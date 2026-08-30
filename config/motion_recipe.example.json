@@ -1,0 +1,21 @@
+{
+  "_comment": "Motion-detection recipe. Loaded by infra/recipe.py and applied to each camera's web UI. Copy to motion_recipe.json (gitignored) and tune per your cameras.",
+
+  "fleet": {
+    "_comment": "Baseline for all cameras. Override per-camera below.",
+    "motion_sensitivity": 25,
+    "smart_person": 50,
+    "smart_vehicle": 30,
+    "smart_pet": 30,
+    "delay_person": 0,
+    "delay_vehicle": 2,
+    "delay_pet": 2
+  },
+
+  "cameras": {
+    "<camera_name>": {
+      "_comment": "Per-camera overrides. Remove this entry to fall back to fleet defaults.",
+      "motion_sensitivity": 25
+    }
+  }
+}

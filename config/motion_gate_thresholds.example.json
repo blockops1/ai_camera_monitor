@@ -1,0 +1,46 @@
+{
+  "_comment": "Example motion-gate thresholds. Copy this file to motion_gate_thresholds.json (gitignored) and tune per your cameras. See README §Configure.",
+
+  "_default_thresholds_reference": {
+    "car": 0.5,
+    "truck": 0.5,
+    "bus": 0.5,
+    "motorcycle": 0.45,
+    "bicycle": 0.45,
+    "person": 0.35,
+    "dog": 0.6,
+    "cat": 0.6,
+    "horse": 0.6,
+    "sheep": 0.6,
+    "cow": 0.6,
+    "bear": 0.6,
+    "bird": 0.6,
+    "_default_for_other_coco": 0.55
+  },
+
+  "<camera_name_1>": {
+    "_comment": "Long driveway camera. Person threshold lowered because partial-view people are common.",
+    "car": 0.45,
+    "person": 0.3,
+    "gate_cooldown": {
+      "vehicle": 60,
+      "person": 120,
+      "animal": 300,
+      "motion": 180,
+      "default": 120
+    }
+  },
+
+  "<camera_name_2>": {
+    "_comment": "Close-up camera. Vehicles well-framed.",
+    "car": 0.5,
+    "person": 0.35,
+    "gate_cooldown": {
+      "vehicle": 60,
+      "person": 120,
+      "animal": 300,
+      "motion": 180,
+      "default": 120
+    }
+  }
+}

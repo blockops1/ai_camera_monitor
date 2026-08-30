@@ -1,0 +1,4 @@
+# Keep this directory tracked in git even when known_animals.json is empty.
+# The empty registry file (known_animals.json) is the canonical store; this
+# .gitkeep ensures `data/animals/` survives in the tree before the first
+# enrollment.

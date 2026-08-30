@@ -1,0 +1,206 @@
+[project]
+name = "ai_camera_monitor"
+version = "0.1.0"
+description = "Self-contained listener + infra for the Reolink farm surveillance setup. See PLAN.md for architecture, AGENTS.md for workflow."
+requires-python = ">=3.14,<3.15"
+# Runtime deps match the old listener at <legacy-repo>/.venv/ exactly.
+# Verify with: pip freeze | diff - <(cat requirements-runtime.txt)
+dependencies = [
+    "flask>=3.1,<4",
+    "httpx>=0.28,<1",
+    "PyYAML>=6.0,<7",
+    "opencv-python>=4.11,<5",
+    "av>=18,<19",
+    "pillow>=12,<13",
+    "numpy>=2,<3",
+    # Phase.106 (person-gatekeeper tier): InsightFace ArcFace for
+    # face-recognition path of person matcher. Installed 2026-08-22 with
+    # Note's approval. Model files live at ~/.insightface/models/buffalo_l/
+    # (~340MB ONNX, on disk since Jul 18 2026).
+    "insightface>=1.0,<2",
+    "onnxruntime>=1.29,<2",
+]
+
+[project.optional-dependencies]
+# Lint tools. Install with: pip install -e ".[dev]"
+dev = [
+    "ruff>=0.6",
+    "bandit>=1.7",   # Security linter — catches yaml.load, assert-in-prod,
+                     #   subprocess shell=True, weak crypto, etc.
+    "mypy>=1.10",    # Static type checker — catches AttributeError on
+                     #   dataclass fields, wrong arg types, missing
+                     #   return types in stubs.
+    "vulture>=2.11", # Dead-code detector — surfaces unused functions,
+                     #   unused imports, unreachable branches.
+    "pre-commit>=3.5", # Local hook runner. See .pre-commit-config.yaml.
+                      #   Gates: ruff, bandit, mypy, vulture.
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Archive files are dead-code snapshots — kept for rollback reference
+# per archive-first-workflow. They contain undefined names by design
+# (they're snippets, not modules). Excluded from lint.
+extend-exclude = [
+    "*archive*.py",
+]
+
+[tool.ruff.lint]
+# N999 fires on package names that contain hyphens
+# (e.g. "ai_camera_monitor" — the repo root). The package
+# names in __init__.py files are correctly named after the repo. We
+# ignore N999 for that reason.
+ignore = ["N999"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use broad exception assertions for frozen dataclass
+# mutation tests (AttributeError, FrozenInstanceError, etc.).
+"**/tests/*.py" = ["B017"]
+# pipeline_integration.py lazy-loads Phase 6A modules from ~/<sibling-project>/
+# via sys.path injection. Ruff can't see those modules (intentional — that's
+# the cross-repo isolation rule). The runtime check is _load_phase6a_modules().
+"infra/pipeline_integration.py" = ["F821"]
+# BLE001: many "log + continue" cleanup paths use `except Exception:` because
+# file/IO operations can throw anything (OSError, json.JSONDecodeError, etc.).
+# Tightening each site to a specific exception would require changes to the
+# call paths; defer until a specific failure motivates the change.
+"infra/*.py" = ["BLE001", "RUF100"]
+"listener/*.py" = ["BLE001"]
+# scripts/ shares the same BLE001 justification as `infra/` and `listener/`:
+# operator scripts use `except Exception:` around browser/RTSP/subprocess
+# operations that can throw anything from the underlying driver. EXE001:
+# scripts carry shebangs for documentation but are invoked via
+# `.venv/bin/python scripts/X.py`, never as executables. chmod +x would
+# misrepresent the invocation pattern; dropping shebangs would lose doc value.
+"scripts/*.py" = ["BLE001", "EXE001"]
+# PLW1510: test_read_alarm_settings_argparse.py invokes
+# `subprocess.run([sys.executable, str(SCRIPT), "--help"])` to assert help
+# output. The intent is to test argparse flag surfacing, NOT to assert
+# process exit. `check=False` is correct here — `result.returncode` is
+# checked separately.
+"infra/tests/test_read_alarm_settings_argparse.py" = ["PLW1510"]
+# PLW0406: tests/test_enroll_vehicle_argparse.py intentionally self-imports
+# (`import infra.tests.test_enroll_vehicle_argparse as t`) so a single test
+# class can read the module's source string to verify the standard header
+# (per refactor-module-header skill). Rename would not help — the pattern
+# is the point.
+"infra/tests/test_enroll_vehicle_argparse.py" = ["PLW0406"]
+# DTZ005/DTZ011: enroll_animal.py uses `_dt.date.today()` and
+# `_dt.datetime.now()` to (a) set first_enrolled in the known_animals
+# registry — the schema documents this as a local-date string; tzinfo
+# would change the on-disk format, and (b) generate a log directory name
+# — tzinfo is irrelevant for a path slug. Both are intentional.
+"scripts/enroll_animal.py" = ["DTZ005", "DTZ011"]
+# PYI034: CamBrowser is a context manager class but `__enter__` returns
+# `CamBrowser` (a self-typed reference) instead of `Self`. The runtime
+# contract is identical; the strict return type would require a runtime
+# `Self` import that adds complexity for no correctness gain.
+"scripts/cam_browser.py" = ["PYI034"]
+
+# ─────────────────────────────────────────────────────────────────────
+# Code-quality toolchain (Phase.119)
+# See ~/.hermes/skills/code-quality-tools/SKILL.md for usage patterns.
+# ─────────────────────────────────────────────────────────────────────
+
+[tool.bandit]
+# Bank of low-signal checks we don't want flagged. The full list lives at:
+#   https://bandit.readthedocs.io/en/latest/plugins/index.html
+#
+# B101 (assert_used): we keep asserts in non-test code for invariant
+#   documentation. Tests run with -O in some CI configs; if we ever hit
+#   that, address the specific assert, don't blanket-enable here.
+#
+# B311 (random): standard random is fine for jitter; not crypto.
+#
+# B404 (subprocess_import): importing subprocess is fine; the call-site
+#   audit (B602/B603/B607) is what matters.
+#
+# B603 (subprocess_without_shell_equals_true): we use subprocess.run
+#   with shell=False by default; this rule fires on absence of shell=
+#   but our explicit shell=False is clearer.
+#
+# B607 (subprocess_popen_with_shell_equals_true): see above.
+#
+# B105 (hardcoded_password_string): we have .env files for creds.
+#
+# B106 (hardcoded_password_funcarg): same.
+skips = ["B101", "B311", "B404", "B603", "B607", "B105", "B106"]
+# We use subprocess.run with shell=False throughout; treat any future
+# shell=True as a hard error.
+exclude_dirs = [
+    "data",            # runtime data dir
+    "logs",            # runtime logs
+    ".venv",           # venv
+    "tests/sandbox",   # integration sandbox
+    # Test fixtures commonly use /tmp paths for ad-hoc frames; bandit
+    # flags B108 (hardcoded_tmp_directory) on every one. Tests are
+    # not production code; suppress wholesale here. Production paths
+    # go through tempfile.mkdtemp() or infra.paths.TMP_DIR.
+    "tests",
+    # Archive files contain code by definition — they're snapshots of
+    # prior revisions, intentionally not linted.
+]
+# Banned imports — flagged as a hard error regardless of context.
+banned_imports = []
+
+[tool.mypy]
+# Strict-ish but pragmatic. We don't have full type coverage across
+# the codebase (~62% in listener.py, ~12% in infra/quick_classifier.py)
+# so we can't enable --strict. Instead we use:
+#   - check_untyped_defs: report errors in untyped function bodies when
+#     they're called from typed code. Catches the "forgot to update a
+#     log line after dataclass field was removed" class of bug.
+#   - warn_unused_ignores: catch dead `# type: ignore` comments.
+#   - warn_return_any: when a function returns Any (e.g. untyped),
+#     warn the caller.
+python_version = "3.14"
+mypy_path = "."
+exclude = [
+    ".*_archive_.*\\.py$",  # Archive snapshots — dead code, not production
+]
+files = ["infra", "listener", "vehicle_position", "vehicle_identifier",
+         "vehicle_matcher", "known_vehicles", "telegram_formatter",
+         "pipeline"]
+# Don't follow imports into third-party libs we don't own.
+follow_imports = "silent"
+# We have untyped third-party libs (insightface, onnxruntime, PyAV
+# stubs are incomplete). Allow them to be untyped.
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_return_any = true
+# Show error codes so callers can suppress specific ones.
+show_error_codes = true
+# Per-module opt-outs:
+#
+# [[tool.mypy.overrides]]
+# module = "scripts.*"
+# ignore_errors = true  # scaffolded one-off scripts; not production
+#
+# We use a stricter rule: scripts get checked but only for the
+# "definitely-wrong" issues (untyped imports, missing returns).
+# Comment this out if scripts become production code.
+
+[tool.vulture]
+# Dead-code detector. We use it for advisory output only — never
+# auto-delete. Manual review decides what to remove.
+#
+# Min confidence: 60% (default). Lower values = more false positives
+# (e.g. "method might be called dynamically" → "definitely dead").
+min_confidence = 60
+# Exclude directories that are intentionally non-production:
+exclude = [
+    "data/",
+    "logs/",
+    ".venv/",
+    "tests/sandbox/",
+    # Archive files contain code by definition — they're snapshots of
+    # prior revisions, intentionally not linted.
+]
+# Whitelist (--ignore-decorators) of patterns that look dead but aren't:
+#   - click/typer commands: registered as decorators, called by name
+ignore_decorators = [
+    "app.route",        # Flask: route decorators in listener
+    "app.errorhandler", # Flask: error handler decorators
+]

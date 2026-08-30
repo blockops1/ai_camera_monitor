@@ -1,0 +1,23 @@
+{
+  "_comment": "Per-camera alert baseline overrides. Add a camera to a set to demote L1→L0 when vision does not see a person. See src/alert_generator.py for the rule logic. Restart the listener after editing this file.",
+
+  "parked_vehicle_baseline": {
+    "_comment": "Cameras where the alert LLM hallucinates 'headlights on' or 'active vehicle' from IR reflections off parked vehicle headlight lenses / reflective trailer strips. Vision sees parked vehicles but does NOT call them 'headlights'; the alert LLM does. Demote L1→L0 when no person is visible. L2 is never demoted.",
+    "cameras": []
+  },
+
+  "static_object_baseline": {
+    "_comment": "Cameras where static environmental objects (tarp, equipment, debris) or distant lights are baseline background. The alert LLM elevates these to L1 because it doesn't know they're permanent noise. Demote L1→L0 when no person is visible. Person visible → L1 preserved. L2 is never demoted.",
+    "cameras": []
+  },
+
+  "vision_none_baseline": {
+    "_comment": "Cameras where the vision LLM consistently returns primary_subject='none' (saw nothing identifiable) but the alert LLM fabricates an L1 verdict from the empty signal. Demote L1→L0 when vision saw nothing AND no person/vehicle in objects_detected. Person/vehicle in vision → L1 preserved. L2 is never demoted. Off-hours only (20:00–06:00).",
+    "cameras": []
+  },
+
+  "distant_vehicle_baseline": {
+    "_comment": "Cameras where vision sees a VEHICLE but flags it as ambiguous / distant / off-property. Demote L1→L0 in this case. Off-hours only (20:00–06:00). L2 never demoted. Person visible → L1 preserved.",
+    "cameras": []
+  }
+}

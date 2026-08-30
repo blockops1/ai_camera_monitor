@@ -1,0 +1,42 @@
+# Pre-commit hooks for ai_camera_monitor
+#
+# Run on demand:   .venv/bin/pre-commit run --all-files
+# Auto-run on commit (after `pre-commit install`).
+
+default_language_version:
+  python: python3.14
+
+# All hooks use local tools (already in .venv). No remote hook downloads.
+
+repos:
+  # ─── Ruff: lint ──────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff lint
+        entry: .venv/bin/ruff check infra/ listener/
+        language: system
+        types: [python]
+        pass_filenames: false
+
+  # ─── Bandit: security linter ──────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: bandit
+        name: bandit security scan
+        entry: .venv/bin/bandit -r infra/ listener/ -c pyproject.toml -q
+        language: system
+        types: [python]
+        pass_filenames: false
+
+  # ─── vulture: dead-code detector (advisory) ───────────────────────
+  - repo: local
+    hooks:
+      - id: vulture
+        name: vulture dead-code scan (advisory — won't fail commit)
+        entry: bash -c '.venv/bin/vulture infra/ listener/ 2>&1; true'
+        language: system
+        types: [python]
+        pass_filenames: false
+
+# To install: .venv/bin/pre-commit install
