@@ -7,6 +7,47 @@ stability guarantees. Pin to a tag if you need reproducibility.
 
 ---
 
+## [0.2.1] — 2026-08-31
+
+Incremental release on top of v0.2.0. Two bug fixes targeting pre-existing
+issues in the v0.2.0 release that were identified during production use.
+
+### Fixed
+
+- **Phase.168 — Gatekeeper membership was always False** (`listener.py`,
+  `listener/vehicle_event_pipeline.py`, `infra/vision_queue.py`). The
+  vehicle-event pipeline compared the friendly webhook label against
+  a CAM{N}-keyed set; the comparison never matched, so the match-alert
+  path silently bypassed every vehicle event. Fix: `AlertContext`
+  now carries a `camera_code` field populated once at the listener
+  driver boundary, and the four gatekeeper membership checks
+  compare code-vs-code. `GATEKEEPER_CAMERAS` + `PHASE6A_ELIGIBLE_CAMERAS`
+  in `infra/vision_queue.py` are CAM{N}-only.
+- **Phase.169 — Diff bbox cropped the wrong frame** (`listener/motion_gate_pipeline.py`).
+  The motion gate computed bbox_a from the diff between frame 2 and 3,
+  but cropped frame 3 — the LATER frame in the diff pair. The LATER
+  frame often shows the subject past the bbox boundary, so the crop
+  contained only a smear. Fix: bbox_a now crops frame 2, bbox_b
+  crops frame 3 (the EARLIER frame of each pair). YOLO classification
+  path is unchanged; downstream Qwen + matcher see a tighter crop
+  and classify with higher confidence.
+
+### Added
+
+- `listener/tests/test_vehicle_event_pipeline_6B168.py` — 11 regression
+  tests pinning the Phase.168 contract (camera_code surface,
+  match_stage uses it, vision queue sets are CAM{N}-only).
+- 2 new tests in `listener/tests/test_motion_gate_pipeline.py` —
+  pin the Phase.169 frame mapping for both PIL and disk-path
+  branches, and assert both crops are non-empty.
+
+### Notes
+
+- Public repository versions are release-cadence markers, not strict
+  SemVer. Pin to a tag if you need reproducibility.
+
+---
+
 ## [0.2.0] — 2026-08-31
 
 **Full overwrite release.** This version **replaces** all prior public
