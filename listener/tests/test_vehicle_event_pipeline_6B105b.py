@@ -53,6 +53,10 @@ def base_ctx(tmp_path) -> AlertContext:
     return AlertContext(
         alert_id="test-alert-001",
         camera_name="CAM5",
+        # Phase.168: explicit camera_code mirrors listener.py boundary.
+        # Tests previously relied on the buggy camera_name-vs-code
+        # comparison; that pass-by-coincidence contract is now explicit.
+        camera_code="CAM5",
         timestamp="2026-08-20T14:00:00-04:00",
         event_type="motion",
         rtsp_url="rtsp://test/oftest",
@@ -104,6 +108,11 @@ def non_gatekeeper_ctx(base_ctx: AlertContext) -> AlertContext:
     cameras.
     """
     base_ctx.camera_name = "Back Door Outside"  # retired — still routes through the non-gatekeeper path
+    # Phase.168: keep camera_code in sync with the camera_name mutation.
+    # "Back Door Outside" isn't in cameras.env so code_for() returns it
+    # unchanged — which is fine, because it isn't in the gatekeeper set
+    # anyway.
+    base_ctx.camera_code = "Back Door Outside"
     return base_ctx
 
 

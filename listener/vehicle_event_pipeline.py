@@ -199,6 +199,23 @@ class AlertContext:
     chat_id: str
     api_url: str
     gatekeeper_cameras: frozenset[str]
+    # camera_code: canonical CAM{N} code for camera_name, populated once
+    # by the listener driver. All gatekeeper membership tests in this
+    # module compare ctx.camera_code against ctx.gatekeeper_cameras
+    # (which is code-keyed), NOT camera_name against gatekeeper_cameras
+    # — that comparison silently failed in production because camera_name
+    # is the friendly name from the webhook and gatekeeper_cameras
+    # contains CAM{N} codes (Phase.168 §13.5). Boundary translation done
+    # once at construction, not at every membership check.
+    camera_code: str = ""
+
+    # NOTE: Phase.168 deliberately does NOT auto-derive camera_code in
+    # __post_init__. The listener driver is the only legitimate
+    # construction site in production, and it always passes both
+    # camera_name AND camera_code explicitly. Auto-derivation would
+    # silently mask a class of test fixture bugs where a test mutates
+    # ctx.camera_name after construction and forgets to refresh
+    # ctx.camera_code.
 
     # ---- Phase.108a (§11.38.5): gate-aware capture inputs ---------------
     # gate_verdict: populated by listener.py when MOTION_GATE_ENABLED=1 and
@@ -509,7 +526,10 @@ def identify_stage(ctx: AlertContext) -> None:
     # property at <camera>, identifying..." — a heads-up that TG#2 and
     # TG#3 will follow with the identified + matched vehicle info.
     #
-    # Phase.113 (2026-08-21): GATE on camera_name ∈ gatekeeper_cameras.
+    # Phase.168 (2026-08-31): GATE on camera_code ∈ gatekeeper_cameras.
+    # Pre-fix compared camera_name (friendly from webhook) against a
+    # code-keyed set, which silently failed every event. See
+    # ctx.camera_code docstring.
     # Per the operator's spec, TG#1 is gatekeeper-only. Non-gatekeeper vehicle
     # events skip TG#1 entirely — the entire vehicle Telegram stack is
     # the gatekeeper's exclusive job until/unless the operator later adds
@@ -518,7 +538,7 @@ def identify_stage(ctx: AlertContext) -> None:
     # _send_arriving_message without raising — never breaks the pipeline.
     if (
         ctx.is_vehicle_event
-        and ctx.camera_name in (ctx.gatekeeper_cameras or frozenset())
+        and ctx.camera_code in (ctx.gatekeeper_cameras or frozenset())
         and ctx.motion_result is not None
         and ctx.motion_result.primary_moving_object is not None
         and ctx.frame_paths
@@ -639,11 +659,14 @@ def match_stage(ctx: AlertContext) -> None:
         # Non-vehicle events don't match.
         return
 
-    if ctx.camera_name not in ctx.gatekeeper_cameras:
-        # Non-gatekeeper cameras skip the match-alert path entirely.
-        # Other gatekeeper vehicles flow through here post-6B.104.
+    if ctx.camera_code not in ctx.gatekeeper_cameras:
+        # Phase.168 (2026-08-31): compare camera_code (CAM{N}) against
+        # the code-keyed gatekeeper set. Pre-fix compared camera_name
+        # (friendly) and silently failed every event to this branch —
+        # see ctx.camera_code docstring.
         log.info(
-            f"[{ctx.alert_id}] match_stage: {ctx.camera_name} is not a "
+            f"[{ctx.alert_id}] match_stage: {ctx.camera_name} "
+            f"(code={ctx.camera_code or '?'}) is not a "
             f"gatekeeper — skipping match-alert path"
         )
         return
@@ -1226,12 +1249,12 @@ def emit_result_stage(ctx: AlertContext) -> dict:
     # alerts are sent to me." So this fires BEFORE the matcher loop.
     # Failure-tolerant: any failure logs + skips; doesn't block match
     # loop or state update. Skipped if motion_result has no primary.
-    # Phase.113: GATE on camera_name ∈ gatekeeper_cameras — same
+    # Phase.168: GATE on camera_code ∈ gatekeeper_cameras — same
     # gate as TG#1. Non-gatekeeper vehicle events skip TG#2 too.
     if (
         sent
         and ctx.is_vehicle_event
-        and ctx.camera_name in (ctx.gatekeeper_cameras or frozenset())
+        and ctx.camera_code in (ctx.gatekeeper_cameras or frozenset())
         and ctx.motion_result is not None
     ):
         try:
@@ -1280,10 +1303,12 @@ def emit_result_stage(ctx: AlertContext) -> dict:
     #   - send match_alert or no_match_alert
     # Non-gatekeeper cameras skip this entirely (no matcher fires for them).
     # Skipped if match_verdict is missing or no known_vehicles.
+    # Phase.168: camera_code gate (pre-fix silently dropped every vehicle
+    # event here).
     if (
         sent
         and ctx.is_vehicle_event
-        and ctx.camera_name in ctx.gatekeeper_cameras
+        and ctx.camera_code in ctx.gatekeeper_cameras
         and ctx.known_vehicles
     ):
         _emit_match_loop(ctx)

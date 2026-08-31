@@ -144,7 +144,7 @@ PRIORITY_INSIDE = 5      # everything else (descriptive only)
 # drop it immediately rather than letting it block forever.
 MAX_QUEUE_DEPTH = 10
 
-# Phase.167 §13.5 Commit 12 — code-keyed eligibility sets.
+# Phase.167 §13.5 Commit 12 / Phase.168 — code-keyed eligibility sets.
 #
 # GATEKEEPER_CAMERAS contains CameraSpec.code values for cameras whose
 # vision calls should jump the queue (priority 0). Submitting a job for
@@ -159,6 +159,16 @@ MAX_QUEUE_DEPTH = 10
 # Callers may pass either a code or a name to submit(); the translation
 # happens inside code_for() below.
 #
+# Phase.168 (2026-08-31): the literal code sets must match the camera
+# codes an operator configures in infra/cameras.py / cameras.env. The
+# pre-fix GATEKEEPER_CAMERAS = {"CAM1"} only matched a single camera,
+# silently demoting every other camera's vision call to PRIORITY_INSIDE
+# when its code wasn't in the set — the same membership-mismatch class
+# of bug fixed at listener/vehicle_event_pipeline.py:652 (match_stage).
+# The defaults below cover CAM1..CAM6 (the typical 6-camera deployment);
+# operators with different camera codes must edit this file (or move it
+# to cameras.env per the future-direction note below).
+#
 # Future direction: these eligibility sets are policy data — long term
 # they belong in cameras.env per-camera (one boolean per CameraSpec),
 # not hardcoded here. For Commit 12 the literal code sets stay in this
@@ -166,6 +176,11 @@ MAX_QUEUE_DEPTH = 10
 
 GATEKEEPER_CAMERAS: frozenset[str] = frozenset({
     "CAM1",
+    "CAM2",
+    "CAM3",
+    "CAM4",
+    "CAM5",
+    "CAM6",
 })
 
 # Phase.24 Fix C — heartbeat was originally planned as a separate
@@ -175,11 +190,12 @@ GATEKEEPER_CAMERAS: frozenset[str] = frozenset({
 # Removed the unused constant.
 
 PHASE6A_ELIGIBLE_CAMERAS: frozenset[str] = frozenset({
-    "FRONT",
+    "CAM1",
     "CAM2",
     "CAM3",
-    "CAM1",
     "CAM4",
+    "CAM5",
+    "CAM6",
 })
 
 

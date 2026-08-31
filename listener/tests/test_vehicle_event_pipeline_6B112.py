@@ -94,6 +94,8 @@ def vehicle_ctx(tmp_path) -> AlertContext:
     return AlertContext(
         alert_id="6B112-test",
         camera_name="CAM5",
+        # Phase.168: explicit camera_code mirrors listener.py boundary.
+        camera_code="CAM5",
         timestamp="2026-08-21 14:30:00 EDT",
         event_type="vehicle",
         rtsp_url="rtsp://test/ofts",
@@ -114,6 +116,8 @@ def nongate_ctx(tmp_path) -> AlertContext:
     return AlertContext(
         alert_id="6B112-nongate",
         camera_name="CAM3",
+        # Phase.168: explicit camera_code for non-gatekeeper fixture.
+        camera_code="CAM3",
         timestamp="2026-08-21 14:30:00 EDT",
         event_type="vehicle",
         rtsp_url="rtsp://test/ofg",
@@ -747,6 +751,8 @@ class TestMatchStageImportResilience:
         ctx = AlertContext(
             alert_id="test-6B116-regression",
             camera_name="CAM5",
+            # Phase.168: explicit camera_code mirrors listener.py boundary.
+            camera_code="CAM5",
             timestamp="2026-08-21 14:00:00 EDT",
             event_type="vehicle",
             rtsp_url="rtsp://test",
@@ -816,6 +822,8 @@ class TestMatchStageImportResilience:
             ctx = AlertContext(
                 alert_id="test-6B116-shadow",
                 camera_name="CAM5",
+                # Phase.168: explicit camera_code mirrors listener.py boundary.
+                camera_code="CAM5",
                 timestamp="2026-08-21 14:00:00 EDT",
                 event_type="vehicle",
                 rtsp_url="rtsp://test",
@@ -889,7 +897,7 @@ class TestExtractSignature:
     def test_multi_vehicle_schema_uses_primary_vehicle(self):
         from listener.vehicle_event_pipeline import AlertContext, _extract_signature
         ctx = AlertContext(
-            alert_id="t1", camera_name="CAM5", timestamp="x",
+            alert_id="t1", camera_name="CAM5", camera_code="CAM5", timestamp="x",
             event_type="vehicle", rtsp_url="", output_dir="/tmp",
             is_vehicle_event=True, known_vehicles=[],
             bot_token="t", chat_id="c", api_url="http://x",
@@ -914,7 +922,7 @@ class TestExtractSignature:
         """primary_vehicle_index=1 → 4Runner, not tractor."""
         from listener.vehicle_event_pipeline import AlertContext, _extract_signature
         ctx = AlertContext(
-            alert_id="t2", camera_name="CAM5", timestamp="x",
+            alert_id="t2", camera_name="CAM5", camera_code="CAM5", timestamp="x",
             event_type="vehicle", rtsp_url="", output_dir="/tmp",
             is_vehicle_event=True, known_vehicles=[],
             bot_token="t", chat_id="c", api_url="http://x",
@@ -938,7 +946,7 @@ class TestExtractSignature:
         """vision_result with no vehicles[] → fall back to top-level fields."""
         from listener.vehicle_event_pipeline import AlertContext, _extract_signature
         ctx = AlertContext(
-            alert_id="t3", camera_name="CAM5", timestamp="x",
+            alert_id="t3", camera_name="CAM5", camera_code="CAM5", timestamp="x",
             event_type="vehicle", rtsp_url="", output_dir="/tmp",
             is_vehicle_event=True, known_vehicles=[],
             bot_token="t", chat_id="c", api_url="http://x",
@@ -957,7 +965,7 @@ class TestExtractSignature:
     def test_empty_vision_result_returns_empty_dict(self):
         from listener.vehicle_event_pipeline import AlertContext, _extract_signature
         ctx = AlertContext(
-            alert_id="t4", camera_name="CAM5", timestamp="x",
+            alert_id="t4", camera_name="CAM5", camera_code="CAM5", timestamp="x",
             event_type="vehicle", rtsp_url="", output_dir="/tmp",
             is_vehicle_event=True, known_vehicles=[],
             bot_token="t", chat_id="c", api_url="http://x",
@@ -972,7 +980,7 @@ class TestExtractSignature:
         """vehicle_features is required by the schema but tests defensive handling."""
         from listener.vehicle_event_pipeline import AlertContext, _extract_signature
         ctx = AlertContext(
-            alert_id="t5", camera_name="CAM5", timestamp="x",
+            alert_id="t5", camera_name="CAM5", camera_code="CAM5", timestamp="x",
             event_type="vehicle", rtsp_url="", output_dir="/tmp",
             is_vehicle_event=True, known_vehicles=[],
             bot_token="t", chat_id="c", api_url="http://x",

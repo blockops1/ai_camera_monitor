@@ -166,8 +166,9 @@ class TestPhase6B167ByCodeKeyedSets:
     def test_gatekeeper_set_is_code_keyed(self):
         # Synthetic codes (TEST_GK) — should NOT appear in the production set.
         assert "TEST_GK" not in GATEKEEPER_CAMERAS
-        # Production code is the legacy prefix from camera-creds.env.
+        # Production codes use the NEW cameras.env CAM{N} schema.
         assert "CAM1" in GATEKEEPER_CAMERAS
+        assert "CAM5" in GATEKEEPER_CAMERAS
 
     def test_phase6a_set_is_code_keyed(self):
         # Friendly names (any name-shaped string with spaces) must NOT
@@ -183,14 +184,15 @@ class TestPhase6B167ByCodeKeyedSets:
                 f"name-shaped string {fake_name!r} should not be in "
                 f"PHASE6A_ELIGIBLE_CAMERAS — set is code-keyed"
             )
-        # Codes (legacy prefixes from the env file) — must be present.
-        for code in (
-            "FRONT",
-            "CAM2",
-            "CAM3",
-            "CAM1",
-            "CAM4",
-        ):
+        # Phase.168: PHASE6A_ELIGIBLE is CAM{N}-only (NEW schema). Legacy
+        # friendly codes (FRONT, BACK) are no longer accepted.
+        for legacy in ("FRONT", "BACK"):
+            assert legacy not in PHASE6A_ELIGIBLE_CAMERAS, (
+                f"Phase.168: legacy friendly code {legacy!r} must not "
+                "appear in PHASE6A_ELIGIBLE_CAMERAS — set is CAM{N}-only"
+            )
+        # Codes (CAM{N} from the env file) — must be present.
+        for code in ("CAM1", "CAM2", "CAM3", "CAM4", "CAM5", "CAM6"):
             assert code in PHASE6A_ELIGIBLE_CAMERAS, (
                 f"code {code!r} should be in PHASE6A_ELIGIBLE_CAMERAS"
             )

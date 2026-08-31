@@ -1856,6 +1856,11 @@ def _process_alert(
     ctx = AlertContext(
         alert_id=alert_id,
         camera_name=camera_name,
+        # Phase.168 (2026-08-31): boundary translation from the friendly
+        # webhook label to the canonical CAM{N} code, done once here so
+        # every downstream membership check (TG#1, match_stage, TG#2,
+        # match_loop) compares code-vs-code instead of name-vs-code.
+        camera_code=_code_for_camera(camera_name),
         timestamp=timestamp,
         event_type=effective_event,
         rtsp_url=rtsp_url,

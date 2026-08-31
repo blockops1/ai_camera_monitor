@@ -80,6 +80,8 @@ def base_ctx(tmp_path) -> AlertContext:
     return AlertContext(
         alert_id="test-alert-001",
         camera_name="CAM5",
+        # Phase.168: explicit camera_code mirrors listener.py boundary.
+        camera_code="CAM5",
         timestamp="2026-08-20T14:00:00-04:00",
         event_type="motion",
         rtsp_url="rtsp://test/oftest",
@@ -105,6 +107,8 @@ def vehicle_ctx(tmp_path) -> AlertContext:
     return AlertContext(
         alert_id="test-alert-6B111",
         camera_name="CAM5",
+        # Phase.168: explicit camera_code mirrors listener.py boundary.
+        camera_code="CAM5",
         timestamp="2026-08-21 14:30:00 EDT",
         event_type="vehicle",
         rtsp_url="rtsp://test/oftest",
@@ -299,6 +303,9 @@ class TestTrajectoryInjection:
         ctx = AlertContext(
             alert_id="non-vehicle-test",
             camera_name="CAM5",
+            # Phase.168: CAM3 is intentionally outside the gatekeeper
+            # set for this non-gatekeeper fixture.
+            camera_code="CAM3",
             timestamp="2026-08-21 14:30:00 EDT",
             event_type="motion",
             rtsp_url="rtsp://test/oftest",
