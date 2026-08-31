@@ -1,0 +1,33 @@
+{
+  "_comment": "Per-camera alert baseline overrides. Add a camera to a set to demote L1->L0 when vision does not see a person. See src/alert_generator.py for the rule logic. Restart the listener after editing this file.",
+  "_phase_6B_167_note": "§13.4 Commit 17 (T3 C17, 2026-08-31): camera keys are CAM{N} codes. CAM1 = FRONT (Front Door Outside), CAM2 = BACK (Back Door Inside), CAM3 = CAM2, CAM4 = CAM3, CAM5 = CAM1, CAM6 = CAM4. See infra/cameras.py::_LEGACY_PREFIX_TO_CODE for the mapping.",
+  "parked_vehicle_baseline": {
+    "_comment": "Cameras where the alert LLM hallucinates 'headlights on' or 'active vehicle' from IR reflections off parked vehicle headlight lenses / reflective trailer strips. Vision sees parked vehicles but does NOT call them 'headlights'; the alert LLM does. Demote L1->L0 when no person is visible. L2 is never demoted.",
+    "cameras": [
+      "CAM6"
+    ]
+  },
+  "static_object_baseline": {
+    "_comment": "Cameras where static environmental objects (tarp, equipment, debris) or distant lights (county-road traffic, far-off lights) are baseline background. The alert LLM elevates these to L1 because it doesn't know they're permanent noise. Demote L1->L0 when no person is visible. Person visible -> L1 preserved. L2 is never demoted.",
+    "cameras": [
+      "CAM1"
+    ]
+  },
+  "vision_none_baseline": {
+    "_comment": "Cameras where the vision LLM consistently returns primary_subject='none' (saw nothing identifiable) but the alert LLM fabricates an L1 verdict from the empty signal - titles like 'Nighttime Activity at <location>', 'Faint motion detected at night', 'Nighttime Motion Detected Near Coop', 'Unknown activity at <location> during night hours'. Demote L1->L0 when vision saw nothing AND no person/vehicle in objects_detected. Person/vehicle in vision -> L1 preserved. L2 is never demoted. Off-hours only (20:00-06:00). CAM2 replaces the retired Building Front Corner - both are west-facing cameras looking directly at the county road ~350ft away; same county-road-distant-light noise pattern.",
+    "cameras": [
+      "CAM1",
+      "CAM3"
+    ]
+  },
+  "distant_vehicle_baseline": {
+    "_comment": "Cameras where vision sees a VEHICLE but flags it as ambiguous / distant / off-property (faint, indistinct, reflection, light source, across the road, etc.). Distinct from parked_vehicle_baseline which fires on PARKED semantics. Targets the north-pasture-road shine pattern on CAM1 (2026-07-29): vision returns a distant vehicle 'with headlights' as cars drive across the neighbor's pasture, and the alert LLM escalated to L1 'Vehicle entering property' anyway. Off-hours only (20:00-06:00). L2 never demoted. Person visible -> L1 preserved.",
+    "cameras": [
+      "CAM5"
+    ]
+  },
+  "debounce_overrides": {
+    "_comment": "Per-camera debounce window overrides in seconds. Cameras in this block use their own window instead of the global default (15s). Add a camera here when it has a chronic noise pattern that bypasses the standard 15s debounce. CAM4's 300s (5 min) catches the wave pattern from dump-trailer reflective-strip pixel-diff events (events at 60-90s intervals when the trailer's strips bounce IR back into the lens) while still allowing a real arriving vehicle to fire within 5 min of a prior event. Restart the listener after editing this file.",
+    "CAM6": 300
+  }
+}

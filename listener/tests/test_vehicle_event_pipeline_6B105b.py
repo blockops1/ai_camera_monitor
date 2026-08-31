@@ -1,0 +1,1189 @@
+"""
+test_vehicle_event_pipeline_6B105b.py — Phase.105b unit tests for the
+6 named stages in listener/vehicle_event_pipeline.py.
+
+Each test builds an AlertContext with stub data, calls a stage, and
+asserts the ctx mutations. The tests proxy the production module by
+importing the actual stage functions and stubbing the infrastructure
+calls (capture_frames, identify_from_crops, match_vehicle_scored, etc.).
+
+Tests cover:
+  1. capture_stage     — frame_paths populated; "arriving" sent for vehicle
+  2. identify_stage    — vehicle vs non-vehicle routing; vision coercion
+  3. match_stage       — gatekeeper-vs-not routing; MatchVerdict vs NoMatch
+  4. select_best_frame — first captured frame default; vision-selected override
+  5. generate_alert    — call to generate_alert; error fallback
+  6. emit_result       — alert_id suffix; arrival detection; state update
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_root = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_root))
+
+import pytest
+
+from listener.vehicle_event_pipeline import (
+    AlertContext,
+    emit_result_stage,
+    generate_alert_stage,
+    identify_stage,
+    match_stage,
+    select_best_frame_stage,
+)
+from vehicle_matcher import MatchVerdict, NoMatch
+
+# Phase.115: capture_stage was removed. gate_aware_vehicle_capture
+# (in listener/_gate_aware_capture.py) replaces it.
+
+# --- Test fixtures --------------------------------------------------------
+
+
+@pytest.fixture
+def base_ctx(tmp_path) -> AlertContext:
+    """Build an AlertContext with stub data. Not a vehicle event."""
+    from PIL import Image as _PILImage
+
+    # Phase.115 (§11.46.6): identify_stage's gate path requires
+    # ctx.frames (4 PIL images). Pre-populate with solid-gray stubs so
+    # the in-memory branch runs and tests can focus on the logic.
+    frames = [_PILImage.new("RGB", (640, 480), color=(128, 128, 128)) for _ in range(4)]
+    return AlertContext(
+        alert_id="test-alert-001",
+        camera_name="CAM5",
+        timestamp="2026-08-20T14:00:00-04:00",
+        event_type="motion",
+        rtsp_url="rtsp://test/oftest",
+        output_dir=str(tmp_path / "alert"),
+        is_vehicle_event=False,
+        known_vehicles=[],
+        bot_token="test-bot-token",
+        chat_id="test-chat-id",
+        api_url="http://127.0.0.1:8093/v1/chat/completions",
+        gatekeeper_cameras=frozenset({"CAM5"}),
+        frames=frames,
+    )
+
+
+@pytest.fixture
+def vehicle_ctx(base_ctx: AlertContext) -> AlertContext:
+    """Vehicle-event variant of base_ctx with known vehicles."""
+    base_ctx.is_vehicle_event = True
+    base_ctx.event_type = "vehicle"
+    base_ctx.known_vehicles = [
+        {
+            "id": "v_test_tesla_y",
+            "label": "Tesla Model Y",
+            "color": "dark blue",
+            "type": "SUV",
+            "make": "Tesla",
+            "model": "Model Y",
+        },
+        {
+            "id": "v_test_f150",
+            "label": "White F-150",
+            "color": "white",
+            "type": "truck",
+            "make": "Ford",
+            "model": "F-150",
+        },
+    ]
+    return base_ctx
+
+
+@pytest.fixture
+def non_gatekeeper_ctx(base_ctx: AlertContext) -> AlertContext:
+    """Non-gatekeeper camera fixture (post-§11.79: only retired /
+    unenrolled cameras qualify; all 6 ACTIVE cameras are now
+    gatekeepers for vehicle events). "Back Door Outside" was retired
+    per §11.77 cleanup; its name returns False from
+    `_gatekeeper_match_alert_runs` and is a valid stand-in for the
+    "non-gatekeeper" code path that exists for future unenrolled
+    cameras.
+    """
+    base_ctx.camera_name = "Back Door Outside"  # retired — still routes through the non-gatekeeper path
+    return base_ctx
+
+
+# --- Test 1: capture_stage (removed in 6B.115) ----------------------------
+#
+# Phase.115 (2026-08-25): capture_stage was removed. The motion gate
+# is now the sole producer of frames + crops on the vehicle path.
+# gate_aware_vehicle_capture() replaces this and is tested in
+# test_gate_aware_capture.py.
+
+
+# --- Test 2: identify_stage -----------------------------------------------
+
+
+class TestIdentifyStage:
+    def test_identify_stage_non_vehicle_routes_to_single_frame(self, base_ctx, monkeypatch):
+        """Non-vehicle events: single-frame first-pass via analyze_frames_queued."""
+        seen = {}
+
+        def fake_analyze(frame_paths, camera_name, api_url, alert_id, event_hint, mode):
+            seen["frame_count"] = len(frame_paths)
+            seen["mode"] = mode
+            return {"color": "blue", "type": "sedan", "make": "Honda", "model": "Civic"}
+
+        monkeypatch.setattr(
+            "infra.vision_analyzer.analyze_frames_queued", fake_analyze,
+        )
+
+        base_ctx.frame_paths = ["/tmp/frame_001.jpg", "/tmp/frame_002.jpg"]
+        identify_stage(base_ctx)
+
+        assert seen["frame_count"] == 1  # single-frame first-pass
+        assert seen["mode"] == "motion"
+        assert base_ctx.vision_result["make"] == "Honda"
+
+    def test_identify_stage_vehicle_with_motion_uses_3crop(self, vehicle_ctx, monkeypatch):
+        """Vehicle events with motion detected: 2-crop multi-crop vision.
+
+        Phase.115: the legacy detect_motion() is gone. The motion
+        gate is the sole producer of crops. identify_stage receives
+        ctx.motion_result from build_motion_result_from_gate().
+        """
+        from vehicle_identifier import IdentifierResult
+
+        # Stub build_motion_result_from_gate to return a fake result
+        # with 2 crop paths (the gate's crop_a + crop_b).
+        class FakeMotionResult:
+            no_motion_detected = False
+            crop_paths = ["/tmp/crop_001.jpg", "/tmp/crop_002.jpg"]  # noqa: RUF012 (test fixture)
+            primary_moving_object = None
+            moving_objects = []  # noqa: RUF012 (test fixture)
+
+        monkeypatch.setattr(
+            "vehicle_position.build_motion_result_from_gate",
+            lambda **kwargs: FakeMotionResult(),
+        )
+
+        # Stub identify_from_crops to return a populated IdentifierResult.
+        from vehicle_identifier import VisionResult
+        fake_vision = VisionResult(
+            content={
+                "color": "dark blue",
+                "type": "SUV",
+                "make": "Tesla",
+                "model": "Model Y",
+                "confidence": 0.92,
+                "vehicle_features": ["no front plate"],
+            },
+            elapsed_ms=100.0,
+            raw_text="",
+        )
+        fake_id_result = IdentifierResult(
+            vision_result=fake_vision,
+            signature={"color": "dark blue", "type": "SUV", "make": "Tesla", "model": "Model Y"},
+            best_crop_path="/tmp/crop_001.jpg",
+            crops_used=1,
+            fallback_used=None,
+            elapsed_ms=100.0,
+        )
+
+        def fake_identify_from_crops(**kwargs):
+            vehicle_ctx.id_result = fake_id_result
+            return fake_id_result
+
+        monkeypatch.setattr(
+            "vehicle_identifier.identify_from_crops", fake_identify_from_crops,
+        )
+
+        vehicle_ctx.frame_paths = ["/tmp/frame_001.jpg", "/tmp/frame_002.jpg"]
+        identify_stage(vehicle_ctx)
+
+        assert vehicle_ctx.vision_result is not None
+        assert vehicle_ctx.vision_result["make"] == "Tesla"
+        assert vehicle_ctx.vision_result["model"] == "Model Y"
+
+
+# --- Phase.121: TG#1 frame selection --------------------------------
+
+
+class TestArrivingFrameSelection:
+    """Phase.121 (2026-08-22): TG#1 (arriving Telegram) must send the
+    FIRST frame where the vehicle is visible, not frame_paths[0].
+
+    Without this fix, the deferred 8s capture means frame_paths[0] is
+    usually an empty driveway — the user sees an empty image as their
+    "vehicle detected" alert. We trust the motion trajectory and pick
+    the first non-'absent' cell.
+    """
+
+    def test_tg1_uses_first_non_absent_trajectory_frame(
+        self, vehicle_ctx, monkeypatch
+    ):
+        """trajectory has 'absent' at index 0, motion at index 1.
+        TG#1 must use frame_paths[1], not frame_paths[0].
+        """
+        # Stub the arriving-message sender to capture the frame path.
+        sent_frame_path = {}
+
+        def fake_send(alert_id, camera_name, frame_path, bot_token, chat_id, captured_at=""):
+            sent_frame_path["frame_path"] = frame_path
+
+        monkeypatch.setattr(
+            "listener.vehicle_event_pipeline._send_arriving_message",
+            fake_send,
+        )
+
+        # Stub build_motion_result_from_gate to return the gate-built result.
+        # Phase.115: trajectory is 4 cells (frame_001..frame_004).
+        class FakeMotionObject:
+            trajectory = ["absent", "LM4", "LM4", "LM3"]  # noqa: RUF012 (test fixture)
+            avg_area = 23925
+
+        class FakeMotionResult:
+            no_motion_detected = False
+            crop_paths = ["/tmp/c1.jpg", "/tmp/c2.jpg"]  # noqa: RUF012 (test fixture)
+            primary_moving_object = FakeMotionObject()
+
+        monkeypatch.setattr(
+            "vehicle_position.build_motion_result_from_gate",
+            lambda **kwargs: FakeMotionResult(),
+        )
+
+        from vehicle_identifier import IdentifierResult, VisionResult
+        fake_vision = VisionResult(
+            content={"color": "blue", "type": "pickup", "make": "Ford",
+                     "model": "F-150", "confidence": 0.9},
+            elapsed_ms=100.0,
+            raw_text="",
+        )
+        monkeypatch.setattr(
+            "vehicle_identifier.identify_from_crops",
+            lambda **kwargs: IdentifierResult(
+                vision_result=fake_vision,
+                signature={"color": "blue", "type": "pickup"},
+                best_crop_path="/tmp/c1.jpg",
+                crops_used=1,
+                fallback_used=None,
+                elapsed_ms=100.0,
+            ),
+        )
+
+        # 4-frame path list (gate's count), indexed 0..3
+        vehicle_ctx.frame_paths = [f"/tmp/frame_{i:03d}.jpg" for i in range(1, 5)]
+        identify_stage(vehicle_ctx)
+
+        # First non-absent cell is index 1 → frame_paths[1]
+        assert sent_frame_path["frame_path"] == "/tmp/frame_002.jpg"
+
+    def test_tg1_falls_back_to_frame_paths_zero_when_all_absent(
+        self, vehicle_ctx, monkeypatch
+    ):
+        """Defensive: even if all trajectory cells are 'absent' (shouldn't
+        happen given the primary_moving_object gate), we don't crash —
+        we fall back to frame_paths[0].
+        """
+        sent = {}
+
+        def fake_send(alert_id, camera_name, frame_path, bot_token, chat_id, captured_at=""):
+            sent["frame_path"] = frame_path
+
+        monkeypatch.setattr(
+            "listener.vehicle_event_pipeline._send_arriving_message",
+            fake_send,
+        )
+
+        class FakeMotionObject:
+            # Phase.115: 4-cell trajectory (gate's frame count).
+            trajectory = ["absent", "absent", "absent", "absent"]  # noqa: RUF012 (test fixture)
+            avg_area = 100  # wouldn't normally pass, but the test bypasses the gate
+
+        class FakeMotionResult:
+            no_motion_detected = False
+            crop_paths = ["/tmp/c1.jpg"]  # noqa: RUF012 (test fixture)
+            primary_moving_object = FakeMotionObject()
+
+        monkeypatch.setattr(
+            "vehicle_position.build_motion_result_from_gate",
+            lambda **kwargs: FakeMotionResult(),
+        )
+        from vehicle_identifier import IdentifierResult, VisionResult
+        fake_vision = VisionResult(
+            content={"color": "blue", "type": "pickup"},
+            elapsed_ms=100.0,
+            raw_text="",
+        )
+        monkeypatch.setattr(
+            "vehicle_identifier.identify_from_crops",
+            lambda **kwargs: IdentifierResult(
+                vision_result=fake_vision,
+                signature={"color": "blue", "type": "pickup"},
+                best_crop_path="/tmp/c1.jpg",
+                crops_used=1,
+                fallback_used=None,
+                elapsed_ms=100.0,
+            ),
+        )
+
+        vehicle_ctx.frame_paths = [f"/tmp/f_{i}.jpg" for i in range(4)]
+        identify_stage(vehicle_ctx)
+        assert sent["frame_path"] == "/tmp/f_0.jpg"
+
+    def test_tg1_picks_fourth_frame_when_first_three_absent(
+        self, vehicle_ctx, monkeypatch
+    ):
+        """Note: 'probably the fourth' — if frame 1-3 are absent,
+        TG#1 must send frame 4 (index 3).
+        """
+        sent = {}
+
+        def fake_send(alert_id, camera_name, frame_path, bot_token, chat_id, captured_at=""):
+            sent["frame_path"] = frame_path
+
+        monkeypatch.setattr(
+            "listener.vehicle_event_pipeline._send_arriving_message",
+            fake_send,
+        )
+
+        class FakeMotionObject:
+            # Phase.115: 4-cell trajectory.
+            # Frame 1-3 absent, frame 4 has motion.
+            trajectory = ["absent", "absent", "absent", "UM1"]  # noqa: RUF012 (test fixture)
+            avg_area = 2555  # exactly the value from the alert
+
+        class FakeMotionResult:
+            no_motion_detected = False
+            crop_paths = ["/tmp/c1.jpg"]  # noqa: RUF012 (test fixture)
+            primary_moving_object = FakeMotionObject()
+
+        monkeypatch.setattr(
+            "vehicle_position.build_motion_result_from_gate",
+            lambda **kwargs: FakeMotionResult(),
+        )
+        from vehicle_identifier import IdentifierResult, VisionResult
+        fake_vision = VisionResult(
+            content={"color": "brown", "type": "pickup"},
+            elapsed_ms=100.0,
+            raw_text="",
+        )
+        monkeypatch.setattr(
+            "vehicle_identifier.identify_from_crops",
+            lambda **kwargs: IdentifierResult(
+                vision_result=fake_vision,
+                signature={"color": "brown", "type": "pickup"},
+                best_crop_path="/tmp/c1.jpg",
+                crops_used=1,
+                fallback_used=None,
+                elapsed_ms=100.0,
+            ),
+        )
+
+        vehicle_ctx.frame_paths = [f"/tmp/frame_{i:03d}.jpg" for i in range(1, 7)]
+        identify_stage(vehicle_ctx)
+        # First non-absent at index 3 → frame_paths[3] = frame_004.jpg
+        assert sent["frame_path"] == "/tmp/frame_004.jpg"
+
+
+# --- Phase.120 regression: vehicle-without-motion fallback mode ---
+
+
+class TestIdentifyStageFallbackMode:
+    """Phase.132 (§11.54): no vehicle fallback.
+
+    the operator 2026-08-26: "I don't want the non-crop fallback to exist. We
+    keep working on designing straight paths and I keep finding that
+    there's these backup systems that do something completely different
+    and kick in at strange times."
+
+    Vehicle events without crops from the gate are SUPPRESSED — no
+    full-frame Qwen send, no degraded ID. Non-vehicle events keep the
+    single-frame first-pass path (separate commit to redesign).
+    """
+
+    def test_vehicle_without_motion_is_suppressed(self, vehicle_ctx, monkeypatch):
+        """Vehicle event + no motion detected → NO vision call (§11.54).
+
+        The pre-6B.132 behavior (deleted): the pipeline fell back to
+        analyze_frames_queued(mode='crop') and produced a generic scene
+        description. the operator's directive: kill the fallback, suppress the
+        alert (downstream stages handle vision_result=None cleanly).
+        """
+        # Vehicle event with NO motion detected
+        class FakeMotionResult:
+            no_motion_detected = True
+            crop_paths = []  # noqa: RUF012 (test fixture)
+            primary_moving_object = None
+
+        monkeypatch.setattr(
+            "infra.motion_detector.detect_motion",
+            lambda **kwargs: FakeMotionResult(),
+        )
+
+        # Stub analyze_frames_queued — if it gets called, fail loud.
+        def fake_analyze(*args, **kwargs):
+            raise AssertionError(
+                "analyze_frames_queued called for vehicle-without-motion; "
+                "Phase.132: no fallback, alert must be suppressed"
+            )
+
+        monkeypatch.setattr(
+            "infra.vision_analyzer.analyze_frames_queued", fake_analyze,
+        )
+
+        # identify_stage needs frame_paths to reach the vision branch
+        vehicle_ctx.frame_paths = ["/tmp/frame_001.jpg"]
+        identify_stage(vehicle_ctx)
+
+        # Suppression — vision_result stays None/empty.
+        assert not vehicle_ctx.vision_result, (
+            f"expected vision_result to stay empty after suppression; "
+            f"got {vehicle_ctx.vision_result!r}"
+        )
+
+    def test_non_vehicle_first_pass_keeps_motion_mode_hint(self, base_ctx, monkeypatch):
+        """Non-vehicle single-frame first-pass still uses mode='motion'.
+
+        Renamed from `_fallback_single_frame_vision` → `_non_vehicle_first_pass`
+        in Phase.132. The non-vehicle path is unchanged in this commit;
+        a separate redesign lands later (per the operator's plan).
+        """
+        from listener.vehicle_event_pipeline import _non_vehicle_first_pass
+
+        seen = {}
+
+        def fake_analyze(frame_paths, camera_name, api_url, alert_id, event_hint, mode):
+            seen["mode"] = mode
+            return {"primary_subject": "person", "scene_description": "test"}
+
+        monkeypatch.setattr(
+            "infra.vision_analyzer.analyze_frames_queued", fake_analyze,
+        )
+
+        base_ctx.frame_paths = ["/tmp/frame_001.jpg"]
+        _non_vehicle_first_pass(base_ctx)
+
+        assert seen["mode"] == "motion"
+
+
+# --- Test 3: match_stage -------------------------------------------------
+
+
+class TestMatchStage:
+    def test_match_stage_non_vehicle_event_returns_no_match(self, base_ctx):
+        """Non-vehicle events skip matching entirely."""
+        match_stage(base_ctx)
+        assert base_ctx.match_verdict is None
+
+    def test_match_stage_non_gatekeeper_skips_match_path(self, non_gatekeeper_ctx):
+        """Non-gatekeeper cameras (e.g. CAM3 post-6B.104) skip match_alert."""
+        # CAM3 is not in GATEKEEPER_CAMERAS, so match-alert skips.
+        non_gatekeeper_ctx.is_vehicle_event = True
+        non_gatekeeper_ctx.vision_result = {"color": "white", "type": "truck"}
+        match_stage(non_gatekeeper_ctx)
+        assert non_gatekeeper_ctx.match_verdict is None
+
+    def test_match_stage_perfect_vehicle_returns_match_verdict(self, vehicle_ctx, monkeypatch):
+        """Gatekeeper camera + perfect signature → MatchVerdict."""
+        vehicle_ctx.vision_result = {
+            "color": "dark blue",
+            "type": "SUV",
+            "make": "Tesla",
+            "model": "Model Y",
+            "vehicle_features": [],
+        }
+
+        # Stub match_vehicle_scored to return a fake match.
+        monkeypatch.setattr(
+            "infra.vehicle_matcher.match_vehicle_scored",
+            lambda sig, known, spec=None: (
+                vehicle_ctx.known_vehicles[0],
+                1.0,
+                1.0,
+                {vehicle_ctx.known_vehicles[0]["id"]: {"color": 1.0, "make": 1.0}},
+            ),
+        )
+
+        # Stub score_top_n.
+        monkeypatch.setattr(
+            "infra.vehicle_matcher.score_top_n",
+            lambda sig, known, n=3: [(kv, 1.0, {}) for kv in known],
+        )
+
+        match_stage(vehicle_ctx)
+
+        assert isinstance(vehicle_ctx.match_verdict, MatchVerdict)
+        assert vehicle_ctx.match_verdict.known_vehicle["id"] == "v_test_tesla_y"
+        assert vehicle_ctx.match_verdict.score == 1.0
+
+    def test_match_stage_no_match_returns_no_match(self, vehicle_ctx, monkeypatch):
+        """No clearing score → NoMatch with below_threshold reason."""
+        vehicle_ctx.vision_result = {"color": "unknown", "type": "unknown"}
+        monkeypatch.setattr(
+            "infra.vehicle_matcher.match_vehicle_scored",
+            lambda sig, known, spec=None: None,
+        )
+        monkeypatch.setattr(
+            "infra.vehicle_matcher.score_top_n",
+            lambda sig, known, n=3: [],
+        )
+
+        match_stage(vehicle_ctx)
+
+        assert isinstance(vehicle_ctx.match_verdict, NoMatch)
+        assert vehicle_ctx.match_verdict.reason == "below_threshold"
+
+
+# --- Test 4: select_best_frame_stage -------------------------------------
+
+
+class TestSelectBestFrameStage:
+    def test_select_best_frame_default_is_first_frame(self, base_ctx):
+        """Default: best_frame_path = frame_paths[0]."""
+        base_ctx.frame_paths = ["/tmp/frame_001.jpg", "/tmp/frame_002.jpg"]
+        select_best_frame_stage(base_ctx)
+        assert base_ctx.best_frame_path == "/tmp/frame_001.jpg"
+
+    def test_select_best_frame_uses_vision_selected(self, base_ctx):
+        """Vision-selected frame wins over the default."""
+        base_ctx.frame_paths = ["/tmp/frame_001.jpg", "/tmp/frame_002.jpg", "/tmp/frame_003.jpg"]
+        base_ctx.vision_result = {"selected_frame": "/tmp/frame_002.jpg"}
+        select_best_frame_stage(base_ctx)
+        assert base_ctx.best_frame_path == "/tmp/frame_002.jpg"
+
+    def test_select_best_frame_empty_paths(self, base_ctx):
+        """Empty frame_paths → empty best_frame_path."""
+        base_ctx.frame_paths = []
+        select_best_frame_stage(base_ctx)
+        assert base_ctx.best_frame_path == ""
+
+
+# --- Test 5: generate_alert_stage ----------------------------------------
+
+
+class TestGenerateAlertStage:
+    def test_generate_alert_calls_generate_alert(self, base_ctx, monkeypatch):
+        """generate_alert is called with the right args."""
+        seen = {}
+
+        def fake_generate_alert(vision_result, camera_name, timestamp, source, api_url):
+            seen["vision_result"] = vision_result
+            seen["camera_name"] = camera_name
+            seen["source"] = source
+            seen["api_url"] = api_url
+            return {
+                "title": "Test Alert",
+                "summary": "Test",
+                "threat_level": 2,
+            }
+
+        monkeypatch.setattr(
+            "infra.alert_generator.generate_alert",
+            fake_generate_alert,
+        )
+
+        base_ctx.vision_result = {"color": "blue"}
+        generate_alert_stage(base_ctx)
+
+        assert seen["camera_name"] == base_ctx.camera_name
+        assert seen["source"] == "rtsp_frames"  # non-vehicle
+        assert base_ctx.alert["title"] == "Test Alert"
+        assert base_ctx.alert["threat_level"] == 2
+
+    def test_generate_alert_vehicle_with_match_uses_match_source(self, vehicle_ctx, monkeypatch):
+        """Vehicle events with match_verdict → source='match'."""
+        seen = {}
+
+        def fake_generate_alert(vision_result, camera_name, timestamp, source, api_url):
+            seen["source"] = source
+            return {"title": "Match", "threat_level": 1, "summary": ""}
+
+        monkeypatch.setattr(
+            "infra.alert_generator.generate_alert",
+            fake_generate_alert,
+        )
+
+        # Set a match verdict to trigger source='match'.
+        vehicle_ctx.match_verdict = MatchVerdict(
+            known_vehicle={"id": "test"},
+            score=1.0,
+            gap=1.0,
+            breakdowns={},
+            rank=0,
+            all_scores=[],
+        )
+        vehicle_ctx.vision_result = {"color": "blue"}
+        generate_alert_stage(vehicle_ctx)
+
+        assert seen["source"] == "match"
+
+    def test_generate_alert_error_fallback(self, base_ctx, monkeypatch):
+        """generate_alert raising → alert['title'] = 'error', threat_level = 0."""
+        def fake_generate_alert(**kwargs):
+            raise RuntimeError("simulated LLM failure")
+
+        monkeypatch.setattr(
+            "infra.alert_generator.generate_alert",
+            fake_generate_alert,
+        )
+
+        base_ctx.vision_result = {"color": "blue"}
+        generate_alert_stage(base_ctx)
+
+        assert base_ctx.alert["title"] == "error"
+        assert base_ctx.alert["threat_level"] == 0
+
+
+# --- Test 6: emit_result_stage -------------------------------------------
+
+
+class TestEmitResultStage:
+    def test_emit_result_vehicle_event_suffixes_alert_id(self, vehicle_ctx, monkeypatch):
+        """Vehicle event → alert_id gets '-identified' suffix."""
+        vehicle_ctx.alert = {"title": "Vehicle Match", "threat_level": 1, "summary": ""}
+        vehicle_ctx.best_frame_path = "/tmp/frame_001.jpg"
+        vehicle_ctx.vision_result = {}  # no person — skip arrival
+
+        # Stub the dependencies to avoid real I/O.
+        monkeypatch.setattr(
+            "infra.alert_history.append_alert", lambda alert: True,
+        )
+        monkeypatch.setattr(
+            "infra.send_telegram.send_photo_with_caption", lambda **kwargs: True,
+        )
+        monkeypatch.setattr(
+            "infra.pipeline_integration.run_phase6a_recognition", lambda **kwargs: None,
+        )
+
+        result = emit_result_stage(vehicle_ctx)
+
+        assert vehicle_ctx.alert["alert_id"] == "test-alert-001-identified"
+        assert vehicle_ctx.alert["frame_path"] == "/tmp/frame_001.jpg"
+        assert result["telegram_sent"] is True
+
+    def test_emit_result_error_title_returns_no_telegram(self, base_ctx, monkeypatch):
+        """alert['title'] == 'error' → telegram_sent=False, no notify call."""
+        base_ctx.alert = {"title": "error", "threat_level": 0, "summary": ""}
+
+        notify_called = []
+
+        def fake_notify(**kwargs):
+            notify_called.append(kwargs)
+            return True
+
+        monkeypatch.setattr(
+            "infra.send_telegram.send_photo_with_caption", fake_notify,
+        )
+
+        result = emit_result_stage(base_ctx)
+
+        assert notify_called == []  # notify NOT called
+        assert result["telegram_sent"] is False
+
+    def test_emit_result_returns_result_dict(self, base_ctx, monkeypatch):
+        """Result dict has all the expected keys."""
+        base_ctx.alert = {"title": "Test", "threat_level": 0, "summary": ""}
+        base_ctx.vision_result = {}
+
+        monkeypatch.setattr(
+            "infra.alert_history.append_alert", lambda alert: True,
+        )
+        monkeypatch.setattr(
+            "infra.send_telegram.send_photo_with_caption", lambda **kwargs: True,
+        )
+        monkeypatch.setattr(
+            "infra.pipeline_integration.run_phase6a_recognition", lambda **kwargs: None,
+        )
+
+        result = emit_result_stage(base_ctx)
+
+        assert "event_type" in result
+        assert "vehicle_match" in result
+        assert "telegram_sent" in result
+        assert "telegram_error" in result
+        assert "alert_id" in result
+
+
+# --- Phase.121: alert.jsonl gets match body when matched -------------
+
+
+class TestEmitAlertJsonlMatchBody:
+    """Phase.121 (2026-08-22): when the match loop populates
+    ctx.match_alerts, emit_result_stage must replace ctx.alert with the
+    match body before append_alert() so alert.jsonl reflects what TG#3
+    told the user (not the LLM-fallback's generic L0 title).
+    """
+
+    def _make_match_input(self):
+        from telegram_formatter.match_telegram import (
+            MatchTelegramInput,
+            MatchVerdict,
+        )
+
+        return MatchTelegramInput(
+            camera_name="CAM5",
+            captured_at_iso="2026-08-22 10:26:25 EDT",
+            verdict=MatchVerdict(
+                known_vehicle={
+                    "id": "v_brown_f150",
+                    "label": "Brown F150 pickup (camper top)",
+                    "owner": "name one",
+                    "color": "black",
+                    "make": "Ford",
+                    "model": "F-150",
+                    "type": "pickup",
+                },
+                score=8.0,
+                gap=7.1,
+                breakdowns={"color_match": 0.7, "make_match": 2.0},
+                rank=0,
+                all_scores=[
+                    ("v_brown_f150", 8.0),
+                    ("v_owner1_darkblue_tesla_y", 0.9),
+                    ("v_24ft_flatbed_trailer", 0.7),
+                ],
+            ),
+            match_threshold=0.6,
+            gap_threshold=0.15,
+            alert_id="test-alert-001-v0",
+        )
+
+    def test_emit_replaces_alert_with_match_body_when_match_alerts_present(
+        self, vehicle_ctx, monkeypatch
+    ):
+        """The alert passed to append_alert() must be the match body,
+        not the LLM-fallback's title.
+        """
+        # Setup: simulate the LLM having produced a generic L0 title
+        # (the bug we're fixing)
+        vehicle_ctx.alert = {
+            "title": "No Activity Detected on Front Solar Camera",
+            "threat_level": 0,
+            "summary": "Generic L0 fallback that contradicts the match.",
+        }
+        vehicle_ctx.best_frame_path = "/tmp/frame_001.jpg"
+        vehicle_ctx.vision_result = {}
+        vehicle_ctx.match_verdict = True  # truthy — match happened
+        vehicle_ctx.match_alerts = [self._make_match_input()]
+
+        appended = {}
+
+        def fake_append(alert):
+            appended["alert"] = alert
+            return True
+
+        monkeypatch.setattr("infra.alert_history.append_alert", fake_append)
+        monkeypatch.setattr("infra.send_telegram.send_photo_with_caption", lambda **kwargs: True)
+        monkeypatch.setattr(
+            "infra.pipeline_integration.run_phase6a_recognition",
+            lambda **kwargs: None,
+        )
+        # The composite TG#2 send is inlined in emit_result_stage; we
+        # avoid I/O by short-circuiting vision_result. The match loop
+        # also requires vision_result with vehicles; ours is empty.
+
+        # §13.4 Commit 17 (T3 C17): patch display_name_for to a
+        # PII-safe placeholder so the rendered title doesn't leak the
+        # operator's friendly name on this public-repo test fixture.
+        monkeypatch.setattr(
+            "telegram_formatter.match_telegram.display_name_for",
+            lambda code: "<MATCH_CAM>",
+        )
+
+        emit_result_stage(vehicle_ctx)
+
+        # The appended alert MUST have the match body's title
+        assert "Match" in appended["alert"]["title"]
+        # §13.4 Commit 17 (T3 C17): the title resolves CAM{N} via
+        # display_name_for() back to the registry's spec.name.
+        # The patched display returns "<MATCH_CAM>" so we don't
+        # assert against the operator's real friendly name here.
+        assert "<MATCH_CAM>" in appended["alert"]["title"]
+        # And NOT the original L0 title
+        assert "Front Solar Camera" not in appended["alert"]["title"]
+        assert appended["alert"]["title"] != "No Activity Detected on Front Solar Camera"
+        # threat_level bumped to 1 (it was a real match)
+        assert appended["alert"]["threat_level"] == 1
+        # Stash metadata for history queries
+        assert appended["alert"]["matched_vehicle_id"] == "v_brown_f150"
+        assert appended["alert"]["match_score"] == 8.0
+
+    def test_emit_preserves_original_alert_when_no_match_alerts(
+        self, vehicle_ctx, monkeypatch
+    ):
+        """No matches → ctx.alert keeps whatever generate_alert_stage set
+        (don't synthesize a body)."""
+        vehicle_ctx.alert = {
+            "title": "Custom title from generate_alert_stage",
+            "threat_level": 1,
+            "summary": "Original LLM output",
+        }
+        vehicle_ctx.best_frame_path = "/tmp/frame_001.jpg"
+        vehicle_ctx.vision_result = {}
+        vehicle_ctx.match_alerts = []  # no matches
+
+        appended = {}
+
+        def fake_append(alert):
+            appended["alert"] = alert
+            return True
+
+        monkeypatch.setattr("infra.alert_history.append_alert", fake_append)
+        monkeypatch.setattr("infra.send_telegram.send_photo_with_caption", lambda **kwargs: True)
+        monkeypatch.setattr(
+            "infra.pipeline_integration.run_phase6a_recognition",
+            lambda **kwargs: None,
+        )
+
+        emit_result_stage(vehicle_ctx)
+
+        # The original alert title is preserved
+        assert appended["alert"]["title"] == "Custom title from generate_alert_stage"
+        assert appended["alert"]["threat_level"] == 1
+
+
+# --- Phase.122 regression: b079e97a "Normal Daytime Scene" bug -------
+
+
+class TestEmitAlertJsonlDeferUntilAfterMatchLoop:
+    """Phase.122 (2026-08-22): 6B.121 was broken — it tried to swap
+    ctx.alert BEFORE append_alert, but match_loop runs AFTER append_alert
+    in the stage. The swap saw an empty match_alerts list and was a silent
+    no-op.
+
+    Confirmed via b079e97a (red Jeep, 11:23:24 EDT): TG#3 sent
+    "❌ No match" but alert.jsonl said "Normal Daytime Scene - No
+    Activity Detected".
+
+    Fix: defer append_alert until AFTER _emit_match_loop. The swap now
+    runs first (when ctx.match_alerts is populated), then append_alert
+    is called once with the final body.
+
+    This test pins the FIX end-to-end: _emit_match_loop is faked to
+    populate match_alerts, then assert append_alert received the
+    swapped body, not the LLM-fallback.
+    """
+
+    def test_append_alert_receives_swapped_body_when_match_loop_populates_first(
+        self, vehicle_ctx, monkeypatch
+    ):
+        # Setup: simulate the LLM-fallback L0 title
+        vehicle_ctx.alert = {
+            "title": "Normal Daytime Scene - No Activity Detected",
+            "threat_level": 0,
+            "summary": "Generic LLM fallback",
+        }
+        vehicle_ctx.best_frame_path = "/tmp/frame_001.jpg"
+        vehicle_ctx.vision_result = {}
+        vehicle_ctx.match_verdict = True
+        vehicle_ctx.match_alerts = []  # initially empty
+
+        # Capture every append_alert call (should only be ONE)
+        appended = []
+
+        def fake_append(alert):
+            appended.append(alert)
+            return True
+
+        monkeypatch.setattr("infra.alert_history.append_alert", fake_append)
+        monkeypatch.setattr("infra.send_telegram.send_photo_with_caption", lambda **kwargs: True)
+        monkeypatch.setattr(
+            "infra.pipeline_integration.run_phase6a_recognition",
+            lambda **kwargs: None,
+        )
+
+        # THE KEY: _emit_match_loop populates ctx.match_alerts (mimics
+        # what the real _emit_match_loop does before returning). This
+        # is the b079e97a bug: pre-6B.122, append_alert ran BEFORE
+        # _emit_match_loop, so ctx.match_alerts was [].
+        from telegram_formatter.no_match_telegram import (
+            NoMatch,
+            NoMatchTelegramInput,
+        )
+        # b079e97a was a NO-MATCH (red Jeep didn't match anything in
+        # known_vehicles). 6B.121 only appended for MATCH cases, so
+        # the swap never ran. 6B.122 fixes this by duck-typing both.
+        no_match = NoMatchTelegramInput(
+            camera_name="CAM5",
+            captured_at_iso="2026-08-22 11:23:24 EDT",
+            no_match=NoMatch(
+                reason="below_threshold",
+                top_candidates=[
+                    ("v_red_yanmar_backhoe", 1.20),
+                    ("v_red_yanmar_tractor", 1.20),
+                ],
+            ),
+            top_n_breakdowns=[
+                ("v_red_yanmar_backhoe", 1.20, {"color_match": 0.7, "color_alt_match": 0.5}),
+                ("v_red_yanmar_tractor", 1.20, {"color_match": 0.7, "color_alt_match": 0.5}),
+            ],
+            match_threshold=0.6,
+            gap_threshold=0.15,
+            alert_id="b079e97a-69b8-4181-ba4b-315ff0e3f85b-v0",
+        )
+
+        def fake_emit_match_loop(ctx):
+            ctx.match_alerts.append(no_match)
+
+        monkeypatch.setattr(
+            "listener.vehicle_event_pipeline._emit_match_loop",
+            fake_emit_match_loop,
+        )
+
+        emit_result_stage(vehicle_ctx)
+
+        # Pin: exactly ONE append_alert call (not two, not zero)
+        assert len(appended) == 1, (
+            f"Expected exactly 1 append_alert call, got {len(appended)}. "
+            f"The 6B.122 deferral is broken."
+        )
+        # Pin: the appended body is the no-match body, not the LLM fallback
+        final = appended[0]
+        assert "No match" in final["title"], (
+            f"alert.jsonl got LLM-fallback title instead of no-match body: "
+            f"{final['title']!r}"
+        )
+        assert final["title"] != "Normal Daytime Scene - No Activity Detected"
+        # Phase.123 (2026-08-22): no-match → L2 (unknown vehicle at CAM5)
+        # per the operator's threat-level spec. Was L1 in 6B.122 (when the swap
+        # hardcoded everything to 1). 6B.123 separates match (L1) from
+        # no-match (L2).
+        assert final["threat_level"] == 2, (
+            f"no-match should be L2 (unknown vehicle at CAM5), got "
+            f"threat_level={final['threat_level']}"
+        )
+
+    def test_append_alert_called_once_even_without_match_swap(
+        self, vehicle_ctx, monkeypatch
+    ):
+        """If match_loop runs but produces no match_alerts (e.g. no
+        known_vehicles, or match failed), we still append exactly ONCE
+        with the original ctx.alert — not zero, not twice."""
+        vehicle_ctx.alert = {
+            "title": "Custom title from generate_alert_stage",
+            "threat_level": 1,
+            "summary": "Original LLM output",
+        }
+        vehicle_ctx.best_frame_path = "/tmp/frame_001.jpg"
+        vehicle_ctx.vision_result = {}
+        vehicle_ctx.match_alerts = []
+
+        appended = []
+
+        def fake_append(alert):
+            appended.append(alert)
+            return True
+
+        monkeypatch.setattr("infra.alert_history.append_alert", fake_append)
+        monkeypatch.setattr("infra.send_telegram.send_photo_with_caption", lambda **kwargs: True)
+        monkeypatch.setattr(
+            "infra.pipeline_integration.run_phase6a_recognition",
+            lambda **kwargs: None,
+        )
+
+        def fake_emit_match_loop(ctx):
+            pass  # match_loop ran but produced nothing
+
+        monkeypatch.setattr(
+            "listener.vehicle_event_pipeline._emit_match_loop",
+            fake_emit_match_loop,
+        )
+
+        emit_result_stage(vehicle_ctx)
+
+        # Exactly ONE call — with the original alert body
+        assert len(appended) == 1
+        assert appended[0]["title"] == "Custom title from generate_alert_stage"
+
+    def test_non_vehicle_event_appends_immediately(
+        self, base_ctx, monkeypatch
+    ):
+        """Non-vehicle alerts skip the deferral and append_alert runs
+        immediately (preserves the existing non-vehicle flow)."""
+        base_ctx.is_vehicle_event = False
+        base_ctx.alert = {
+            "title": "Generic non-vehicle alert",
+            "threat_level": 1,
+            "summary": "",
+        }
+        base_ctx.vision_result = {}
+
+        appended = []
+
+        def fake_append(alert):
+            appended.append(alert)
+            return True
+
+        monkeypatch.setattr("infra.alert_history.append_alert", fake_append)
+        monkeypatch.setattr("infra.send_telegram.send_photo_with_caption", lambda **kwargs: True)
+
+        emit_result_stage(base_ctx)
+
+        # Non-vehicle → single immediate append
+        assert len(appended) == 1
+        assert appended[0]["title"] == "Generic non-vehicle alert"
+
+
+# --- Phase.123 regression: vehicle threat level routing ---
+
+
+class TestVehicleThreatLevelRouting:
+    """Phase.123 (2026-08-22, Note): vehicle threat-level routing.
+
+    Per the operator 2026-08-22:
+      L1 = known vehicle at CAM5 (matched to known_vehicles.json)
+      L2 = unknown vehicle at CAM5 (no match)
+      L3 = emergency vehicle (police/ambulance/firetruck) — NOT YET WIRED
+
+    The swap in emit_result_stage sets threat_level based on whether
+    match_alerts[0] is a MatchTelegramInput (match → L1) or
+    NoMatchTelegramInput (no-match → L2).
+
+    Tests pin both branches so future changes can't accidentally flip
+    the levels back to L1 for everything (the 6B.122 bug).
+    """
+
+    def _setup_vehicle_ctx(self, vehicle_ctx):
+        vehicle_ctx.alert = {
+            "title": "<LLM body, will be overwritten>",
+            "threat_level": 0,  # LLM's fallback — must be replaced
+            "summary": "Generic LLM output",
+        }
+        vehicle_ctx.best_frame_path = "/tmp/frame_001.jpg"
+        vehicle_ctx.vision_result = {}
+
+    def _capture_appended(self, monkeypatch):
+        appended = []
+
+        def fake_append(alert):
+            appended.append(alert)
+            return True
+
+        monkeypatch.setattr("infra.alert_history.append_alert", fake_append)
+        monkeypatch.setattr("infra.send_telegram.send_photo_with_caption", lambda **kwargs: True)
+        monkeypatch.setattr(
+            "infra.pipeline_integration.run_phase6a_recognition",
+            lambda **kwargs: None,
+        )
+        return appended
+
+    def test_match_routes_to_L1(self, vehicle_ctx, monkeypatch):
+        """Matched vehicle at CAM5 → threat_level=1 (L1, Telegram alert).
+
+        the operator 2026-08-22: 'L one are things that I want to get an
+        alert on, which right now is any known vehicle moving on my
+        property past the CAM5 Camera.'
+        """
+        self._setup_vehicle_ctx(vehicle_ctx)
+        appended = self._capture_appended(monkeypatch)
+
+        from telegram_formatter.match_telegram import (
+            MatchTelegramInput,
+            MatchVerdict,
+        )
+
+        match_input = MatchTelegramInput(
+            camera_name="CAM5",
+            captured_at_iso="2026-08-22 11:25:00 EDT",
+            verdict=MatchVerdict(
+                known_vehicle={"id": "v_jeffrey_red_jeep_wrangler",
+                               "label": "Jeffrey's red Jeep Wrangler"},
+                score=9.0,
+                gap=8.1,
+                breakdowns={},
+                rank=0,
+                all_scores=[("v_jeffrey_red_jeep_wrangler", 9.0)],
+            ),
+            match_threshold=0.6,
+            gap_threshold=0.15,
+            alert_id="enrollment-test-v0",
+        )
+
+        def fake_emit_match_loop(ctx):
+            ctx.match_alerts.append(match_input)
+
+        monkeypatch.setattr(
+            "listener.vehicle_event_pipeline._emit_match_loop",
+            fake_emit_match_loop,
+        )
+
+        emit_result_stage(vehicle_ctx)
+
+        assert len(appended) == 1
+        assert appended[0]["threat_level"] == 1, (
+            f"matched vehicle at CAM5 should be L1, got "
+            f"threat_level={appended[0]['threat_level']}"
+        )
+        assert appended[0]["matched_vehicle_id"] == "v_jeffrey_red_jeep_wrangler"
+
+    def test_no_match_routes_to_L2(self, vehicle_ctx, monkeypatch):
+        """Unknown vehicle at CAM5 → threat_level=2 (L2, higher alert).
+
+        the operator 2026-08-22: 'L2 would be an unknown vehicle moving
+        past the CAM5 Camera.' This is the b079e97a (red Jeep before
+        enrollment) case in production.
+        """
+        self._setup_vehicle_ctx(vehicle_ctx)
+        appended = self._capture_appended(monkeypatch)
+
+        from telegram_formatter.no_match_telegram import (
+            NoMatch,
+            NoMatchTelegramInput,
+        )
+
+        no_match = NoMatchTelegramInput(
+            camera_name="CAM5",
+            captured_at_iso="2026-08-22 11:23:24 EDT",
+            no_match=NoMatch(
+                reason="below_threshold",
+                top_candidates=[
+                    ("v_red_yanmar_backhoe", 1.20),
+                    ("v_red_yanmar_tractor", 1.20),
+                ],
+            ),
+            top_n_breakdowns=[
+                ("v_red_yanmar_backhoe", 1.20,
+                 {"color_match": 0.7, "color_alt_match": 0.5}),
+                ("v_red_yanmar_tractor", 1.20,
+                 {"color_match": 0.7, "color_alt_match": 0.5}),
+            ],
+            match_threshold=0.6,
+            gap_threshold=0.15,
+            alert_id="b079e97a-69b8-4181-ba4b-315ff0e3f85b-v0",
+        )
+
+        def fake_emit_match_loop(ctx):
+            ctx.match_alerts.append(no_match)
+
+        monkeypatch.setattr(
+            "listener.vehicle_event_pipeline._emit_match_loop",
+            fake_emit_match_loop,
+        )
+
+        emit_result_stage(vehicle_ctx)
+
+        assert len(appended) == 1
+        assert appended[0]["threat_level"] == 2, (
+            f"no-match vehicle at CAM5 should be L2, got "
+            f"threat_level={appended[0]['threat_level']}"
+        )
+
+    def test_no_match_alerts_empty_keeps_LLM_level(
+        self, vehicle_ctx, monkeypatch
+    ):
+        """If match_loop ran but produced no match_alerts (edge case:
+        known_vehicles is empty, etc.), the LLM's level is preserved.
+        No routing should happen — we're not in the vehicle path.
+        """
+        self._setup_vehicle_ctx(vehicle_ctx)
+        vehicle_ctx.alert["threat_level"] = 1  # LLM said L1
+        appended = self._capture_appended(monkeypatch)
+
+        def fake_emit_match_loop(ctx):
+            pass  # produced nothing
+
+        monkeypatch.setattr(
+            "listener.vehicle_event_pipeline._emit_match_loop",
+            fake_emit_match_loop,
+        )
+
+        emit_result_stage(vehicle_ctx)
+
+        assert len(appended) == 1
+        # Original LLM level preserved (no swap ran)
+        assert appended[0]["threat_level"] == 1

@@ -1,0 +1,92 @@
+{
+  "_comment": "Phase.107 §11.37 — motion-gate per-camera confidence thresholds. Per-class values OVERRIDE the per-class defaults in infra/motion_gate_pipeline.py (THRESHOLDS_BY_CLASS). Per-camera values OVERRIDE per-class for that camera+class. Format: {'<camera_name>': {'<coco_class>': <threshold>, ...}, ...}. Thresholds are 0.0-1.0 confidence. Lower = more permissive (more passes to Qwen). Higher = more strict (more suppressions). Tunable after week 1 of production data.\nPhase.152: each camera may have a top-level \"gate_enabled\" field shaped like {\"vehicle\": bool, \"person\": bool, \"animal\": bool, \"motion\": bool}. Default if missing: all True. See infra.is_gate_enabled() and PLAN §11.75.\n\nPhase.154 (§11.77): each camera may have a top-level \"gate_cooldown\" field shaped like {\"vehicle\": int_seconds, \"person\": int_seconds, \"animal\": int_seconds, \"motion\": int_seconds, \"default\": int_seconds}. 0 or absent = no cooldown (backward-compatible). Applied at the gate BEFORE motion gate runs. See infra/gate_cooldown.py.\n\nPhase.167 §13.4 Commit 17 (T3 C17): top-level keys are CAM{N} codes per infra.cameras._LEGACY_PREFIX_TO_CODE (CAM1=FRONT, CAM2=BACK, CAM3=CAM2, CAM4=CAM3, CAM5=CAM1, CAM6=CAM4). Lookup sites in listener.motion_gate_pipeline.is_gate_enabled()/load_thresholds() and infra.gate_cooldown.get_gate_cooldown_seconds() translate the friendly name from the webhook payload via infra.cameras.code_for() before fetching the camera's config blob. The full friendly-name → CAM{N} mapping lives in infra.cameras._LEGACY_PREFIX_TO_CODE.\n\nPhase.165 §11.86.4 (2026-08-30): animal cooldowns added per-camera. Approved values (the operator 2026-08-29): CAM3/CAM4/CAM5/CAM6 = 300s (long driveway/field cameras, low animal traffic so longer cooldown is safe), CAM1 = 180s (front-door, animals sometimes wander near), CAM2 = 60s (indoor workshop, resident cats/dogs frequent — short cooldown so we don't miss return visits). Tunable per-camera after week 1 of production data.",
+  "_default_thresholds_reference": {
+    "car": 0.5,
+    "truck": 0.5,
+    "bus": 0.5,
+    "motorcycle": 0.45,
+    "bicycle": 0.45,
+    "person": 0.35,
+    "dog": 0.6,
+    "cat": 0.6,
+    "horse": 0.6,
+    "sheep": 0.6,
+    "cow": 0.6,
+    "bear": 0.6,
+    "bird": 0.6,
+    "_default_for_other_coco": 0.55
+  },
+  "CAM5": {
+    "_comment": "CAM5 = CAM1. Long driveway, slow approach, headlight flares common. Person threshold lowered because partial-view people are common at the gate.",
+    "car": 0.45,
+    "person": 0.3,
+    "gate_cooldown": {
+      "vehicle": 60,
+      "person": 120,
+      "animal": 300,
+      "motion": 180,
+      "default": 120
+    }
+  },
+  "CAM3": {
+    "_comment": "CAM3 = CAM2. Closer than CAM5, vehicles usually well-framed. Same headlight-flare risk at night.",
+    "car": 0.5,
+    "person": 0.35,
+    "gate_cooldown": {
+      "vehicle": 60,
+      "person": 120,
+      "animal": 300,
+      "motion": 180,
+      "default": 120
+    }
+  },
+  "CAM6": {
+    "_comment": "CAM6 = CAM4. Back of property, longer detection distance. Slightly stricter person threshold because fewer false person detections at distance.",
+    "car": 0.5,
+    "person": 0.35,
+    "gate_cooldown": {
+      "vehicle": 60,
+      "person": 120,
+      "animal": 300,
+      "motion": 180,
+      "default": 120
+    }
+  },
+  "CAM2": {
+    "_comment": "CAM2 = BACK_DOOR_INSIDE. Indoor workshop, person-gatekeeper. Animals (cats) sometimes wander in — animal threshold lower to not suppress real cats/dogs.",
+    "person": 0.3,
+    "cat": 0.5,
+    "dog": 0.5,
+    "gate_cooldown": {
+      "vehicle": 60,
+      "person": 120,
+      "animal": 60,
+      "motion": 180,
+      "default": 120
+    }
+  },
+  "_phase_6B_154_defaults_applied": "2026-08-28 — the operator: 'apply it to all cameras with the defaults'. vehicle=60s, person=120s, motion=180s, default=120s. Tunable per-camera; restart required for config changes.",
+  "CAM1": {
+    "_comment": "CAM1 = FRONT_DOOR_OUTSIDE. Close range, person-gatekeeper camera. Person threshold lower (more permissive) because we WANT person detections here. Vehicles rarely show up here.",
+    "person": 0.3,
+    "car": 0.55,
+    "gate_cooldown": {
+      "vehicle": 60,
+      "person": 120,
+      "animal": 180,
+      "motion": 180,
+      "default": 120
+    }
+  },
+  "CAM4": {
+    "_comment": "CAM4 = CAM3. §11.80 (2026-08-28) — was missing from this config (never enrolled in §11.77 defaults apply); added now that CAM4 is a person+vehicle gatekeeper camera. person threshold at the global default 0.35; gate_cooldown matches the rest of the fleet (vehicle=60s, person=120s, animal=300s, motion=180s, default=120s) so per-camera person floods cap at 1/min.",
+    "person": 0.35,
+    "gate_cooldown": {
+      "vehicle": 60,
+      "person": 120,
+      "animal": 300,
+      "motion": 180,
+      "default": 120
+    }
+  }
+}
