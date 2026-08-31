@@ -823,3 +823,150 @@ class TestIsGateEnabled:
         assert is_gate_enabled("CAM3", "vehicle") is True
         # "person" configured False → returns False
         assert is_gate_enabled("CAM3", "person") is False
+
+
+# ---------------------------------------------------------------------------
+# Phase.169 §11.93 — crop source frame regression tests
+# ---------------------------------------------------------------------------
+
+
+def _make_moving_object_frames(out_dir: Path) -> list[str]:
+    """4 frames with a bright object at KNOWN positions per frame.
+
+    Frame 1: object at x=30..80,  y=80..130
+    Frame 2: object at x=60..110, y=80..130
+    Frame 3: object at x=90..140, y=80..130
+    Frame 4: object at x=120..170, y=80..130
+
+    The diff bbox of frames (2,3) covers roughly x=60..140. The diff bbox
+    of frames (3,4) covers roughly x=90..170.
+
+    Pre-fix bug: crops written to frame_3_path / frame_4_path. For
+    bbox_b = diff(3,4), the bbox covers x=90..170 — at frame_4 the
+    object has moved to x=120..170, so part of the bbox (x=90..120)
+    shows the empty region the object just left. For the
+    "OBJECT_LEAVES_BBOX" case below, the object exits the bbox
+    entirely by frame_4, leaving an empty crop.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for i in range(4):
+        frame = np.full((200, 200, 3), 50, dtype=np.uint8)
+        x_offset = 30 + i * 30
+        frame[80:130, x_offset : x_offset + 50] = (220, 220, 220)
+        path = out_dir / f"frame_{i+1:03d}.jpg"
+        cv2.imwrite(str(path), frame)
+        paths.append(str(path))
+    return paths
+
+
+def test_phase169_crops_written_to_earlier_frame_in_each_diff_pair(
+    tmp_path, monkeypatch
+):
+    """§11.93: bbox_a (diff of frame_2/3) crops frame_2; bbox_b (diff
+    of frame_3/4) crops frame_3. Pre-fix: frame_3 and frame_4."""
+    monkeypatch.setenv("GATE_KEEP_DISK_ARTIFACTS", "true")
+    out_dir = tmp_path / "frames"
+    paths = _make_moving_object_frames(out_dir)
+
+    classifier = FakeClassifier([
+        _verdict("car", 0.85, "pass_with_hint"),
+        _verdict("car", 0.78, "pass_with_hint"),
+    ])
+    verdict = run(
+        frame_paths=paths,
+        camera_name="CAM5",
+        alert_id="test-phase169-source",
+        output_dir=str(tmp_path),
+        classifier=classifier,
+    )
+
+    assert verdict.decision == "vehicle"
+    assert verdict.crop_a_path is not None
+    assert verdict.crop_b_path is not None
+
+    # crop_a_path = bbox_a applied to frame_2 → filename starts "frame_002_"
+    assert "frame_002_crop" in verdict.crop_a_path, (
+        f"crop_a_path should be written to frame_2 (earlier of pair), "
+        f"got {verdict.crop_a_path}"
+    )
+    # crop_b_path = bbox_b applied to frame_3 → filename starts "frame_003_"
+    assert "frame_003_crop" in verdict.crop_b_path, (
+        f"crop_b_path should be written to frame_3 (earlier of pair), "
+        f"got {verdict.crop_b_path}"
+    )
+    # Sanity: NOT frame_3/frame_4 (the buggy pre-fix behavior)
+    assert "frame_003_crop" not in verdict.crop_a_path
+    assert "frame_004_crop" not in verdict.crop_b_path
+
+    # And the files actually exist on disk
+    assert Path(verdict.crop_a_path).is_file()
+    assert Path(verdict.crop_b_path).is_file()
+
+
+def _make_object_leaves_bbox_frames(out_dir: Path) -> list[str]:
+    """4 frames where the moving object at frame_3 IS inside the diff
+    bbox but at frame_4 has moved OUT of the bbox entirely.
+
+    Frame 1: object at x=30..80
+    Frame 2: object at x=60..110
+    Frame 3: object at x=90..140 (still inside the diff(3,4) bbox x=90..170)
+    Frame 4: object at x=160..210 (OUTSIDE the diff(3,4) bbox — the
+             bbox covers x=90..170 because that's where pixels changed)
+
+    Pre-fix: crop_b_path applies bbox_b to frame_4_path. At frame_4 the
+    object is at x=160..210, but bbox_b only covers x=90..170. So the
+    crop is empty.
+
+    Post-fix: crop_b_path applies bbox_b to frame_3_path. At frame_3
+    the object is at x=90..140, fully inside bbox_b. So the crop has
+    the object visible.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for i, x_offset in enumerate([30, 60, 90, 160]):  # frame_4 jumps past bbox
+        frame = np.full((200, 200, 3), 50, dtype=np.uint8)
+        frame[80:130, x_offset : x_offset + 50] = (220, 220, 220)
+        path = out_dir / f"frame_{i+1:03d}.jpg"
+        cv2.imwrite(str(path), frame)
+        paths.append(str(path))
+    return paths
+
+
+def test_phase169_crop_b_contains_object_when_object_leaves_later_frame(
+    tmp_path, monkeypatch
+):
+    """§11.93 end-to-end: when the object moves past the diff bbox by
+    frame_4, the post-fix crop_b (taken from frame_3) MUST contain
+    bright pixels where the object is. Pre-fix crop_b (taken from
+    frame_4) would be entirely dark gray."""
+    monkeypatch.setenv("GATE_KEEP_DISK_ARTIFACTS", "true")
+    out_dir = tmp_path / "frames"
+    paths = _make_object_leaves_bbox_frames(out_dir)
+
+    classifier = FakeClassifier([
+        _verdict("car", 0.85, "pass_with_hint"),
+        _verdict("car", 0.78, "pass_with_hint"),
+    ])
+    verdict = run(
+        frame_paths=paths,
+        camera_name="CAM5",
+        alert_id="test-phase169-leave",
+        output_dir=str(tmp_path),
+        classifier=classifier,
+    )
+
+    assert verdict.decision == "vehicle"
+    assert verdict.crop_b_path is not None
+
+    # Read the crop from disk and confirm it has bright pixels.
+    crop = cv2.imread(verdict.crop_b_path)
+    assert crop is not None, f"crop_b_path {verdict.crop_b_path} unreadable"
+    # Mean brightness of crop should be > 100 — the object is at
+    # brightness 220, background is 50. Pre-fix would be ~50 (empty
+    # bbox where object already left).
+    mean_brightness = float(crop.mean())
+    assert mean_brightness > 100, (
+        f"crop_b appears empty (mean brightness {mean_brightness:.1f}); "
+        f"the bbox was applied to a frame where the object had moved past it"
+    )

@@ -2,7 +2,8 @@
 
 STATUS: provisional (Phase.107 §11.37, 2026-08-23; Phase.109 §11.39 v2 fixes 2026-08-24;
         Phase.137 §11.59 catchall-when-no-vehicle fix 2026-08-27;
-        Phase.144 §11.66 YOLO-tighten revert + pairwise diff image 2026-08-27)
+        Phase.144 §11.66 YOLO-tighten revert + pairwise diff image 2026-08-27;
+        Phase.169 §11.93 apply diff bbox to EARLIER frame of pair 2026-08-31)
 THREAD SAFETY: single-threaded (one alert at a time, no shared state)
 INPUTS:
   - 4 frame paths (from persistent RTSP buffer via listener.py)
@@ -44,14 +45,15 @@ CALLS INTO:
   - config/motion_gate_thresholds.json (per-camera overrides)
 RELATED:
   - PLAN.md §11.37 (locked architecture), §11.39 (V2 fixes), §11.59 (rule-5 catchall fix),
-    §11.66 (YOLO-tighten revert + 3-image Qwen payload)
+    §11.66 (YOLO-tighten revert + 3-image Qwen payload),
+    §11.93 (apply diff bbox to earlier frame of pair — Phase.169)
   - docs/RESEARCH-2026-08-23-reolink-vs-frigate-classification.md
 
-Architecture (LOCKED §11.37, modified §11.66):
+Architecture (LOCKED §11.37, modified §11.66 + §11.93):
   Reolink fires webhook → listener peels 4 frames from persistent RTSP
   → this module runs:
-    diff(frame_2, frame_3) → bbox_a → crop_a = frame_3.crop(bbox_a)
-    diff(frame_3, frame_4) → bbox_b → crop_b = frame_4.crop(bbox_b)
+    diff(frame_2, frame_3) → bbox_a → crop_a = frame_2.crop(bbox_a)
+    diff(frame_3, frame_4) → bbox_b → crop_b = frame_3.crop(bbox_b)
     YOLOv8n ONNX on crop_a + crop_b (~25ms each) — gate decision only
     [Phase.144 §11.66] write `pairwise_diff.jpg` = abs(frame_3 − frame_4)
       with bbox overlay, so Qwen sees what pixels moved.
@@ -360,14 +362,14 @@ class GateVerdict:
       frames: 4 full frames as PIL.Image (BGR→RGB). Loaded once at gate
         start, used for diff + crops + downstream pipeline. This is the
         authoritative copy on the hot path — no filesystem reads.
-      crop_a: PIL.Image crop from frames[2] using bbox_a (or None)
-      crop_b: PIL.Image crop from frames[3] using bbox_b (or None)
+      crop_a: PIL.Image crop from frames[1] using bbox_a (or None)
+      crop_b: PIL.Image crop from frames[2] using bbox_b (or None)
       bbox_a: (x, y, w, h) from diff(2,3) — None if no motion
       bbox_b: (x, y, w, h) from diff(3,4) — None if no motion
       frame_paths: 4 disk paths; present when GATE_KEEP_DISK_ARTIFACTS=true
         (for postmortem / debugging). Empty list when env var is off.
-      crop_a_path: disk path to frame_3 crop (None when env var off)
-      crop_b_path: disk path to frame_4 crop (None when env var off)
+      crop_a_path: disk path to frame_2 crop (None when env var off)
+      crop_b_path: disk path to frame_3 crop (None when env var off)
       pairwise_diff_path: disk path to abs(frame_3 − frame_4) JPEG with
         bbox overlays (Phase.144 §11.66). Qwen sees this to
         disambiguate the moving subject from stationary vehicles that
@@ -760,8 +762,8 @@ def run(
       and (when GATE_KEEP_DISK_ARTIFACTS=true) disk paths for postmortem.
 
     Per §11.37 LOCKED architecture:
-      - diff(frame_2, frame_3) → bbox_a → crop_a = frame_3.crop(bbox_a)
-      - diff(frame_3, frame_4) → bbox_b → crop_b = frame_4.crop(bbox_b)
+      - diff(frame_2, frame_3) → bbox_a → crop_a = frame_2.crop(bbox_a)
+      - diff(frame_3, frame_4) → bbox_b → crop_b = frame_3.crop(bbox_b)
       - classify both crops, apply thresholds, route to vehicle/person/suppress
 
     Per §11.46.6 (Phase.115): the gate loads all 4 frames once at start
@@ -816,6 +818,7 @@ def run(
             reason="frame_load_failed",
         )
 
+    frame_2_pil = pil_frames[1]
     frame_3_pil = pil_frames[2]
     frame_4_pil = pil_frames[3]
 
@@ -872,8 +875,8 @@ def run(
     # ---- crop frames (in-memory + optional disk write) ----
     # In-memory PIL crops: always built (verdict.crop_a/b are the
     # authoritative copy on the hot path).
-    crop_a_pil = _pil_crop(frame_3_pil, bbox_a) if bbox_a else None
-    crop_b_pil = _pil_crop(frame_4_pil, bbox_b) if bbox_b else None
+    crop_a_pil = _pil_crop(frame_2_pil, bbox_a) if bbox_a else None
+    crop_b_pil = _pil_crop(frame_3_pil, bbox_b) if bbox_b else None
 
     # Disk writes: only when GATE_KEEP_DISK_ARTIFACTS=true. The crop
     # files are written next to the source frame with the existing
@@ -882,8 +885,8 @@ def run(
     crop_a_path: str | None = None
     crop_b_path: str | None = None
     if keep_disk:
-        crop_a_path = crop_frame_to_bbox(frame_3_path, bbox_a) if bbox_a else None
-        crop_b_path = crop_frame_to_bbox(frame_4_path, bbox_b) if bbox_b else None
+        crop_a_path = crop_frame_to_bbox(frame_2_path, bbox_a) if bbox_a else None
+        crop_b_path = crop_frame_to_bbox(frame_3_path, bbox_b) if bbox_b else None
 
     # ---- classify both crops ----
     # Phase.115 (§11.46.6): when GATE_KEEP_DISK_ARTIFACTS=true the
