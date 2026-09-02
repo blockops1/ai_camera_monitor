@@ -1,0 +1,86 @@
+# Pre-commit hooks for REPO_PATH
+# ──────────────────────────────────────────────────────────────
+# Run manually:    .venv/bin/pre-commit run --all-files
+# Run on commit:   auto-runs when you `git commit` (after `pre-commit install`)
+# Skip once:       git commit --no-verify
+# Update hooks:    .venv/bin/pre-commit autoupdate
+#
+# See ~/.hermes/skills/code-quality-tools/SKILL.md for what each gate catches.
+
+default_language_version:
+  python: python3.14
+
+# Use local tools (already in .venv). No remote hook downloads.
+
+repos:
+  # ─── Ruff: lint ──────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff lint (infra/ listener/ scripts/)
+        entry: .venv/bin/ruff check infra/ listener/ scripts/
+        language: system
+        types: [python]
+        pass_filenames: false
+        # Skip archived files (they're snapshots of prior revisions)
+        exclude: |
+          (?x)^(
+              .*/_.*archive_.*\.py
+            | .*/.*archive.*\.py
+          )$
+
+  # ─── Bandit: security linter ──────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: bandit
+        name: bandit security scan (infra/ listener/)
+        entry: .venv/bin/bandit -r infra/ listener/ -c pyproject.toml -q
+        language: system
+        types: [python]
+        pass_filenames: false
+        exclude: |
+          (?x)^(
+              .*/_.*archive_.*\.py
+            | .*/.*archive.*\.py
+            | .*/tests/.*\.py
+          )$
+
+  # ─── vulture: dead-code detector (advisory) ───────────────────────
+  # Vulture findings are advisory — per the vulture workflow in
+  # ~/.hermes/skills/code-quality-tools/SKILL.md, never auto-delete.
+  # The hook surfaces findings; humans decide what to do.
+  - repo: local
+    hooks:
+      - id: vulture
+        name: vulture dead-code scan (advisory — won't fail commit)
+        entry: bash -c '.venv/bin/vulture infra/ listener/ vehicle_position/ vehicle_identifier/ vehicle_matcher/ known_vehicles/ telegram_formatter/ pipeline/ 2>&1; true'
+        language: system
+        types: [python]
+        pass_filenames: false
+        # Vulture exit code 1 means "found dead code". Currently 99
+        # 60%-confidence findings remain (mostly dynamic-dispatch
+        # false positives — Flask routes, pytest fixtures, __init__
+        # exports). Those are documented in PLAN.md as deferred.
+        # To make vulture fail commits once 60%-conf findings reach 0:
+        # remove the trailing `true` from the entry above.
+
+# Notes on what's NOT in the pre-commit hooks:
+#
+# - mypy: deliberately excluded. Takes ~30s on the full repo.
+#   Run manually before push: .venv/bin/mypy --explicit-package-bases
+#   --exclude='_.*archive' --exclude='.*archive.*' infra/ listener/
+#   vehicle_position/ vehicle_identifier/ vehicle_matcher/
+#   known_vehicles/ telegram_formatter/ pipeline/
+#   See PLAN.md Phase 6B.123 for the mypy-pre-commit task (after
+#   100%-conf findings drop further).
+#
+# - pytest: deliberately excluded. 1191 tests = ~30s. Run manually
+#   before push: .venv/bin/python -m pytest
+#   If we want commit-time smoke tests, see SKILL.md for a
+#   "changed-files only" pytest invocation pattern.
+#
+# To install this config so it auto-runs:
+#   .venv/bin/pre-commit install
+#
+# To run on demand without committing:
+#   .venv/bin/pre-commit run --all-files
