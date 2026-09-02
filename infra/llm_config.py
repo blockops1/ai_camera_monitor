@@ -8,7 +8,7 @@ THREAD SAFETY: thread-safe (module-level cached configs are immutable
 INPUTS:
     - function arg env_path: str (optional) — absolute path to the
       llm-creds.env file. Default: infra.paths.LLM_CREDS_FILE
-      (~/farm-surveillance-refactor/llm-creds.env).
+      (~/REPO_PATH/llm-creds.env).
     - env VISION_LLM_URL — overrides file value
     - env VISION_LLM_TOKEN — overrides file value (Bearer auth)
     - env VISION_LLM_MODEL — overrides file value

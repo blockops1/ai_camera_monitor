@@ -669,7 +669,7 @@ def render_html(svg: str) -> str:
         <div class="pulse-dot"></div>
         <h1>Refactor Listener — Module Logic</h1>
       </div>
-      <p class="subtitle">~/farm-surveillance-refactor/ &middot; alert lifecycle (top) + intra-project import graph (below) &middot; post Part 9 split</p>
+      <p class="subtitle">~/REPO_PATH/ &middot; alert lifecycle (top) + intra-project import graph (below) &middot; post Part 9 split</p>
     </div>
 
     <div class="diagram-container">
@@ -750,13 +750,13 @@ def render_html(svg: str) -> str:
           <li>&bull; Telegram Bot API (api.telegram.org)</li>
           <li>&bull; Qwen3.6-35B-A3B server (:8093, unified since §11.81)</li>
           <li>&bull; Refactor-only filesystem (data/, logs/, config/)</li>
-          <li>&bull; Zero coupling to ~/farm-surveillance/</li>
+          <li>&bull; Zero coupling to legacy systems.</li>
         </ul>
       </div>
     </div>
 
     <p class="footer">
-      Generated {today} from actual intra-project imports &middot; ~/farm-surveillance-refactor/ &middot; post-6B.147 (drop vision_pool, configurable LLM endpoints)
+      Generated {today} from actual intra-project imports &middot; ~/REPO_PATH/ &middot; post-6B.147 (drop vision_pool, configurable LLM endpoints)
     </p>
   </div>
 </body>

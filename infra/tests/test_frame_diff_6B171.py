@@ -263,8 +263,8 @@ def _find_morning_frames() -> dict[str, list[Path]]:
     found, else empty dict.
     """
     candidates = [
-        Path.home() / "farm-surveillance-refactor" / "data" / "frames",
-        Path.home() / "farm-surveillance-data" / "frames",
+        Path.home() / "REPO_PATH" / "data" / "frames",
+        Path.home() / "legacy-frames" / "frames",
         Path("/data/frames"),
     ]
     alert_ids = [

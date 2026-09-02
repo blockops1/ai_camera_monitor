@@ -317,8 +317,8 @@ def test_no_subject_detection_suppresses_alert(tmp_path, monkeypatch):
 def _find_morning_frames() -> dict[str, list[Path]]:
     """Locate the 7 morning alert frames from 2026-09-01."""
     candidates = [
-        Path.home() / "farm-surveillance-refactor" / "data" / "frames",
-        Path.home() / "farm-surveillance-data" / "frames",
+        Path.home() / "REPO_PATH" / "data" / "frames",
+        Path.home() / "legacy-frames" / "frames",
         Path("/data/frames"),
     ]
     alert_ids = [

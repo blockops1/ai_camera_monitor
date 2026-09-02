@@ -36,7 +36,7 @@ Phase 6B.166 §11.87.2 (2026-08-30):
     other camera.
   - env_path defaults to infra.paths.CAMERA_CREDS_FILE — was hardcoded
     to LEGACY_PATH/camera-creds.env which broke
-    in the refactor (which lives at ~/farm-surveillance-refactor).
+    in the refactor (which lives at ~/REPO_PATH).
 
 Phase 6B.167 §13.5 (2026-08-30, T2 Commit 7):
   - CLI accepts `--camera <code>` (CAM1/CAM2/...) instead of raw IP.

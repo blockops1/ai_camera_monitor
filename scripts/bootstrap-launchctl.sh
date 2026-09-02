@@ -1,5 +1,5 @@
 #!/bin/bash
-# bootstrap-launchctl.sh — restart the farm-surveillance-refactor listener under launchd.
+# bootstrap-launchctl.sh — restart the REPO_PATH listener under launchd.
 # Run from your terminal, NOT from the agent:
 #   bash REPO_PATH/scripts/bootstrap-launchctl.sh
 set -e

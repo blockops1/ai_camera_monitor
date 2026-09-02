@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vehicle_matcher import NoMatch  # 6B.90 package-form (per farm-surveillance-workflow skill)
+from vehicle_matcher import NoMatch  # 6B.90 package-form (per farm-vision skill)
 
 
 @dataclass(frozen=True)

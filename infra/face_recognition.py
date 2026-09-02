@@ -1,7 +1,7 @@
 """
 face_recognition.py — Face detection + identification from a single frame.
 
-Lifted 2026-08-22 from ~/farm-surveillance/src/face_recognition.py
+Lifted 2026-08-22 from ~/legacy-tree/src/face_recognition.py
 (archived at ~/archive/2026-08-22-phase6b106-prelift-archive/) for
 Phase 6B.106 (person-gatekeeper tier). Logic is byte-identical; only
 the import structure changes (bare `import faces` → `from infra import faces`).

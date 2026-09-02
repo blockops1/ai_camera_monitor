@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from infra.cameras import code_for, display_name_for
 
 from vehicle_matcher import (
-    MatchVerdict,  # 6B.90 package-form (per farm-surveillance-workflow skill)
+    MatchVerdict,  # 6B.90 package-form (per farm-vision skill)
 )
 
 

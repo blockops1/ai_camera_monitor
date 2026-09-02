@@ -18,7 +18,7 @@ This script catches that class of bug in <100ms with no I/O beyond
 the on-disk store load.
 
 Usage:
-    cd ~/farm-surveillance-refactor
+    cd ~/REPO_PATH
     .venv/bin/python scripts/score_known_vehicles.py                 # all canonical candidates
     .venv/bin/python scripts/score_known_vehicles.py --candidate-id v_jeremiah_blue
                                                             # narrow to one entry

@@ -1,7 +1,7 @@
 """
-faces.py — Identity storage for farm-surveillance-refactor.
+faces.py — Identity storage for REPO_PATH.
 
-Lifted 2026-08-22 from ~/farm-surveillance/src/faces.py
+Lifted 2026-08-22 from ~/legacy-tree/src/faces.py
 (archived at ~/archive/2026-08-22-phase6b106-prelift-archive/) for
 Phase 6B.106 (person-gatekeeper tier). Logic is byte-identical; only
 the path imports change (bare `from paths import` → `from infra.paths import`).

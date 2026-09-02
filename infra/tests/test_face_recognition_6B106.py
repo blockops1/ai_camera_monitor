@@ -1,6 +1,6 @@
 """Unit tests for infra.face_recognition (Phase 6B.106 lift).
 
-The lifted module mirrors ~/farm-surveillance/src/face_recognition.py
+The lifted module mirrors ~/legacy-tree/src/face_recognition.py
 (archived 2026-08-22) but uses absolute imports for the refactor layout.
 
 Tests mock the insightface package so the 300MB buffalo_l model doesn't

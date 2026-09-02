@@ -191,7 +191,7 @@ def match_stage(ctx: AlertContext) -> None:
     if match_result is None:
         log.info(f"[{ctx.alert_id}] match_stage: no match")
         from vehicle_matcher.matcher import (
-            NoMatch,  # 6B.90 package-form (per farm-surveillance-workflow skill)
+            NoMatch,  # 6B.90 package-form (per farm-vision skill)
         )
         ctx.match_verdict = NoMatch(
             reason="below_threshold",

@@ -1,4 +1,4 @@
-# Pre-commit hooks for farm-surveillance-refactor
+# Pre-commit hooks for REPO_PATH
 # ──────────────────────────────────────────────────────────────
 # Run manually:    .venv/bin/pre-commit run --all-files
 # Run on commit:   auto-runs when you `git commit` (after `pre-commit install`)

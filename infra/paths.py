@@ -6,7 +6,7 @@ THREAD SAFETY: single-threaded (constants computed at import time)
 
 INPUTS:
     - env FARMSURV_PRODUCTION (default "0") — bool flag, gates file handlers
-    - env FARMSURV_PROJECT_ROOT (default ~/farm-surveillance-refactor)
+    - env FARMSURV_PROJECT_ROOT (default ~/ai_camera_monitor)
     - env FARMSURV_DATA_DIR (default $PROJECT_ROOT/data)
     - env FARM_IDENTITY_BACKUP_DIR (default "") — face-recognition backup dir
     - env FARM_VEHICLE_ARRIVING_ENABLED (default "0") — bool feature flag
@@ -57,7 +57,7 @@ WHY HERE:
     in conftest.py and target a tmp_path copy without monkey-patching
     individual call sites. Two-system isolation contract (AGENTS.md §1)
     is enforced by _DEFAULT_PROJECT_ROOT pointing at the refactor tree,
-    never at ~/farm-surveillance/.
+    never at ~/legacy-tree/.
 
 CALLED BY:
     - listener.listener: LISTENER_LOG, ensure_dirs, all *_DIR constants
@@ -93,11 +93,9 @@ PRODUCTION_MODE = os.environ.get("FARMSURV_PRODUCTION", "0") == "1"
 # ZoneInfo is the stdlib tz implementation since 3.9 — no pytz dependency.
 LOCAL_TZ = ZoneInfo("America/New_York")
 
-# PROJECT_ROOT — the refactor listener is its own self-contained tree.
-# Hardcoded to the refactor root by default; tests override with
-# FARMSURV_PROJECT_ROOT. There is NO FARMSURV_PROJECT_ROOT pointing at
-# the old repo — that would defeat the two-system isolation contract.
-_DEFAULT_PROJECT_ROOT = os.path.expanduser("~/farm-surveillance-refactor")
+# PROJECT_ROOT — the ai_camera_monitor checkout root. Hardcoded default
+# for clean public install; override at runtime via FARMSURV_PROJECT_ROOT.
+_DEFAULT_PROJECT_ROOT = os.path.expanduser("~/ai_camera_monitor")
 PROJECT_ROOT = os.environ.get(
     "FARMSURV_PROJECT_ROOT", _DEFAULT_PROJECT_ROOT
 )
@@ -241,7 +239,7 @@ _DEFAULT_CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Ch
 BROWSER_CHROME_PATH = os.environ.get("BROWSER_CHROME_PATH", _DEFAULT_CHROME_PATH)
 
 # macOS Keychain — biometric encryption key storage
-KEYCHAIN_SERVICE = "farm-surveillance.faces"
+KEYCHAIN_SERVICE = "ai-camera-monitor.faces"
 KEYCHAIN_ACCOUNT = "primary"
 
 # Retention

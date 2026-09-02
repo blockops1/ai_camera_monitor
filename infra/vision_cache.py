@@ -79,7 +79,7 @@ from typing import Any, cast
 # Where to persist the cache. Lives next to data/frames/ so it's part of normal
 # backup scope, not in config (config is for things the user changes).
 # Uses infra.paths.DATA_DIR — this repo's DATA_DIR is the refactor tree,
-# NOT ~/farm-surveillance/data. Per AGENTS.md §3 isolation rule.
+# NOT ~/legacy-tree/data.
 from infra.paths import DATA_DIR as _DATA_DIR
 from infra.timezone import parse_iso as _parse_iso  # promoted from here (Phase 6B.99)
 
