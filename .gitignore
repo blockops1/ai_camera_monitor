@@ -1,0 +1,96 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Linters
+.ruff_cache/
+.mypy_cache/
+.pyright_cache/
+
+# Runtime data — gitignored, recreated on first run
+data/alerts/
+data/audit/
+data/audit.db
+data/probes/
+data/sessions/
+data/training_corpus/
+data/frames/
+data/crops/
+data/identities/
+data/state/
+data/vehicle_artifacts/
+data/last_person_seen.json
+data/last_vision.json
+
+# Pretrained ML model weights — downloaded via scripts/download_quick_classifier_model.sh
+# Not in git: large binary files bloat history. Re-download after clone.
+models/*.onnx
+models/*.pt
+models/*.bin
+
+# Operational logs — gitignored
+logs/
+
+# Config with secrets or operator-overridden values
+config/camera_creds.env
+config/quiet_hours.local.json
+
+# Credentials at project root (paths.py CAMERA_CREDS_FILE / TELEGRAM_CREDS_FILE / LLM_CREDS_FILE)
+camera-creds.env
+telegram-creds.env
+llm-creds.env
+
+# NEW-schema operator camera registry (Phase 6B.167 §13.2)
+cameras.env
+
+# Parity test fixtures — large binary blobs + private alert bodies
+tests/fixtures/parity/
+
+# Person-tracker project — separate repo, separate tree at HOME_DIR/person-tracker
+/person-tracker
+data/probe_results/
+
+# Phase 6B.116b archives — local-only, not for commit
+infra/_quick_classifier_archive_*.py.bak
+infra/_quick_classifier_archive_*.py.bak.v2
+listener/_listener_archive_*.py.bak
+listener/_motion_gate_dispatch_archive_*.py.bak
+listener/_motion_gate_pipeline_archive_*.py.bak
+listener/_motion_gate_pipeline_archive_*.py.bak.v2
+
+# One-off backup files written by scripts/enroll_vehicle_from_alert.py
+# before mutating data/vehicles/known_vehicles.json (manual recovery
+# point in case the JSON is corrupted by a bad write). Format:
+#   <original>.bak-YYYYMMDD_HHMMSS
+*.bak-*
+
+# Legacy person_a-face tuning probes (Phase 6B.165 era) — one-off session
+# scripts for ArcFace threshold exploration, never tracked, never run
+# by any operator. Drop in gitignore so they don't pollute git status.
+scripts/_test_ben_*.py
+scripts/_test_extract_ben_face.py
+
+# Pre-commit cache (auto-created, never commit)
+.pre-commit-cache/
+.mypy_cache/

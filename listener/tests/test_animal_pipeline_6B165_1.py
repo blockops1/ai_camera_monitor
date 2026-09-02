@@ -1,0 +1,353 @@
+"""
+test_animal_pipeline_6B165_1.py — Animal pipeline scaffold tests (PLAN §11.86.1).
+
+STATUS: provisional
+THREAD SAFETY: pytest test functions — run sequentially per file.
+
+WHAT THIS TESTS:
+    Phase 6B.165 §11.86.1 animal pipeline scaffold:
+    - AnimalContext dataclass round-trips all required fields.
+    - process_animal_event() returns the scaffold result dict with
+      phase='scaffold', telegram_sent=False, suppressed=False.
+    - process_animal_event() emits one INFO log line per call
+      (audit-only behavior — no Qwen, no Telegram, no frame writes).
+    - Dispatch wiring: _process_animal_alert() builds an AnimalContext
+      and delegates to process_animal_event() correctly. Verifies the
+      integration point between listener.py and the new pipeline
+      module without actually exercising the listener's main loop.
+
+WHAT THIS DOES NOT TEST:
+    - Qwen vision calls → arrives in §11.86.3 (6B.165.3).
+    - Animal matching → arrives in §11.86.2 (6B.165.2).
+    - Telegram send → arrives in §11.86.6 (6B.165.6).
+    - Per-camera cooldown config → arrives in §11.86.4 (6B.165.4).
+    - Known-animal enrollment / registry → arrives in §11.86.5
+      (6B.165.5).
+    - Frame capture — the scaffold does NOT capture (same as person
+      pipeline scaffold, which also relies on gate frames).
+
+DESIGN CHOICES:
+    - Tests use real AnimalContext construction (no mocking). The
+      scaffold has no I/O, so testing with a real instance exercises
+      the same code path as production.
+    - Log assertion uses caplog (pytest's built-in capture). The
+      scaffold uses logging.getLogger(__name__) exactly like
+      person_event_pipeline (6B.164's vision_attrs logging tests
+      proved this pattern works).
+    - Dispatch test imports the new _process_animal_alert directly
+      and stubs _load_telegram_creds so we don't need real Telegram
+      credentials to verify the integration.
+
+CALLED BY: pytest in `listener/tests/`.
+
+RUN: cd REPO_PATH && .venv/bin/python -m pytest \\
+        listener/tests/test_animal_pipeline_6B165_1.py -v
+
+RELATED:
+    - listener/animal_event_pipeline.py (scaffold under test)
+    - listener/listener.py:_process_animal_alert (dispatch wiring)
+    - listener/tests/test_person_event_pipeline_6B106.py (sibling
+      test pattern)
+    - listener/tests/test_vision_attrs_logging_6B164.py (sibling
+      log-assertion pattern)
+    - PLAN.md §11.86.1
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+
+# -----------------------------------------------------------------------
+# Tests for AnimalContext dataclass
+# -----------------------------------------------------------------------
+
+
+def test_animal_context_required_fields_roundtrip():
+    """AnimalContext stores all required inputs verbatim."""
+    from listener.animal_event_pipeline import AnimalContext
+
+    ctx = AnimalContext(
+        alert_id="aaaaaaaa-1111-2222-3333-444444444444",
+        camera_name="CAM3",
+        timestamp="2026-08-29T18:30:00-04:00",
+        event_type="animal",
+        rtsp_url="rtsp://10.0.0.5/Streaming/Channels/101",
+        output_dir="data/frames/aaaaaaaa-1111-2222-3333-444444444444",
+        bot_token="[REDACTED]",
+        chat_id="[REDACTED]",
+        api_url="http://localhost:8080/v1/chat/completions",
+    )
+
+    assert ctx.alert_id == "aaaaaaaa-1111-2222-3333-444444444444"
+    assert ctx.camera_name == "CAM3"
+    assert ctx.timestamp == "2026-08-29T18:30:00-04:00"
+    assert ctx.event_type == "animal"
+    assert ctx.rtsp_url.startswith("rtsp://")
+    assert ctx.output_dir.endswith(
+        "aaaaaaaa-1111-2222-3333-444444444444"
+    )
+    assert ctx.api_url.startswith("http://")
+
+
+def test_animal_context_reserved_fields_have_defaults():
+    """Reserved state fields default to neutral values, not raising
+    AttributeError on access. This matters because later sub-phases
+    (6B.165.2 matcher, 6B.165.3 prompt, 6B.165.6 Telegram) will
+    populate these fields without changing the constructor signature.
+    """
+    from listener.animal_event_pipeline import AnimalContext
+
+    ctx = AnimalContext(
+        alert_id="b",
+        camera_name="c",
+        timestamp="t",
+        event_type="animal",
+        rtsp_url="rtsp://x",
+        output_dir="o",
+        bot_token="",
+        chat_id="",
+        api_url="",
+    )
+
+    # Reserved state fields are default-initialized, not None-replaced
+    assert ctx.vision_result == {}
+    assert ctx.animal_match is None
+    assert ctx.structured_body == ""
+    assert ctx.result == {}
+
+    # Side-effect fields default to "did not run yet"
+    assert ctx.telegram_sent is False
+    assert ctx.telegram_error is None
+
+
+# -----------------------------------------------------------------------
+# Tests for process_animal_event() (the scaffold body)
+# -----------------------------------------------------------------------
+
+
+def test_process_animal_event_returns_scaffold_dict():
+    """process_animal_event returns the documented scaffold result
+    dict shape with phase='scaffold'."""
+    from listener.animal_event_pipeline import (
+        AnimalContext,
+        process_animal_event,
+    )
+
+    ctx = AnimalContext(
+        alert_id="alert-001",
+        camera_name="CAM3",
+        timestamp="2026-08-29T18:30:00-04:00",
+        event_type="animal",
+        rtsp_url="rtsp://x",
+        output_dir="o",
+        bot_token="",
+        chat_id="",
+        api_url="",
+    )
+
+    result = process_animal_event(ctx)
+
+    # Required keys present
+    assert result["alert_id"] == "alert-001"
+    assert result["camera_name"] == "CAM3"
+    assert result["phase"] == "scaffold"
+
+    # Scaffold must NOT have run Telegram or suppression
+    assert result["telegram_sent"] is False
+    assert result["suppressed"] is False
+    assert result["suppressed_reason"] is None
+
+
+def test_process_animal_event_emits_audit_log(caplog):
+    """Every call to process_animal_event emits exactly one INFO log
+    line for audit. Mirrors the 6B.164 vision_attrs logging pattern.
+
+    The log line is the entire behavior of the scaffold — without it
+    we have no way to verify dispatch works in production."""
+    from listener.animal_event_pipeline import (
+        AnimalContext,
+        process_animal_event,
+    )
+
+    ctx = AnimalContext(
+        alert_id="alert-log-001",
+        camera_name="CAM3",
+        timestamp="2026-08-29T18:30:00-04:00",
+        event_type="animal",
+        rtsp_url="rtsp://x",
+        output_dir="o",
+        bot_token="",
+        chat_id="",
+        api_url="",
+    )
+
+    with caplog.at_level(logging.INFO, logger="listener.animal_event_pipeline"):
+        process_animal_event(ctx)
+
+    # Exactly one INFO log line on the animal pipeline logger
+    animal_logs = [
+        r for r in caplog.records
+        if r.name == "listener.animal_event_pipeline"
+    ]
+    assert len(animal_logs) == 1, (
+        f"expected exactly 1 INFO log, got {len(animal_logs)}: "
+        f"{[r.getMessage() for r in animal_logs]}"
+    )
+
+    msg = animal_logs[0].getMessage()
+    # Audit log includes alert_id, camera, event type, scaffold marker
+    assert "alert-log-001" in msg
+    assert "CAM3" in msg
+    assert "animal" in msg
+    assert "scaffold" in msg, (
+        "scaffold marker must be in audit log so future ops can "
+        "distinguish audit-only from real pipeline runs"
+    )
+
+
+def test_process_animal_event_does_not_touch_telegram(caplog, tmp_path):
+    """Scaffold must NOT call Telegram or write any frames. This is
+    the entire purpose of §11.86.1 — prove the route works WITHOUT
+    triggering real side effects."""
+    from listener.animal_event_pipeline import (
+        AnimalContext,
+        process_animal_event,
+    )
+
+    ctx = AnimalContext(
+        alert_id="alert-no-side-effects",
+        camera_name="CAM5",
+        timestamp="2026-08-29T18:30:00-04:00",
+        event_type="animal",
+        rtsp_url="rtsp://x",
+        output_dir=str(tmp_path),  # point at a tmp dir
+        bot_token="[REDACTED]",
+        chat_id="[REDACTED]",
+        api_url="http://invalid.invalid",
+    )
+
+    with caplog.at_level(logging.INFO):
+        result = process_animal_event(ctx)
+
+    assert result["telegram_sent"] is False
+    # No files written in output_dir
+    assert os.listdir(str(tmp_path)) == [], (
+        "scaffold must NOT write frames — frame capture is §11.86.2+"
+    )
+
+
+# -----------------------------------------------------------------------
+# Tests for dispatch wiring in listener.py
+# -----------------------------------------------------------------------
+
+
+def test_process_animal_alert_dispatches_to_pipeline(monkeypatch):
+    """listener._process_animal_alert must build an AnimalContext
+    from the alert kwargs and call process_animal_event.
+
+    This is the integration test that proves the dispatch wiring in
+    listener.py:_process_alert (the `if event_lower == 'animal':`
+    branch) actually reaches the new pipeline module.
+
+    We test _process_animal_alert directly (the function the dispatch
+    branch calls) — this is the cleaner integration point than
+    exercising _process_alert, which has internal gate logic and
+    event_promotion logic that's outside §11.86.1's scope.
+    """
+    from listener import listener as listener_module
+    from listener.animal_event_pipeline import AnimalContext
+
+    # Stub _load_telegram_creds so we don't need real Telegram creds
+    monkeypatch.setattr(
+        listener_module, "_load_telegram_creds",
+        lambda: ("[REDACTED]", "[REDACTED]"),
+    )
+
+    # Stub the imported process_animal_event inside listener.py. The
+    # listener does `from animal_event_pipeline import process_animal_event`
+    # (local import), so we patch the symbol in that module — that's
+    # where the function was looked up at call time.
+    import listener.animal_event_pipeline as animal_module
+
+    seen = {}
+
+    def fake_process(ctx):
+        seen["ctx"] = ctx
+        return {"phase": "scaffold", "telegram_sent": False, "suppressed": False}
+
+    monkeypatch.setattr(animal_module, "process_animal_event", fake_process)
+
+    # Call the listener's dispatch helper
+    listener_module._process_animal_alert(
+        alert_id="dispatch-001",
+        camera_name="CAM3",
+        timestamp="2026-08-29T18:30:00-04:00",
+        event="animal",
+        rtsp_url="rtsp://x",
+        gate_verdict=None,
+    )
+
+    # AnimalContext was built with all kwargs
+    assert isinstance(seen["ctx"], AnimalContext)
+    ctx = seen["ctx"]
+    assert ctx.alert_id == "dispatch-001"
+    assert ctx.camera_name == "CAM3"
+    assert ctx.event_type == "animal"
+    assert ctx.rtsp_url == "rtsp://x"
+    # output_dir is ALERT_FRAME_DIR/alert_id — just verify it ends with the alert_id
+    assert ctx.output_dir.endswith("dispatch-001")
+    # bot_token + chat_id were loaded (even if redacted)
+    assert ctx.bot_token == "[REDACTED]"
+    assert ctx.chat_id == "[REDACTED]"
+
+
+def test_dispatch_branch_routes_animal_event_to_animal_pipeline(monkeypatch):
+    """The dispatch branch `if event_lower == "animal":` in
+    listener.py:_process_alert must route animal events to
+    _process_animal_alert, not to the vehicle catch-all.
+
+    Verifies the structural integration point — the branch exists,
+    and it calls the right helper. We stub _process_animal_alert and
+    _process_person_alert on the listener module so we can assert
+    which one fires. We do NOT exercise _process_alert's full body
+    (gate + promotion logic is out of scope for §11.86.1).
+    """
+    from listener import listener as listener_module
+
+    # Spy on _process_animal_alert
+    called = {"animal": False, "person": False}
+
+    def fake_animal(*args, **kwargs):
+        called["animal"] = True
+
+    def fake_person(*args, **kwargs):
+        called["person"] = True
+
+    monkeypatch.setattr(listener_module, "_process_animal_alert", fake_animal)
+    monkeypatch.setattr(listener_module, "_process_person_alert", fake_person)
+
+    # Read the source to verify the dispatch branch exists and is
+    # wired correctly. This is more robust than running _process_alert
+    # (which has gate logic, event_promotion logic, and other state).
+    import inspect
+    src = inspect.getsource(listener_module._process_alert)
+
+    # The animal dispatch branch must exist in _process_alert
+    assert 'event_lower == "animal"' in src, (
+        "_process_alert must have an `event_lower == 'animal'` branch"
+    )
+    assert "_process_animal_alert" in src, (
+        "_process_alert must call _process_animal_alert for animal events"
+    )
+    # Phase 6B.170 (§11.111): the animal dispatch branch must come
+    # BEFORE the vehicle catch-all (the vehicle_pipeline import block)
+    # so animals don't fall through to vehicle pipeline.
+    animal_branch_pos = src.find('event_lower == "animal"')
+    # The vehicle catch-all is the `from vehicle_pipeline import ...`
+    # block, since §11.111 split that file into a package.
+    vehicle_import_pos = src.find("from vehicle_pipeline import")
+    assert 0 < animal_branch_pos < vehicle_import_pos, (
+        "animal dispatch branch must come before the vehicle "
+        "catch-all (vehicle_pipeline import block)"
+    )

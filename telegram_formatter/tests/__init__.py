@@ -1,0 +1,1 @@
+"""telegram_formatter/ tests."""
