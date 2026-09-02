@@ -184,7 +184,6 @@ GROUPS: list[tuple[str, str, list[str]]] = [
             "infra.alert_prompt",
             "infra.alert_overrides_baseline",
             "infra.alert_overrides_offhours",
-            "infra.quiet_hours",
         ],
     ),
     (
