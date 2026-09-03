@@ -7,6 +7,42 @@ stability guarantees. Pin to a tag if you need reproducibility.
 
 ---
 
+## [0.4.2] — 2026-09-02
+
+Hotfix on top of v0.4.1. v0.4.1 fixed the import regression but
+introduced (and was followed by) two additional runtime bugs that
+crashed the pipeline on the most common suppression path — motion
+gate says "no subject" — preventing every alert from reaching the
+classification stage.
+
+### Fixed
+
+- **`listener/single_pipeline.py`** — defensive guard for empty
+  `frame_paths`. The motion gate can suppress an alert with no
+  subject detected across the 4-frame window, leaving `frame_paths`
+  empty. The pipeline previously called `frame_diff_fn(frame_paths)`
+  unconditionally, which raised `IndexError` inside
+  `listener._frame_diff_fn` (it tried to index `frame_paths[-1]`).
+  The pipeline now returns `PipelineResult(skipped_reason="no_frames",
+  log_only=True)` and never invokes `frame_diff_fn` on an empty list.
+
+- **`listener/listener.py`** — `log_fn` adapter for structured context.
+  The pipeline calls `log_fn(message, alert_id=..., camera=...,
+  event=...)`, but `log_fn` was wired to `log.info` directly. Stdlib
+  `logging.Logger.info` does **not** accept arbitrary kwargs; it
+  treats them as `LogRecord` factory fields, raising
+  `TypeError: Logger._log() got an unexpected keyword argument
+  'alert_id'`. Added `listener._log_with_context(message, **context)`
+  which stringifies the context and appends it to the message.
+
+### Tests
+
+- `listener/tests/test_single_pipeline.py::TestEmptyFramesGate` —
+  two cases covering (1) empty `frame_paths` returns
+  `skipped_reason="no_frames"` with `log_only=True` and logs the
+  suppression reason; (2) `frame_diff_fn` is never invoked when
+  `frame_paths` is empty.
+
 ## [0.4.1] — 2026-09-02
 
 Hotfix on top of v0.4.0. v0.4.0 shipped a critical regression that broke

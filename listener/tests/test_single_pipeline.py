@@ -213,6 +213,43 @@ class TestRtspGate:
         assert len(deps["qwen_fn"].calls) >= 1
 
 
+class TestEmptyFramesGate:
+    """§11.115.16 — defensive guard for gate-suppressed (empty frame_paths) alerts."""
+
+    def test_drops_alert_when_no_frames(self) -> None:
+        deps = _make_deps(
+            qwen_responses=[],
+            has_rtsp=True,
+        )
+        result = single_pipeline.run(
+            alert_id="alert-nof",
+            camera_name="Outside Front Solar",
+            camera_code="CAM6",
+            captured_at="2026-09-02T18:00:00.000Z",
+            frame_paths=[],
+            event_type="vehicle",
+            **deps,
+        )
+        assert result.skipped_reason == "no_frames"
+        assert result.sent_telegram is False
+        assert result.log_only is True
+        assert deps["frame_diff_fn"].call_count == 0
+        assert any("no frames from motion gate" in c.message for c in deps["log_fn"].calls)
+
+    def test_no_frames_does_not_call_frame_diff(self) -> None:
+        deps = _make_deps(qwen_responses=[], has_rtsp=True)
+        single_pipeline.run(
+            alert_id="alert-nof-2",
+            camera_name="Outside Front Solar",
+            camera_code="CAM6",
+            captured_at="2026-09-02T18:00:00.000Z",
+            frame_paths=[],
+            event_type="vehicle",
+            **deps,
+        )
+        assert deps["frame_diff_fn"].call_count == 0
+
+
 class TestSinglePipelineVehicle:
     """vehicle class → vehicle matcher → Telegram."""
 

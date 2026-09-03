@@ -1,6 +1,6 @@
 [project]
 name = "ai_camera_monitor"
-version = "0.4.1"
+version = "0.4.2"
 description = "Self-hosted Reolink-camera-to-Telegram surveillance pipeline. See README.md for architecture, AGENT-MATCHER-TUNING-LESSONS.md for matcher tuning field guide."
 requires-python = ">=3.11"
 # Runtime deps match the project's tested Python environment.

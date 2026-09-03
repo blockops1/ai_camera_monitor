@@ -179,6 +179,26 @@ def run(
         )
 
     # ----- Stage 2: pairwise diff → crop_a + crop_b -----
+    # Defensive: motion gate can suppress with empty frame_paths (no subject
+    # found across the 4-frame window). Treat that as a log-only "no_frames"
+    # outcome so we don't crash in frame_diff_fn — the gate already made the
+    # suppress decision, the cascade should honor it without throwing.
+    if not frame_paths:
+        log_fn(
+            "single_pipeline: skipped (no frames from motion gate)",
+            alert_id=alert_id,
+            camera=camera_name,
+            event=event_type,
+        )
+        return PipelineResult(
+            alert_id=alert_id,
+            classify_label=None,
+            classify_fallback_used=False,
+            skipped_reason="no_frames",
+            sent_telegram=False,
+            log_only=True,
+        )
+
     crop_a, crop_b = frame_diff_fn(frame_paths)
 
     # ----- Stage 3: Qwen call 1 (shared classify) -----

@@ -1738,6 +1738,24 @@ def _load_telegram_creds() -> tuple[str, str]:
 
 
 
+def _log_with_context(message: str, **context: Any) -> None:
+    """Adapter: single_pipeline.log_fn expects (msg, **context).
+
+    Python's stdlib logging.Logger.info(msg, *args, **kwargs) treats
+    kwargs as fields for the LogRecord factory, not as format args —
+    so `log.info("msg", alert_id="x")` raises
+    `TypeError: Logger._log() got an unexpected keyword argument 'alert_id'`.
+
+    This adapter stringifies the context and appends it to the message,
+    preserving the structured fields that single_pipeline passes in.
+    """
+    if context:
+        suffix = " ".join(f"{k}={v!r}" for k, v in context.items())
+        log.info(f"{message} {suffix}")
+    else:
+        log.info(message)
+
+
 def _process_alert(
     alert_id: str, camera_name: str, timestamp: str, event: str, rtsp_url: str
 ) -> None:
@@ -1989,7 +2007,7 @@ def _process_alert(
         qwen_fn=_qwen_fn,
         matchers=matchers,
         telegram_fn=_telegram_no_op,
-        log_fn=log.info,
+        log_fn=_log_with_context,
         cooldown=pipeline_cooldown,
     )
 
