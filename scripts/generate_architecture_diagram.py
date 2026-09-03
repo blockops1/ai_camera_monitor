@@ -223,7 +223,7 @@ GROUPS: list[tuple[str, str, list[str]]] = [
             "telegram_formatter.render_qwen",
             "telegram_formatter.composite_telegram",
             "telegram_formatter.vehicle_alert",
-            "infra.<nas>_preview",
+# removed by release-pipeline: Reference to stripped infra.synology_preview module
         ],
     ),
     (

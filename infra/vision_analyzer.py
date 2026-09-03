@@ -214,8 +214,8 @@ def analyze_frames(
         # flat identification fields. Result: Qwen drops make/model/
         # vehicle_features from the response, extract_signature() sees only
         # {color: white, body_style_hint: pickup}, the matcher falls back to
-        # color+type-only scoring, and name two's white Silverado gets
-        # misidentified as name one's F-350 (alert ddeaefc5 false positive,
+        # color+type-only scoring, and [name two]'s pickup gets
+        # misidentified as [name one]'s pickup (alert ddeaefc5 false positive,
         # 14:02 EDT). VEHICLE_CROP_SCHEMA_JSON gives Qwen permission to
         # return the rich identification fields the crop prompt needs.
         # Top-level fallback path in extract_signature()

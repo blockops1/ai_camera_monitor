@@ -40,7 +40,7 @@ from vehicle_matcher import MatchVerdict, NoMatch
 
 KNOWN_TESLA = {
     "id": "v_owner1_darkblue_tesla_y",
-    "label": "name one's Dark Blue Tesla Model Y",
+    "label": "[name one]'s sedan",
     "color": "dark blue",
     "type": "SUV",
     "make": "Tesla",

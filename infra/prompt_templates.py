@@ -879,7 +879,7 @@ def select_prompt_template(
     # Without this, callers like vehicle_identifier.identify_from_crops()
     # that pass event_hint=None fall through to PROMPT_TEMPLATE (legacy),
     # even though they explicitly asked for the crop prompt. That was the
-    # root cause of name two's Silverado being misidentified as name one's F-350
+    # root cause of [name two]'s pickup being misidentified as [name one]'s pickup
     # since 6B.65 — Qwen was being asked the legacy 6-field question
     # instead of make/model/vehicle_features.
     if mode == "crop":

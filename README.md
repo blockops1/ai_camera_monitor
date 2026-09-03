@@ -676,7 +676,7 @@ of the manual "before pushing" gate.
 - **§11.42 — Color penalty too weak (name four blue / name two white case).**
   `vehicle_matcher/scoring.py` treats color mismatch as a single zero
   dimension among 7. name four's blue Chevrolet (not yet enrolled) is
-  being matched to name two's white Chevrolet Silverado at score 4.50
+  being matched to [name two]'s pickup at score 4.50
   (above the 0.6 threshold). Three proposed fixes: (a) enroll
   name four's truck, (b) strengthen the color penalty to a negative
   score, (c) both. Awaiting Note decision.

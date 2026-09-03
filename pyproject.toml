@@ -1,6 +1,6 @@
 [project]
 name = "ai_camera_monitor"
-version = "0.1.0"
+version = "v0.4.4"
 description = "Self-contained listener + infra for the Reolink farm surveillance setup. See PLAN.md for architecture, AGENTS.md for workflow."
 requires-python = ">=3.14,<3.15"
 # Runtime deps match the old listener at <legacy-repo>/.venv/ exactly.
