@@ -1,0 +1,28 @@
+{
+  "_comment": "Motion-detection recipe for RLC-510A fleet. Phase.166 §11.87.3. Loaded by infra/recipe.py, applied via scripts/tune_510a_motion_sensitivity.py <ip> --apply. Schema documented in docs/PROPOSAL-script-parameterization.md and infra/recipe.py docstring.",
+    "fleet": {
+    "_comment": "Baseline for all four 510As. Mirrors the RECIPE dict in scripts/tune_510a_motion_sensitivity.py (post-2026 motion 25 raise from 15).",
+    "motion_sensitivity": 25,
+    "smart_person": 50,
+    "smart_vehicle": 30,
+    "smart_pet": 30,
+    "delay_person": 0,
+    "delay_vehicle": 2,
+    "delay_pet": 2
+  },
+  "cameras": {
+    "CAM5": {
+      "_comment": "2026-08-30: motion 25 -> 40 after name four truck missed (slow arrival, too few changed macroblocks at 25). Monitor for false alarms; revert to 30 or 25 if noise climbs.",
+      "motion_sensitivity": 40
+    },
+    "CAM3": {
+      "_comment": "Fleet default. Explicit entry documents intent (vs implicit fall-through)."
+    },
+    "CAM4": {
+      "_comment": "Fleet default. Explicit entry documents intent (vs implicit fall-through)."
+    },
+    "CAM6": {
+      "_comment": "Fleet default. Explicit entry documents intent (vs implicit fall-through)."
+    }
+  }
+}
