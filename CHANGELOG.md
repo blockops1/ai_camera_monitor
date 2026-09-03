@@ -7,6 +7,83 @@ stability guarantees. Pin to a tag if you need reproducibility.
 
 ---
 
+## [0.4.1] — 2026-09-02
+
+Hotfix on top of v0.4.0. v0.4.0 shipped a critical regression that broke
+the pipeline at import time when the listener is launched as a script
+(via launchd plist). This patch fixes the import and restores pipeline
+operation. No behavior changes; pin to v0.4.0 only if you do not run
+the listener via a launchd plist or systemd unit that invokes
+`listener/listener.py` directly.
+
+### Fixed
+
+- **`listener/single_pipeline.py`** — relative import for sibling module
+  (`from .pipeline_filters import …`). The v0.4.0 release used an
+  absolute import (`from listener.pipeline_filters import …`) which
+  fails at runtime with `ModuleNotFoundError: 'listener' is not a
+  package` when `listener.py` is launched as a top-level script. This
+  affected every operator running the listener via launchd, systemd,
+  or any host that does not invoke it as `python -m listener.listener`.
+
+## [0.4.0] — 2026-09-02
+
+Single-pipeline architectural release. Consolidates the
+classify → per-class pipeline (person/animal/vehicle) into one
+orchestrator (`listener/single_pipeline.py`) with shared cooldown
++ vehicle camera allowlist between Qwen call 1 (shared classify)
+and Qwen call 2 (per-class cascade). End-user behavior unchanged
+from v0.3.0 when run with the default config; the pipeline now
+applies a 15-minute property-wide cooldown for person + animal
+events after Qwen call 1 confirms the class, and restricts vehicle
+matching to the two designated solar cameras.
+
+### Added
+
+- **`listener/single_pipeline.py`** — new orchestrator. Replaces the
+  per-class pipeline dispatch with a single webhook → RTSP-presence
+  → pairwise diff → 2 crops → Qwen call 1 (shared classify) →
+  PipelineCooldown (15-min, property-wide, person+animal only) →
+  VEHICLE_CAMERAS_ALLOWLIST (CAM5/CAM6 only) → Qwen call 2
+  (per-class) → matcher → Telegram flow.
+- **`listener/pipeline_filters.py`** — `PipelineCooldown` class
+  (property-wide, per-class, time-window throttle) + the
+  `VEHICLE_CAMERAS_ALLOWLIST` frozenset (resolves friendly names to
+  CAM{N} codes via `infra.cameras.code_for()`; falls back to friendly
+  names when `cameras.env` is unavailable).
+- **`listener/matcher_adapters.py`** — uniform adapter shape for
+  person/animal/vehicle matcher output. Adapters normalize each
+  matcher’s native result schema into a single shape for downstream
+  Telegram formatting.
+- **`infra/two_call_cascade.py`** — split into `cascade_call1()`
+  (shared classify) and `cascade_call2()` (per-class).
+- **New prompt + schema modules**:
+  `infra/classify_prompt.py`, `infra/classify_schema.py`,
+  `infra/classify_validator.py`, `infra/person_prompt.py`,
+  `infra/animal_prompt.py`, `infra/vehicle_prompt.py`,
+  plus the matching `_template` variants.
+- **New tests**: `test_pipeline_filters_111513.py`,
+  `test_pipeline_filters_integration_111513.py`,
+  `test_single_pipeline.py`, `test_matcher_adapters.py`,
+  `test_classify_prompt.py`, `test_two_call_cascade.py`,
+  `test_person_prompt.py`, `test_animal_prompt.py`,
+  `test_vehicle_prompt.py`.
+
+### Notes
+
+- The two-crop invariant is preserved: webhook → pairwise diff →
+  exactly `crop_a` + `crop_b`.
+- Vehicle matching is gated by `VEHICLE_CAMERAS_ALLOWLIST` which
+  resolves to `{"CAM5", "CAM6"}` when `cameras.env` is loaded, or
+  `{"Outside Front Solar", "Outside Back Solar"}` as a defensive
+  fallback.
+- Property-wide cooldown applies to person + animal only. Vehicle
+  alerts are cooldown-free.
+- **Known v0.4.0 regression (fixed in v0.4.1)**: launched via a
+  top-level script (e.g. via launchd plist), `from listener.pipeline_filters`
+  fails with `ModuleNotFoundError`. Pin to v0.4.1 or apply the
+  one-line relative-import patch documented above.
+
 ## [0.3.0] — 2026-09-02
 
 Incremental release on top of v0.2.1. Multi-area refactor and tuning hardening

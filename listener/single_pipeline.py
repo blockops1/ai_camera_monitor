@@ -66,7 +66,14 @@ from typing import Any
 
 from infra.classify_schema import ClassLabel
 from infra.two_call_cascade import cascade_call1, cascade_call2
-from listener.pipeline_filters import (
+
+# Use relative import for sibling module (listener.pipeline_filters).
+# When listener.py is launched as a top-level script (e.g. via launchd plist),
+# sys.modules['listener'] gets bound to the listener.py FILE, not the
+# listener/ PACKAGE - so absolute 'from listener.pipeline_filters import ...'
+# fails with "'listener' is not a package". Relative imports work in both
+# contexts.
+from .pipeline_filters import (
     ANIMAL_COOLDOWN_SECONDS,
     PERSON_COOLDOWN_SECONDS,
     VEHICLE_CAMERAS_ALLOWLIST,
