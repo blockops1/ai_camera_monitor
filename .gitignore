@@ -95,3 +95,8 @@ scripts/_test_extract_ben_face.py
 .pre-commit-cache/
 .mypy_cache/
 .venv-test/
+
+# Build artifacts (pip install -e . creates these)
+*.egg-info/
+*.pyc
+

@@ -46,7 +46,7 @@ from pathlib import Path
 _root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_root))
 
-from listener.vehicle_pipeline import AlertContext, VISION_CONFIDENCE_FLOOR
+from listener.vehicle_pipeline import VISION_CONFIDENCE_FLOOR, AlertContext
 from listener.vehicle_pipeline.match import match_stage
 from vehicle_matcher.matcher import NoMatch
 

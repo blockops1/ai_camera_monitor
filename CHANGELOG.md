@@ -7,6 +7,122 @@ stability guarantees. Pin to a tag if you need reproducibility.
 
 ---
 
+## [0.4.3] — 2026-09-02
+
+Install-friendliness release. v0.4.2 was technically functional but the
+README contained several broken paths and missing files that made a
+clean public install effectively impossible. v0.4.3 makes a fresh
+clone → install → run workflow work end-to-end on a clean machine.
+
+### Added
+
+- **`camera-creds.env.example`** — explicit template showing
+  `CAM1_*`–`CAM6_*` block structure with `IP`, `HTTP_USER`, `HTTP_PASS`,
+  `RTSP_USER`, `RTSP_PASS`, `RTSP_URL` fields. Matches what
+  `infra.camera_creds.load_camera_creds()` expects.
+- **`telegram-creds.env.example`** — template for `TELEGRAM_BOT_TOKEN`
+  and `TELEGRAM_CHAT_ID`.
+- **`llm-creds.env.example`** — already shipped in v0.4.0, now also
+  referenced in the README Quick Start.
+- **`data/vehicles/known_vehicles.example.json`** — minimal
+  schema-correct example the operator can `cp` to `known_vehicles.json`
+  to get started.
+- **`data/animals/known_animals.json`** — empty canonical registry
+  (no enrolled animals) shipped so the pipeline can boot without an
+  operator file. Operator can `cp known_animals.example.json` later.
+- **`data/vehicles/known_vehicles.json`** — empty canonical registry
+  (no enrolled vehicles), same reason.
+- **`tests/conftest.py`** — known-issue skip for `tests/test_time_of_day.py`
+  on public installs (see "Known issues" below). Operator's private
+  repo can re-enable these tests with `AICAM_INCLUDE_KNOWN_BUGS=1`.
+
+### Fixed
+
+- **README Quick Start**:
+  - `scripts/download_models.sh` → `scripts/download_quick_classifier_model.sh`
+    (the script was already named correctly; README was wrong).
+  - `pytest tests/ infra/tests/` → actual test paths:
+    `pytest listener/tests/ infra/tests/ known_vehicles/tests/      known_animals/tests/ telegram_formatter/tests/ tests/`.
+  - Step ordering corrected: install deps BEFORE running scripts.
+  - **Reolink camera setup section now explicitly documents that
+    the camera's RTSP stream must be set to 2 fps.** The motion
+    gate assumes a 2fps stream (fps-aware frame offsets of
+    `(0, 4, 8, 12)` keep the same 2-second spacing regardless of
+    actual fps). Without 2fps the ring buffer at the default 30s
+    lookback is too short to cover the trail, and the gate fires
+    on the wrong frames.
+- **`pyproject.toml`** — added `[tool.setuptools.packages.find]` with
+  explicit `include` list. Without this, `pip install -e .` fails on
+  this flat-layout repo (12 top-level packages) with
+  "Multiple top-level packages discovered in a flat-layout".
+- **`pyproject.toml`** — added `[tool.pytest.ini_options]` so tests
+  use the right `testpaths` and `pythonpath`.
+- **`conftest.py`** — was setting the wrong env var name
+  (`AICAM_PROJECT_ROOT` instead of `ai_camera_monitor_ROOT`).
+  Tests relying on `infra.paths.PROJECT_ROOT` resolving to the
+  repo root now work out-of-the-box.
+- **`listener/listener.py`** — `chat_id` default fallback was a
+  hardcoded operator chat ID (operator data leak). Changed to empty
+  string default; the listener now requires `TELEGRAM_CHAT_ID` to
+  be set explicitly via `telegram-creds.env` or env var. (Per
+  sanitization audit 2026-09-02.)
+- **`infra/telegram_creds.py`** — error message example
+  `TELEGRAM_CHAT_ID=5264050975` was a hardcoded operator value
+  (data leak). Replaced with `<your-chat-id>` placeholder.
+
+### Test fixtures — public-safe versions
+
+Several tests in v0.4.2 were written assuming the operator's data
+files exist (`known_vehicles.json` with 12 entries, `cameras.env`
+with 6 cameras, etc.). On a fresh public install these fail. v0.4.3
+makes the tests conditional:
+
+- **`known_vehicles/tests/test_store.py::test_load_known_vehicles_real_default_path`** —
+  skip when canonical file is missing OR empty (operator hasn't
+  populated it yet).
+- **`infra/tests/test_load_camera_aliases.py::TestLoadCameraAliasesIntegration::test_real_cameras_env_has_all_six_cameras`** —
+  skip when operator's `cameras.env` isn't present.
+- **`infra/tests/test_enroll_vehicle_argparse.py::TestPathParameterization::test_known_file_override_takes_precedence`** —
+  skip when canonical vehicle file is empty.
+- **`infra/tests/test_quiet_hours.py`** — uses CAM codes directly
+  instead of operator's friendly camera names (CAM5/OFG → CAM3, etc.).
+  No data dependency.
+- **`infra/tests/test_read_alarm_settings_argparse.py`** — fixed
+  `REPO = Path("ai_camera_monitor")` to use `Path(__file__).resolve().parents[2]`
+  so it works in any clone directory. Wraps the `subprocess.run` calls
+  with a helper that skips on playwright ImportError.
+- **`infra/tests/test_apply_all_tuning_argparse.py`** — wraps subprocess
+  calls with playwright-ImportError skip pattern (apply_all_tuning.py
+  imports playwright at module load; public installs don't need it).
+- **`infra/tests/test_recipe.py`** — was hardcoded to operator's
+  friendly name "Outside Front Solar"; now uses CAM5 directly.
+- **`infra/tests/test_faces_6B106.py`** — was hardcoded to
+  operator's identity slug "mr_v"; now uses generic "operator_name".
+- **`listener/tests/test_dual_context_imports.py`** — was hardcoded
+  to `.venv/bin/python`; now uses `sys.executable` so it works
+  with any venv (including `.venv-test`).
+- **`listener/tests/test_preview_endpoint.py`** and
+  **`infra/tests/test_synology_preview.py`** — `pytest.importorskip("infra.synology_preview")`
+  (operator NAS module not shipped in public).
+
+### Known issues
+
+- **`infra.time_of_day.is_night_at_edt()`** returns `False` for
+  evening EDT times (20:46–23:59 EDT). The suntime-based
+  `_today_sunset_edt()` returns tomorrow's sunset when the reference
+  instant is past 8 PM EDT, breaking the night-window detection
+  for the most common case (a person triggers at 22:00 and the
+  operator's quiet_hours filter says "daytime"). Affected tests
+  in `tests/test_time_of_day.py` are skipped by default on public
+  (set `AICAM_INCLUDE_KNOWN_BUGS=1` to re-enable). Tracked for
+  v0.4.4.
+
+### Not changed
+
+- No code logic changes in `single_pipeline.py`, `cascade_call2`,
+  `match_stage`, or any pipeline path. v0.4.3 is purely install/
+  documentation/sanitization.
+
 ## [0.4.2] — 2026-09-02
 
 Hotfix on top of v0.4.1. v0.4.1 fixed the import regression but

@@ -16,6 +16,8 @@ from __future__ import annotations
 import io
 from contextlib import redirect_stderr
 
+import pytest
+
 from infra.cameras import _parse_aliases_from_kv, load_camera_aliases
 
 
@@ -38,7 +40,7 @@ class TestParseAliasesFromKv:
         assert prev == {"OFS": "CAM5"}
 
     def test_comma_separated_shorthand(self):
-        snap, prev = _parse_aliases_from_kv(
+        snap, _prev = _parse_aliases_from_kv(
             {"CAM5_SNAPSHOT_ALIAS": "OFS,of-solar,solar"}
         )
         assert snap == {"OFS": "CAM5", "of-solar": "CAM5", "solar": "CAM5"}
@@ -70,7 +72,7 @@ class TestParseAliasesFromKv:
 
     def test_lowercase_alias_kind_ignored(self):
         # Regex requires uppercase suffix per the spec.
-        snap, prev = _parse_aliases_from_kv({"CAM5_snapshot_alias": "OFS"})
+        snap, _prev = _parse_aliases_from_kv({"CAM5_snapshot_alias": "OFS"})
         assert snap == {}
 
     def test_multiple_cameras(self):
@@ -95,6 +97,12 @@ class TestLoadCameraAliasesIntegration:
     """End-to-end tests using real cameras.env + tmp_path overrides."""
 
     def test_real_cameras_env_has_all_six_cameras(self, monkeypatch):
+        # Public-repo version: skip when no operator cameras.env is present.
+        # (The original test loaded the operator's real cameras.env which
+        # isn't shipped in the public repo.)
+        import os as _os
+        if not _os.path.exists("cameras.env"):
+            pytest.skip("Public repo: requires operator's cameras.env (created by copying camera-creds.env.example)")
         # Integration check: when the real cameras.env is present
         # (which is true on this dev machine), we get 11+ alias
         # entries split across snapshot + preview dicts.
@@ -102,8 +110,7 @@ class TestLoadCameraAliasesIntegration:
         snap, prev = load_camera_aliases()
         assert len(snap) >= 6
         assert len(prev) >= 6
-        # OFS appears in both (it's the gatekeeper — operator types it
-        # in chat for both /snapshot and /preview).
+        # CAM5 (Outside Front Solar) appears in both (it's the gatekeeper).
         assert snap.get("OFS") == "CAM5"
         assert prev.get("OFS") == "CAM5"
 

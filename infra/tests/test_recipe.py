@@ -296,11 +296,12 @@ class TestResolveForCamera:
 
     def test_real_recipe_file_resolution(self, real_recipe_file):
         # End-to-end: load + resolve against the committed file.
-        result = resolve_for_camera("Outside Front Solar", env_path=real_recipe_file)
+        # CAM5 has motion_sensitivity=40 override; CAM3 falls back to fleet (25).
+        result = resolve_for_camera("CAM5", env_path=real_recipe_file)
         assert result["motion_sensitivity"] == 40  # override
         assert result["smart_person"] == 50         # fleet
 
-        result_garage = resolve_for_camera("Outside Front Garage", env_path=real_recipe_file)
+        result_garage = resolve_for_camera("CAM3", env_path=real_recipe_file)
         assert result_garage["motion_sensitivity"] == 25  # fleet
 
     def test_does_not_mutate_input_recipe(self):

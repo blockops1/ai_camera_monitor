@@ -26,10 +26,14 @@ def test_listener_imports_cleanly_in_main_mode():
     working directory set to PROJECT_ROOT (matches launchd plist). Catches
     the ModuleNotFoundError bug we hit in production.
     """
-    # Spawn a fresh python process with cwd=PROJECT_ROOT (production mode)
+    # Spawn a fresh python process with cwd=PROJECT_ROOT (production mode).
+    # Use sys.executable (whatever python pytest is running with) instead of
+    # hardcoded .venv/bin/python — fresh public installs may not have a .venv.
+    import sys as _sys
+    _python = _sys.executable
     result = subprocess.run(
             [
-                str(PROJECT_ROOT / ".venv" / "bin" / "python"),
+                _python,
                 "-c",
                 (
                     "import listener.listener as L; "
@@ -85,9 +89,12 @@ def test_lazy_motion_gate_imports_in_main_mode_6B161():
     PROJECT_ROOT (matches launchd plist), and assert it resolves to a
     class object.
     """
+    # Use sys.executable for fresh public installs without .venv.
+    import sys as _sys2
+    _python2 = _sys2.executable
     result = subprocess.run(
         [
-            str(PROJECT_ROOT / ".venv" / "bin" / "python"),
+            _python2,
             "-c",
             # Mirror the lazy-import shape from listener.py:1747/1803:
             (
@@ -157,11 +164,14 @@ def test_listener_lazy_imports_work_with_real_gate_pass_verdict_6B161():
         "    and v.reason.endswith('_not_vehicle_no_pipeline')\n"
         ")\n"
         "print(f'decision={v.decision} reason={v.reason} '\n"
-        "      f'suppress_override={is_person_suppress_on_vehicle}')\n"
+        "      f'suppress_override={is_person_suppress_on_vehicle}')" + "\n"
     )
+    # Use sys.executable for fresh public installs without .venv.
+    import sys as _sys3
+    _python3 = _sys3.executable
     result = subprocess.run(
         [
-            str(PROJECT_ROOT / ".venv" / "bin" / "python"),
+            _python3,
             "-c",
             inline_script,
         ],

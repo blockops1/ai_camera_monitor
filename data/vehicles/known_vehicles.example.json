@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "vehicles": [
+    {
+      "id": "v_example_white_pickup",
+      "label": "my white pickup (replace with your own fleet)",
+      "owner": "your name",
+      "color": "white",
+      "type": "pickup",
+      "make": "Ford",
+      "model": "F-150",
+      "vehicle_features": {
+        "wheel_style": "alloy",
+        "bed_cover": "none"
+      }
+    }
+  ]
+}

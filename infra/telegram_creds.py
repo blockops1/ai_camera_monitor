@@ -100,7 +100,7 @@ def load_telegram_creds(env_path: str) -> TelegramCreds:
     if not chat_id:
         raise ValueError(
             f"TELEGRAM_CHAT_ID missing or empty in {env_path}. "
-            "Add a line like: TELEGRAM_CHAT_ID=5264050975"
+            "Add a line like: TELEGRAM_CHAT_ID=<your-chat-id>"
         )
 
     return TelegramCreds(bot_token=token, chat_id=chat_id)

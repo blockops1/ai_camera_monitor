@@ -4,7 +4,7 @@ The runtime default in infra/paths.py is ~/ai_camera_monitor (the public
 install location), but tests run from the source checkout and need the
 project root resolved to that checkout, not the install path.
 
-Override via AICAM_PROJECT_ROOT at pytest invocation if you need a
+Override via ai_camera_monitor_ROOT at pytest invocation if you need a
 different root (rare — only when running integration tests against a
 deployed install).
 """
@@ -18,4 +18,5 @@ if _REPO_ROOT not in sys.path:
 
 # Set PROJECT_ROOT for tests so MOTION_RECIPE_FILE / DATA_DIR etc.
 # resolve to the checkout, not ~/ai_camera_monitor.
-os.environ.setdefault("AICAM_PROJECT_ROOT", _REPO_ROOT)
+os.environ.setdefault("ai_camera_monitor_ROOT", _REPO_ROOT)
+os.environ.setdefault("ai_camera_monitor_DATA_DIR", os.path.join(_REPO_ROOT, "data"))

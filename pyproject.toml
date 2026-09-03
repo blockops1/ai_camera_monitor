@@ -1,6 +1,6 @@
 [project]
 name = "ai_camera_monitor"
-version = "0.4.2"
+version = "0.4.3"
 description = "Self-hosted Reolink-camera-to-Telegram surveillance pipeline. See README.md for architecture, AGENT-MATCHER-TUNING-LESSONS.md for matcher tuning field guide."
 requires-python = ">=3.11"
 # Runtime deps match the project's tested Python environment.
@@ -45,6 +45,38 @@ testpaths = ["."]
 pythonpath = ["."]
 addopts = "-q --tb=short"
 
+# Explicit package discovery (setuptools refuses flat-layout with 12 top-level
+# packages without this). Include all the Python packages, exclude tests / data.
+[tool.setuptools.packages.find]
+include = [
+    "data",
+    "infra",
+    "infra.*",
+    "config",
+    "pipeline",
+    "listener",
+    "known_animals",
+    "known_animals.*",
+    "known_vehicles",
+    "known_vehicles.*",
+    "vehicle_matcher",
+    "vehicle_matcher.*",
+    "vehicle_position",
+    "vehicle_position.*",
+    "telegram_formatter",
+    "telegram_formatter.*",
+    "vehicle_identifier",
+    "vehicle_identifier.*",
+]
+exclude = [
+    "tests",
+    "tests.*",
+    "models",
+    "scripts",
+    "skills",
+    "docs",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
@@ -56,10 +88,11 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-# N999 fires on package names that contain hyphens
-# (e.g. "ai_camera_monitor" — the repo root). The package
-# names in __init__.py files are correctly named after the repo. We
-# ignore N999 for that reason.
+# Treat E402 as enabled so "import X after conditional sys.path manipulation"
+# (common in tests/conftest.py patterns) doesn't trigger RUF100 "unused noqa".
+# N999 fires on package names that contain hyphens (e.g. "ai_camera_monitor" —
+# the repo root). The package names in __init__.py files are correctly named
+# after the repo. We ignore N999 for that reason.
 ignore = ["N999"]
 
 [tool.ruff.lint.per-file-ignores]

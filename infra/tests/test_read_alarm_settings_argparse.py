@@ -20,7 +20,7 @@ from unittest import mock
 
 import pytest
 
-REPO = Path("ai_camera_monitor")
+REPO = Path(__file__).resolve().parents[2]  # works for any clone dir name
 SCRIPT = REPO / "scripts" / "read_alarm_settings.py"
 
 
@@ -123,16 +123,29 @@ class TestLocalCredsRemoved:
         )
 
 
+def _run_help_for_tests():
+    """Run scripts/read_alarm_settings.py --help.
+
+    Skip on public install if playwright (operator-only browser automation)
+    is not installed. The script's top-level playwright import fails when
+    missing, breaking every --help invocation.
+    """
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--help"],
+        capture_output=True, text=True, cwd=str(REPO),
+        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(REPO)},
+    )
+    if "ModuleNotFoundError: No module named 'playwright'" in result.stderr:
+        pytest.skip("read_alarm_settings.py requires playwright (operator-only)")
+    return result
+
+
 class TestArgparseFlagsPresent:
     """Verify the new CLI flags were added."""
 
     def test_help_shows_new_flags(self, capsys):
         """--help must list --label, --recipe, --recipe-path."""
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--help"],
-            capture_output=True, text=True, cwd=str(REPO),
-            env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(REPO)},
-        )
+        result = _run_help_for_tests()
         assert result.returncode == 0, result.stderr
         out = result.stdout + result.stderr
         assert "--label" in out, f"--help missing --label flag:\n{out}"
@@ -141,11 +154,8 @@ class TestArgparseFlagsPresent:
 
     def test_existing_flags_preserved(self):
         """--json, --headed, ip positional must still exist."""
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--help"],
-            capture_output=True, text=True, cwd=str(REPO),
-            env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(REPO)},
-        )
+        result = _run_help_for_tests()
+        assert result.returncode == 0
         out = result.stdout + result.stderr
         assert "--json" in out
         assert "--headed" in out
@@ -538,11 +548,7 @@ class TestPhase6B167CameraFlag:
     """Phase 6B.167 §13.4 — `--camera <label>` filters to a single camera."""
 
     def test_camera_flag_present_in_help(self):
-        result = subprocess.run(
-            [sys.executable, str(SCRIPT), "--help"],
-            capture_output=True, text=True, cwd=str(REPO),
-            env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(REPO)},
-        )
+        result = _run_help_for_tests()
         assert result.returncode == 0
         out = result.stdout + result.stderr
         assert "--camera" in out, "--help must list --camera"

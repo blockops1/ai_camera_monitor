@@ -36,15 +36,16 @@ def isolated_identities(monkeypatch, tmp_path):
 
 
 def test_slug_from_name__basic_lowercases_and_replaces_spaces():
-    """'maintainer' → 'mr_v' — lowercase + non-alphanumeric → underscore."""
+    """Generic slug: lowercase + non-alphanumeric runs collapsed to underscores."""
     from infra.faces import _slug_from_name
-    assert _slug_from_name("maintainer") == "mr_v"
+    assert _slug_from_name("Operator Name") == "operator_name"
+    assert _slug_from_name("maintainer") == "maintainer"
 
 
 def test_slug_from_name__collapses_runs_of_punctuation():
-    """'<visitor-name>'s Truck!!' → 'carson_s_truck' (one underscore per run)."""
+    """'<visitor-name>'s Truck!!' → 'visitor_name_s_truck' (one underscore per run)."""
     from infra.faces import _slug_from_name
-    assert _slug_from_name("<visitor-name>'s Truck!!") == "carson_s_truck"
+    assert _slug_from_name("<visitor-name>'s Truck!!") == "visitor_name_s_truck"
 
 
 def test_slug_from_name__empty_name_falls_back_to_unnamed():
@@ -54,7 +55,7 @@ def test_slug_from_name__empty_name_falls_back_to_unnamed():
 
 def test_slug_from_name__preserves_digits():
     from infra.faces import _slug_from_name
-    assert _slug_from_name("<visitor-name> 2") == "carson_2"
+    assert _slug_from_name("operator 2") == "operator_2"
 
 
 # -----------------------------------------------------------------------------
@@ -66,7 +67,7 @@ def test_save_then_load__round_trip_preserves_fields(isolated_identities):
     from infra.faces import load_identity, save_identity
 
     identity = {
-        "name": "maintainer",
+        "name": "operator_name",
         "role": "owner",
         "face_embedding": [0.1, 0.2, 0.3] * 171 + [0.1],  # 514 → 512 via slice
         "sample_count": 5,
@@ -76,11 +77,11 @@ def test_save_then_load__round_trip_preserves_fields(isolated_identities):
     identity["face_embedding"] = [float(i) / 512 for i in range(512)]
 
     path = save_identity(identity)
-    assert path == str(isolated_identities / "mr_v.json")
+    assert path == str(isolated_identities / "operator_name.json")
 
-    loaded = load_identity("maintainer")
+    loaded = load_identity("operator_name")
     assert loaded is not None
-    assert loaded["name"] == "maintainer"
+    assert loaded["name"] == "operator_name"
     assert loaded["role"] == "owner"
     assert loaded["face_embedding"] == identity["face_embedding"]
     assert loaded["sample_count"] == 5

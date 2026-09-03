@@ -85,21 +85,36 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 
-# 3. Download the YOLOv8n motion-gate model (~12 MB)
-#    (URL in scripts/download_models.sh)
+# 3. Download the motion-gate YOLOv8n model (~12 MB, ONNX format)
+bash scripts/download_quick_classifier_model.sh
 
-# 4. Configure cameras + Telegram
-#    See "Reolink camera setup" and "Telegram setup" below.
-#    Place creds files at the repo root.
+# 4. Configure cameras + Telegram + LLM (three env files at repo root)
+cp camera-creds.env.example camera-creds.env       # edit your Reolink IP / RTSP URLs
+cp telegram-creds.env.example telegram-creds.env   # edit your bot token + chat ID
+# llm-creds.env is OPTIONAL — defaults work for local llama-server on :8093
+# (see llm-creds.env.example for remote / cloud LLMs)
 
-# 5. Edit your known vehicles
-cp known_vehicles.example.json known_vehicles.json
-# fill in your fleet
+# 5. Edit your known vehicles (the matcher compares against this list)
+cp data/vehicles/known_vehicles.example.json data/vehicles/known_vehicles.json
+# fill in your fleet (the example is a single placeholder truck)
 
-# 6. Smoke-test
-pytest tests/ infra/tests/ -q
-curl http://localhost:8090/health
+# 6. Verify everything
+pytest listener/tests/ infra/tests/ -q
+python -c "from listener import listener; print('imports OK')"
+bash scripts/download_quick_classifier_model.sh    # verify model exists
 ```
+
+Then start the listener:
+
+```bash
+# Foreground (for setup debugging)
+python -m listener.listener
+
+# Background / launchd-managed (production)
+bash scripts/bootstrap-launchctl.sh               # generates a launchd plist
+```
+
+Hit `http://localhost:8090/health` to confirm the listener is up.
 
 ## Reolink camera setup
 
@@ -113,6 +128,23 @@ Your camera needs:
 
 See the `skills/reolink-camera-config/` and `skills/reolink-new-firmware-automation/`
 Hermes skills for camera-side configuration playbooks.
+
+### ⚠️ RTSP frame rate: set to 2 fps (REQUIRED)
+
+The motion gate assumes the persistent RTSP ring buffer fills at
+**2 frames per second** and computes frame-trail offsets from
+`webhook_offsets_seconds = (2, 4, 6, 8)`. At the camera's default 15 fps,
+the ring buffer's 12s lookback compresses to <2s of pre-event frames
+and the motion gate breaks (false negatives or empty results).
+
+**Set your camera's RTSP stream to 2 fps before starting the listener.**
+On Reolink web UI: *Settings → Camera → Video → Frame Rate → Main Stream → 2*.
+
+If you must use a different fps, the offsets are computed at runtime via
+`stream_fps()` in `infra/persistent_rtsp.py`, so the system is
+technically fps-aware — but 2 fps is the only rate that has been
+verified end-to-end. Higher rates burn CPU on decoding without improving
+gate accuracy.
 
 ## Telegram setup
 
@@ -129,28 +161,43 @@ The matcher compares each detected vehicle's stable attributes
 The score combines stable-attribute distance and a face-recognition
 cross-check (if a person is visible near the vehicle).
 
-Edit `known_vehicles.json` with your fleet — typical format:
+Edit `data/vehicles/known_vehicles.json` with your fleet — typical format:
 
 ```json
 {
-  "my-truck": {
-    "label": "the operator's truck",
-    "stable_attributes": {
+  "version": 1,
+  "vehicles": [
+    {
+      "id": "v_my_truck",
+      "label": "the operator's truck",
+      "owner": "your name",
+      "color": "white",
+      "type": "pickup",
       "make": "Ford",
       "model": "F-150",
-      "color": "white",
-      "body_type": "pickup"
+      "vehicle_features": {
+        "wheel_style": "alloy",
+        "bed_cover": "none"
+      }
     }
-  }
+  ]
 }
 ```
+
+The starter template is at
+`data/vehicles/known_vehicles.example.json` — copy it to
+`known_vehicles.json` and replace the single placeholder entry with
+your real fleet. Use `scripts/enroll_vehicle_from_alert.py` to add
+vehicles from a real Telegram alert (the crop + vision attributes are
+auto-extracted).
 
 ## Tests
 
 Run the public test subset:
 
 ```bash
-pytest tests/ infra/tests/ -v
+pytest listener/tests/ infra/tests/ known_vehicles/tests/ \
+       known_animals/tests/ telegram_formatter/tests/ tests/ -v
 ```
 
 The full private test suite is not shipped (it contains operator

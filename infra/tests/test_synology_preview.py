@@ -28,6 +28,10 @@ _repo_root = Path(__file__).resolve().parent.parent.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
+# infra.synology_preview is operator-infrastructure-specific (Synology NAS
+# SMB mount); not shipped in the public repo. Skip these tests on public.
+pytest.importorskip("infra.synology_preview", reason="requires operator NAS module")
+
 from infra.synology_preview import (  # noqa: E402
     _INTERDIR_RETRY_ATTEMPTS,
     _iterdir_with_retry,

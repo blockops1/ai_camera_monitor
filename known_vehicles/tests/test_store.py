@@ -12,6 +12,7 @@ sys.path.insert(0, str(_root))
 import pytest
 
 from known_vehicles.store import (
+    _DEFAULT_PATH,
     KNOWN_VEHICLES_SCHEMA,
     KnownVehicleStore,
     load_known_vehicles,
@@ -289,6 +290,19 @@ def test_load_known_vehicles_real_default_path():
     a list, not the wrapped {version, vehicles} the schema expected,
     and load_known_vehicles() failed with AttributeError on .get()).
     """
+    # Public repo: skip when the operator hasn't created known_vehicles.json yet
+    # (the test verifies the schema of the operator's actual data file).
+    if not _DEFAULT_PATH.exists():
+        pytest.skip(
+            "Public repo: requires operator's known_vehicles.json "
+            "(created by copying data/vehicles/known_vehicles.example.json)"
+        )
     loaded = load_known_vehicles()
     assert isinstance(loaded, list)
+    # On public install, the canonical file is empty. Skip the >=10 count check.
+    if len(loaded) == 0:
+        pytest.skip(
+            "Public repo: known_vehicles.json is empty (canonical). "
+            "Operator should populate it."
+        )
     assert len(loaded) >= 10  # current canonical list has 12

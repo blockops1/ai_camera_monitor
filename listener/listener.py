@@ -1703,7 +1703,7 @@ def _load_telegram_creds() -> tuple[str, str]:
     if not bot_token:
         bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     if not chat_id:
-        chat_id = os.environ.get("TELEGRAM_CHAT_ID", "5264050975")
+        chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
 
     # Phase 2.2 — at debug level, surface when the cache was used so
     # operators can see "this alert hit the cache" without INFO spam.
