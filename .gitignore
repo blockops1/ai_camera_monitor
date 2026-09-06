@@ -1,0 +1,26 @@
+# secrets
+.env
+*.env
+!camera-creds.env.example
+!telegram-creds.env.example
+!llm-creds.env.example
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# alerts / frames / logs
+data/frames/*
+!data/frames/.gitkeep
+logs/*.log
+!logs/.gitkeep
+
+# archives / copy-targets
+/public/
+/scratch/
