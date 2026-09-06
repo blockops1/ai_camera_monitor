@@ -2,9 +2,9 @@
   "prd_id": "PHASE-V2-CORE-PRD-pipeline-buildout",
   "title": "v2 pipeline core buildout: cooldown, vision_analyzer, listener, telegram_formatter, vehicle_matcher, tests",
   "author": "Jill",
-  "status": "proposal",
+  "status": "active",
   "phase": "v2-core",
-  "plan_section": "v2 §11.117 (PLAN.md sections 4-9)",
+  "plan_section": "v2 \u00a711.117 (PLAN.md sections 4-9)",
   "trigger": "Operator said (2026-09-06, verbatim): \"I want you to write a full PrD for this and write the story small enough that they're gonna be able to be done by local model via a specialist and kanban\". v2 scaffold + 4 vision prompts already shipped (Phase A, A+, B). The pipeline that consumes them does not exist. Listener is offline in maintenance mode (plist .disabled-20260906-1117stripdown).",
   "background": "v2 has 8 infra modules lifted from the old refactor (byte-identical) plus 4 fresh vision prompts (vm1_prompt, vehicle_prompt, person_prompt, animal_prompt) plus the v2 PLAN.md spec. The 11-stage linear pipeline described in PLAN.md is not yet wired. Missing: a pipeline cooldown keyed on (camera_id, classification), a vision analyzer that calls Qwen with the 4 prompts and dispatches by MODE_NAME, three telegram formatter stages (alert, detail, match), a vehicle matcher that consumes VM2 output, the listener pipeline + webhook entrypoint, and tests. Without these, the 4 prompts are unused code. Stories must be small enough for ONE local-qwen specialist pass (validated 2026-09-04: stories >100 LOC crash at ~132k prompt tokens; the cap is ~110k).",
   "goal": "Land all 11 stages of v2 pipeline so an end-to-end webhook on CAM1 (or any test camera) routes through cooldown -> gate -> VM1 -> TG#1 -> VM2 -> TG#2 -> match -> TG#3 and reaches Telegram with no operator hand-holding. Tests net-NEGATIVE relative to any lifted baseline (operator rule: tests should go DOWN as we simplify).",
@@ -35,8 +35,8 @@
     "Pre-dispatch gate: confirm `qwen-local :8093` reports 4+ slots. Currently confirmed (llama-server -np 4).",
     "After dispatch, STOP parallel tool calls until worker emits first assistant turn (validated 2026-09-05 starvation pattern)."
   ],
-  "test_strategy": "Per-story `pytest tests/ -x --tb=short` with `pytest --co -q` for collection check. Tests live in `tests/` (empty, must be created in US-013). Project baseline: 0 tests. Net-negative is impossible from 0; the rule becomes 'do not regress to non-zero' — US-013 lands <=20 tests covering pipeline_cooldown + vision_analyzer dispatch + telegram_formatter pure functions + listener webhook routing. Each story that adds logic adds 1-3 tests. Stories that only move code add zero tests.",
-  "shipping_definition": "Operator sends a synthetic webhook (CAM1, vehicle label, 4 frames already on disk in tests/data/cam1/). pipeline.run() returns within 30s, listener handles the webhook, TG#1 fires with full image + pairwise-diff composite + 4-frame positions, VM2 fires for vehicle with the 2 crops, TG#2 fires with the 2 crops + VM2 output (no threat-level), vehicle_matcher matches the alert, TG#3 fires with the match result. All Telegram messages visible in the operator's chat 374999219. Listener remains offline in production (plist .disabled-20260906-1117stripdown) — the test fixture replays the webhook via `tests/integration/test_end_to_end_pipeline.py::test_synthetic_webhook_reaches_telegram_format` without ever opening the production port. Failure mode: any stage throws an exception, OR TG#1/TG#2/TG#3 silently skipped, OR VM2 output not in the Telegram message body, OR Telegram sends but pytest fails on `mock_telegram.assert_called_once()`.",
+  "test_strategy": "Per-story `pytest tests/ -x --tb=short` with `pytest --co -q` for collection check. Tests live in `tests/` (empty, must be created in US-013). Project baseline: 0 tests. Net-negative is impossible from 0; the rule becomes 'do not regress to non-zero' \u2014 US-013 lands <=20 tests covering pipeline_cooldown + vision_analyzer dispatch + telegram_formatter pure functions + listener webhook routing. Each story that adds logic adds 1-3 tests. Stories that only move code add zero tests.",
+  "shipping_definition": "Operator sends a synthetic webhook (CAM1, vehicle label, 4 frames already on disk in tests/data/cam1/). pipeline.run() returns within 30s, listener handles the webhook, TG#1 fires with full image + pairwise-diff composite + 4-frame positions, VM2 fires for vehicle with the 2 crops, TG#2 fires with the 2 crops + VM2 output (no threat-level), vehicle_matcher matches the alert, TG#3 fires with the match result. All Telegram messages visible in the operator's chat 374999219. Listener remains offline in production (plist .disabled-20260906-1117stripdown) \u2014 the test fixture replays the webhook via `tests/integration/test_end_to_end_pipeline.py::test_synthetic_webhook_reaches_telegram_format` without ever opening the production port. Failure mode: any stage throws an exception, OR TG#1/TG#2/TG#3 silently skipped, OR VM2 output not in the Telegram message body, OR Telegram sends but pytest fails on `mock_telegram.assert_called_once()`.",
   "files_out_of_scope": [
     "/Users/jill/farm-surveillance-refactor/**",
     "/Users/jill/farm-surveillance-internal/**",
@@ -60,15 +60,24 @@
     "/Users/jill/farm-surveillance-v2/docs/V2-LIFT-PLAN.md",
     "/Users/jill/farm-surveillance-v2/docs/PLAN.md"
   ],
-  "userStories": [
+  "related": [
+    "infra/vm1_prompt.py (US-002 depends on MODE_NAME + SCHEMA_JSON)",
+    "infra/vehicle_prompt.py / person_prompt.py / animal_prompt.py (US-003 depends on these)",
+    "skills/devops/coder-pipeline/SKILL.md (story-sizing discipline: ~100 LOC, 150 max, <=2500 char body)",
+    "skills/autonomous-ai-agents/kanban-orchestrator/SKILL.md (single-specialist queue, link-chain pattern)",
+    "MEMORY.md 2026-09-06: 'tests must go DOWN as we simplify'",
+    "docs/PLAN.md (v2 11-stage linear pipeline spec, frozen 2026-09-06)",
+    "docs/RECREATION.md (full system state recreation guide, written 2026-09-06)"
+  ],
+  "stories": [
     {
       "id": "US-001",
-      "title": "infra/pipeline_cooldown.py — PipelineCooldown with (camera_id, classification) keying",
+      "title": "infra/pipeline_cooldown.py \u2014 PipelineCooldown with (camera_id, classification) keying",
       "status": "todo",
       "target_file": "/Users/jill/farm-surveillance-v2/infra/pipeline_cooldown.py",
       "dependsOn": [],
       "estimated_lines": 90,
-      "description": "Build a fresh cooldown module that throttles pipeline events keyed on (camera_id, classification). One lock, two maps. API: PipelineCooldown() with should_suppress(camera_id, classification, window_seconds) -> bool and record_hit(camera_id, classification) -> None. Cooldown window is per-(camera_id, classification): defaults are 60s for vehicle, 30s for person, 120s for motion, 0 (no cooldown) for animal. Animal is left at 0 because animal false-positive floods are rare and operator-side the animal matcher is the throttle. Built fresh; do NOT lift or reference infra/cooldown.py or infra/gate_cooldown.py (those are gate-time cooldowns, this is pipeline-time). Thread-safety: one threading.Lock guards both maps.",
+      "description": "Build infra/pipeline_cooldown.py. PipelineCooldown() with one threading.Lock + two maps. API: should_suppress(camera_id, classification, window_seconds) -> bool; record_hit(camera_id, classification) -> None; clear() -> None. Defaults: vehicle=60s, person=30s, motion=120s, animal=0. Built fresh; do NOT lift infra/cooldown.py or gate_cooldown.py.",
       "acceptanceCriteria": [
         "python3 -c \"from infra.pipeline_cooldown import PipelineCooldown; pc = PipelineCooldown(); pc.record_hit('CAM1', 'vehicle'); assert pc.should_suppress('CAM1', 'vehicle') is True\" exits 0",
         "python3 -c \"from infra.pipeline_cooldown import PipelineCooldown; pc = PipelineCooldown(); pc.record_hit('CAM1', 'vehicle'); pc.clear(); assert pc.should_suppress('CAM1', 'vehicle') is False\" exits 0",
@@ -82,12 +91,14 @@
     },
     {
       "id": "US-002",
-      "title": "infra/vision_analyzer.py — verify_class() calls Qwen with vm1_prompt",
+      "title": "infra/vision_analyzer.py \u2014 verify_class() calls Qwen with vm1_prompt",
       "status": "todo",
       "target_file": "/Users/jill/farm-surveillance-v2/infra/vision_analyzer.py",
-      "dependsOn": ["US-001"],
+      "dependsOn": [
+        "US-001"
+      ],
       "estimated_lines": 70,
-      "description": "Add verify_class() to a NEW infra/vision_analyzer.py module. Calls the vision llama-server (vision-8B at port 8080) with the vm1_prompt prompt + 2 crop images + SCHEMA_JSON as response_format. NO gate hint per operator 2026-09-06 — verify_class accepts (crop_a, crop_b) only. Returns dict parsed from JSON response: {class, confidence, notes}. On non-200 from llama-server, raise VisionAnalyzerError (define in same module). Use httpx (already in poetry from lifted modules). No tests yet beyond import-and-call smoke.",
+      "description": "Add verify_class() to a NEW infra/vision_analyzer.py module. Calls the vision llama-server (vision-8B at port 8080) with the vm1_prompt prompt + 2 crop images + SCHEMA_JSON as response_format. NO gate hint per operator 2026-09-06 \u2014 verify_class accepts (crop_a, crop_b) only. Returns dict parsed from JSON response: {class, confidence, notes}. On non-200 from llama-server, raise VisionAnalyzerError (define in same module). Use httpx (already in poetry from lifted modules). No tests yet beyond import-and-call smoke.",
       "acceptanceCriteria": [
         "python3 -c \"from infra.vision_analyzer import verify_class, VisionAnalyzerError; print(verify_class.__name__)\" exits 0 and prints verify_class",
         "grep -nE '^def verify_class|^class VisionAnalyzerError' /Users/jill/farm-surveillance-v2/infra/vision_analyzer.py returns 2 hits",
@@ -101,10 +112,12 @@
     },
     {
       "id": "US-003",
-      "title": "infra/vision_analyzer.py — detail_class() dispatch dict + 3 schemas",
+      "title": "infra/vision_analyzer.py \u2014 detail_class() dispatch dict + 3 schemas",
       "status": "todo",
       "target_file": "/Users/jill/farm-surveillance-v2/infra/vision_analyzer.py",
-      "dependsOn": ["US-002"],
+      "dependsOn": [
+        "US-002"
+      ],
       "estimated_lines": 80,
       "description": "Add detail_class() to the same vision_analyzer.py. Takes (mode: str, crop_a, crop_b, motion_diff_image=None). Builds a dispatch dict keyed by MODE_NAME constants imported from the 3 prompt modules: vehicle -> vehicle_prompt, person -> person_prompt, animal -> animal_prompt. Calls llama-server with the matching prompt + 2 crops + SCHEMA_JSON response_format. Returns dict parsed from JSON response, schema varies by mode. On unknown mode, raise VisionAnalyzerError. Audit-grade exhaustive dispatch (Rule 8 from vision-prompt-design skill): dispatch keys must cover all 3 MODE_NAME values. NO gate hint here either. NO threat-level fields.",
       "acceptanceCriteria": [
@@ -120,10 +133,12 @@
     },
     {
       "id": "US-004",
-      "title": "telegram_formatter/alert.py — TG#1 message after VM1",
+      "title": "telegram_formatter/alert.py \u2014 TG#1 message after VM1",
       "status": "todo",
       "target_file": "/Users/jill/farm-surveillance-v2/telegram_formatter/alert.py",
-      "dependsOn": ["US-003"],
+      "dependsOn": [
+        "US-003"
+      ],
       "estimated_lines": 60,
       "description": "Create telegram_formatter/__init__.py (empty) and telegram_formatter/alert.py. Function build_alert_message(verdict: GateVerdict, vm1_result: dict, frames: list[Path], diff_image: Path) -> dict. Returns dict with caption text (camera label + vm1 class + confidence + notes) + photo paths (full image + pairwise-differential composite + the 4 frame positions). NO threat-level. NO license plate. Format is the dict shape that listener/pipeline.py will hand to the Telegram client. Pure function: no I/O. No tests for I/O yet (covers pipeline-routing tests later).",
       "acceptanceCriteria": [
@@ -136,10 +151,12 @@
     },
     {
       "id": "US-005",
-      "title": "telegram_formatter/detail.py — TG#2 message after VM2",
+      "title": "telegram_formatter/detail.py \u2014 TG#2 message after VM2",
       "status": "todo",
       "target_file": "/Users/jill/farm-surveillance-v2/telegram_formatter/detail.py",
-      "dependsOn": ["US-004"],
+      "dependsOn": [
+        "US-004"
+      ],
       "estimated_lines": 70,
       "description": "telegram_formatter/detail.py. Function build_detail_message(mode: str, vm2_result: dict, crop_a: Path, crop_b: Path) -> dict. Renders caption as camera + mode + class_confirmed + the class-specific fields (license_plate, distinctive_features, threat_indicators from VM2 output but as a copy-paste of the LLM output, not a derived threat-level). Photos: crop_a + crop_b. NO threat-level field added by us. Pure function. Mode must be one of vehicle/person/animal; raise ValueError otherwise.",
       "acceptanceCriteria": [
@@ -153,10 +170,12 @@
     },
     {
       "id": "US-006",
-      "title": "vehicle_matcher/match.py — pure vehicle matcher",
+      "title": "vehicle_matcher/match.py \u2014 pure vehicle matcher",
       "status": "todo",
       "target_file": "/Users/jill/farm-surveillance-v2/vehicle_matcher/match.py",
-      "dependsOn": ["US-005"],
+      "dependsOn": [
+        "US-005"
+      ],
       "estimated_lines": 90,
       "description": "vehicle_matcher/__init__.py (empty) + vehicle_matcher/match.py. Function match_vehicle(vm2_result: dict, candidates: list[dict]) -> dict. Takes the VM2 vehicle output + a list of {license_plate, distinctive_features} candidate dicts. Returns the matched candidate dict or {matched: False}. Uses license_plate text first (exact match, case-insensitive, strip whitespace). On no plate or no plate match, falls back to distinctive_features Jaccard >= 0.5. NO file I/O. NO database. Pure function. The actual list of candidates comes from a future story (US-009) that wires the data/vehicles/ store; this story only builds the matcher.",
       "acceptanceCriteria": [
@@ -171,10 +190,12 @@
     },
     {
       "id": "US-007",
-      "title": "telegram_formatter/match_alert.py — TG#3 message after match",
+      "title": "telegram_formatter/match_alert.py \u2014 TG#3 message after match",
       "status": "todo",
       "target_file": "/Users/jill/farm-surveillance-v2/telegram_formatter/match_alert.py",
-      "dependsOn": ["US-006"],
+      "dependsOn": [
+        "US-006"
+      ],
       "estimated_lines": 60,
       "description": "telegram_formatter/match_alert.py. Function build_match_message(match_result: dict, vm2_result: dict) -> dict. Renders caption: matched-or-not, plate, distinctive features summary. NO threat-level. Pure function. If match_result.matched is False, render a 'unrecognized vehicle' body. If matched, render 'recognized: <plate>'. Always carries forward distinctive_features from VM2 output as a list, not a derived summary.",
       "acceptanceCriteria": [
@@ -187,10 +208,12 @@
     },
     {
       "id": "US-008",
-      "title": "listener/pipeline.py::run() — 11-stage linear function",
-      "status": "todo",
+      "title": "listener/pipeline.py::run() \u2014 11-stage linear function",
+      "status": "superseded",
       "target_file": "/Users/jill/farm-surveillance-v2/listener/pipeline.py",
-      "dependsOn": ["US-007"],
+      "dependsOn": [
+        "US-007"
+      ],
       "estimated_lines": 150,
       "description": "listener/__init__.py (empty) + listener/pipeline.py. ONE function run(alert: dict) -> dict. Stages: 1) extract camera_id + classification from alert, 2) cooldown check via PipelineCooldown.should_suppress (drop on True), 3) load 4 frames via vehicle_position, 4) run infra.gate (YOLO gate), 5) drop if gate returns no_surveillance, 6) record_hit on PipelineCooldown (key=classification), 7) call verify_class, 8) build TG#1 via telegram_formatter.alert, 9) call detail_class with the right mode, 10) build TG#2 via telegram_formatter.detail, 11) match vehicle + build TG#3. Returns the dict of {tg1, tg2, tg3}. NO ThreatLevel/TG-threat-level fields anywhere. NO per-class dispatch (no if mode == 'vehicle' branches that import vehicle-only modules). Listener/pipeline.py is the spine.",
       "acceptanceCriteria": [
@@ -201,14 +224,22 @@
         "grep -nE 'def vehicle_run|def person_run|def animal_run|def vehicle_pipeline' /Users/jill/farm-surveillance-v2/listener/pipeline.py returns 0 hits (no per-class methods)",
         "python3 -m py_compile /Users/jill/farm-surveillance-v2/listener/pipeline.py exits 0",
         "wc -l /Users/jill/farm-surveillance-v2/listener/pipeline.py prints <180"
-      ]
+      ],
+      "superseded_by": [
+        "US-008a",
+        "US-008b",
+        "US-008c"
+      ],
+      "supersession_note": "Decomposed 2026-09-06 per operator (\"It never hurts to make them smaller than they need to be\"). 11-stage run() function split by natural stage seam into 3 sub-stories, each independently shippable."
     },
     {
       "id": "US-009",
-      "title": "listener/listener.py::handle_webhook() — webhook entrypoint",
+      "title": "listener/listener.py::handle_webhook() \u2014 webhook entrypoint",
       "status": "todo",
       "target_file": "/Users/jill/farm-surveillance-v2/listener/listener.py",
-      "dependsOn": ["US-008"],
+      "dependsOn": [
+        "US-008"
+      ],
       "estimated_lines": 80,
       "description": "listener/listener.py. Function handle_webhook(alert: dict) -> dict. Wraps pipeline.run() with try/except that returns {'status': 'error', 'stage': str(exc), 'alert_id': alert.get('id')} on any exception. Also handles the Telegram send side: takes the dict returned by pipeline.run() and dispatches tg1/tg2/tg3 to the Telegram client (use python-telegram-bot sync, from env TELEGRAM_BOT_TOKEN + TELEGRAM_HOME_CHAT_ID). The send is wrapped in another try/except so a Telegram failure does not crash the webhook. NO daemonization. NO Flask app. handle_webhook is a plain function; the daemon that calls it is the next story.",
       "acceptanceCriteria": [
@@ -222,10 +253,12 @@
     },
     {
       "id": "US-010",
-      "title": "listener/daemon.py — Flask app + launchctl plist generator",
+      "title": "listener/daemon.py \u2014 Flask app + launchctl plist generator",
       "status": "todo",
       "target_file": "/Users/jill/farm-surveillance-v2/listener/daemon.py",
-      "dependsOn": ["US-009"],
+      "dependsOn": [
+        "US-009"
+      ],
       "estimated_lines": 90,
       "description": "listener/daemon.py. Flask app with POST /webhook route that parses JSON, calls listener.handle_webhook, returns 200. Listens on port from env (default 9999). Plus a generate_plist() function that writes a launchd plist to stdout (operator copies it to ~/Library/LaunchAgents/). Do NOT install the plist. Do NOT start the daemon. Do NOT call launchctl. This story only produces the daemon + plist generator so the operator can review before activating.",
       "acceptanceCriteria": [
@@ -239,10 +272,12 @@
     },
     {
       "id": "US-011",
-      "title": "tests/conftest.py + tests/test_pipeline_cooldown.py — 3 baseline tests",
+      "title": "tests/conftest.py + tests/test_pipeline_cooldown.py \u2014 3 baseline tests",
       "status": "todo",
       "target_file": "/Users/jill/farm-surveillance-v2/tests/conftest.py",
-      "dependsOn": ["US-010"],
+      "dependsOn": [
+        "US-010"
+      ],
       "estimated_lines": 70,
       "description": "Create tests/__init__.py (empty) + tests/conftest.py with shared fixtures (sample alert dict, sample frames fixture pointing to tests/data/, mocked llama-server). Also tests/test_pipeline_cooldown.py with the 3 tests from US-001 acceptance: test_suppresses_within_window, test_record_hit_then_clear, test_animal_default_zero. tests/data/ contains a placeholder directory with .gitkeep. NO live HTTP calls in tests; llama-server is mocked at the httpx level.",
       "acceptanceCriteria": [
@@ -255,10 +290,12 @@
     },
     {
       "id": "US-012",
-      "title": "tests/test_vision_analyzer.py — 4 tests covering verify_class + detail_class dispatch",
+      "title": "tests/test_vision_analyzer.py \u2014 4 tests covering verify_class + detail_class dispatch",
       "status": "todo",
       "target_file": "/Users/jill/farm-surveillance-v2/tests/test_vision_analyzer.py",
-      "dependsOn": ["US-011"],
+      "dependsOn": [
+        "US-011"
+      ],
       "estimated_lines": 80,
       "description": "tests/test_vision_analyzer.py with 4 tests: test_verify_class_returns_parsed_dict, test_verify_class_raises_on_non_200, test_detail_class_dispatch_keys_match_mode_names, test_detail_class_raises_on_unknown_mode. Mocks llama-server via monkeypatched httpx. No live HTTP. Total project test count after this story: 7 (3 from US-011 + 4 here).",
       "acceptanceCriteria": [
@@ -270,10 +307,12 @@
     },
     {
       "id": "US-013",
-      "title": "tests/test_pipeline_end_to_end.py — synthetic webhook reaches all 3 telegram stages",
-      "status": "todo",
+      "title": "tests/test_pipeline_end_to_end.py \u2014 synthetic webhook reaches all 3 telegram stages",
+      "status": "superseded",
       "target_file": "/Users/jill/farm-surveillance-v2/tests/test_pipeline_end_to_end.py",
-      "dependsOn": ["US-012"],
+      "dependsOn": [
+        "US-012"
+      ],
       "estimated_lines": 100,
       "description": "tests/test_pipeline_end_to_end.py with 1 integration test: test_synthetic_webhook_reaches_all_3_telegram_stages. Builds a synthetic alert + 4 fake frames + mocks llama-server (VM1 returns class=vehicle, confidence=likely; VM2 returns license_plate=ABC123 + distinctive features; vehicle_matcher matches on plate; Telegram send is monkeypatched). Calls listener.handle_webhook. Asserts mock_telegram.send_message called 3 times (TG#1, TG#2, TG#3). Asserts TG#2 caption contains 'ABC123' and 'roof_rack'. Asserts the dict contains no 'threat' key. Total project test count after this story: 8.",
       "acceptanceCriteria": [
@@ -283,15 +322,124 @@
         "grep -nE 'plist.disabled|ai\\.farm\\.surveillance-listener' /Users/jill/farm-surveillance-v2/tests/test_pipeline_end_to_end.py returns 0 hits (no production listener touch)",
         "pytest /Users/jill/farm-surveillance-v2/tests/ --tb=short exits 0 and prints '8 passed'",
         "wc -l /Users/jill/farm-surveillance-v2/tests/test_pipeline_end_to_end.py prints <130"
+      ],
+      "superseded_by": [
+        "US-013a",
+        "US-013b"
+      ],
+      "supersession_note": "Decomposed 2026-09-06 per operator. Test fixtures separated from E2E test so fixtures can ship before pipeline is fully wired."
+    },
+    {
+      "id": "US-008a",
+      "title": "listener/pipeline.py \u2014 skeleton + stages 1-3 (extract/cooldown/load)",
+      "status": "blocked",
+      "kanban_task_id": "t_a394fbb9",
+      "target_file": "/Users/jill/farm-surveillance-v2/listener/pipeline.py",
+      "loc_cap": 60,
+      "depends_on": [],
+      "blocks": [
+        "US-008b"
+      ],
+      "shipping_def": "Creates listener/__init__.py + listener/pipeline.py with run(alert: dict) -> dict implementing ONLY stages 1-3. NO vision calls, NO Telegram calls, NO gate. Returns {status, camera_id, classification, frames}.",
+      "acceptance_criteria": [
+        "python3 -c \"from listener.pipeline import run; print(run.__name__)\" exits 0",
+        "grep -nE '^def run' pipeline.py returns 1 hit",
+        "grep -nE 'should_suppress|record_hit' pipeline.py returns >=2 hits",
+        "grep -nE 'threat|threat_level' pipeline.py returns 0 hits",
+        "python3 -m py_compile pipeline.py exits 0",
+        "wc -l pipeline.py prints <60"
+      ]
+    },
+    {
+      "id": "US-008b",
+      "title": "listener/pipeline.py::run() \u2014 extend with stages 4-7 (gate/verify_class/TG#1)",
+      "status": "blocked",
+      "kanban_task_id": "t_90288eab",
+      "target_file": "/Users/jill/farm-surveillance-v2/listener/pipeline.py",
+      "loc_cap": 120,
+      "depends_on": [
+        "US-008a"
+      ],
+      "blocks": [
+        "US-008c"
+      ],
+      "shipping_def": "Extends run() with stages 4-7. Stage 4: infra.gate. Stage 5: drop on no_surveillance. Stage 6: record_hit. Stage 7: verify_class + build TG#1. Returns {status, camera_id, classification, tg1, ...}.",
+      "acceptance_criteria": [
+        "grep -nE '^def run' pipeline.py returns 1 hit",
+        "grep -nE 'GateVerdict|infra\\.gate|run_gate' pipeline.py returns >=1 hit",
+        "grep -nE 'verify_class|build_alert_message' pipeline.py returns >=2 hits",
+        "grep -nE 'record_hit' pipeline.py returns >=1 hit",
+        "grep -nE 'threat|threat_level' pipeline.py returns 0 hits",
+        "grep -nE 'def vehicle_run|def person_run|def animal_run|def vehicle_pipeline' pipeline.py returns 0 hits",
+        "python3 -m py_compile pipeline.py exits 0",
+        "wc -l pipeline.py prints <120"
+      ]
+    },
+    {
+      "id": "US-008c",
+      "title": "listener/pipeline.py::run() \u2014 extend with stages 8-11 (detail_class/TG#2/match/TG#3)",
+      "status": "blocked",
+      "kanban_task_id": "t_487691e2",
+      "target_file": "/Users/jill/farm-surveillance-v2/listener/pipeline.py",
+      "loc_cap": 180,
+      "depends_on": [
+        "US-008b"
+      ],
+      "blocks": [
+        "US-009"
+      ],
+      "shipping_def": "Extends run() with stages 8-11. Stage 8: detail_class. Stage 9: TG#2. Stage 10: vehicle_matcher. Stage 11: TG#3. Returns final dict {tg1, tg2, tg3}.",
+      "acceptance_criteria": [
+        "grep -nE '^def run' pipeline.py returns 1 hit",
+        "grep -nE 'detail_class|build_detail_message|build_match_message|vehicle_matcher' pipeline.py returns >=3 hits",
+        "grep -nE 'threat|threat_level' pipeline.py returns 0 hits",
+        "grep -nE 'def vehicle_run|def person_run|def animal_run|def vehicle_pipeline' pipeline.py returns 0 hits",
+        "python3 -m py_compile pipeline.py exits 0",
+        "wc -l pipeline.py prints <180"
+      ]
+    },
+    {
+      "id": "US-013a",
+      "title": "tests/test_pipeline_synthetic.py \u2014 fixtures only (no test cases)",
+      "status": "blocked",
+      "kanban_task_id": "t_ca16576a",
+      "target_file": "/Users/jill/farm-surveillance-v2/tests/test_pipeline_synthetic.py",
+      "loc_cap": 70,
+      "depends_on": [],
+      "blocks": [
+        "US-013b"
+      ],
+      "shipping_def": "Creates tests/test_pipeline_synthetic.py with reusable fixtures (make_alert, make_frames, mock_llama_server, mock_telegram) and ZERO test cases. Ships alone so US-013b can drop in test cases without rewriting setup.",
+      "acceptance_criteria": [
+        "pytest --co -q prints 0 tests collected (fixtures only)",
+        "grep -nE 'launchctl|launchd|/System/Library' returns 0 hits",
+        "grep -nE 'plist.disabled|ai\\.farm\\.surveillance-listener' returns 0 hits",
+        "python3 -m py_compile exits 0",
+        "wc -l prints <70"
+      ]
+    },
+    {
+      "id": "US-013b",
+      "title": "tests/test_pipeline_synthetic.py \u2014 1 E2E test using US-013a fixtures",
+      "status": "blocked",
+      "kanban_task_id": "t_42859fe9",
+      "target_file": "/Users/jill/farm-surveillance-v2/tests/test_pipeline_synthetic.py",
+      "loc_cap": 130,
+      "depends_on": [
+        "US-013a",
+        "US-009"
+      ],
+      "blocks": [],
+      "shipping_def": "Adds 1 integration test using US-013a fixtures. Asserts 3 TG stages fire, TG#2 contains expected content, no 'threat' key leaks. Project total after: 8 tests pass.",
+      "acceptance_criteria": [
+        "pytest --co -q prints 1 test collected",
+        "pytest tests/ -x --tb=short exits 0 with 8 passed",
+        "grep -nE 'launchctl|launchd|/System/Library' returns 0 hits",
+        "grep -nE 'plist.disabled|ai\\.farm\\.surveillance-listener' returns 0 hits",
+        "python3 -m py_compile exits 0",
+        "wc -l prints <130"
       ]
     }
   ],
-  "related": [
-    "docs/PLAN.md (v2 11-stage linear pipeline spec)",
-    "infra/vm1_prompt.py (US-002 depends on MODE_NAME + SCHEMA_JSON)",
-    "infra/vehicle_prompt.py / person_prompt.py / animal_prompt.py (US-003 depends on these)",
-    "skills/devops/coder-pipeline/SKILL.md (story-sizing discipline: ~100 LOC, 150 max, <=2500 char body)",
-    "skills/autonomous-ai-agents/kanban-orchestrator/SKILL.md (single-specialist queue, link-chain pattern)",
-    "MEMORY.md 2026-09-06: 'tests must go DOWN as we simplify'"
-  ]
+  "updated_at": "2026-09-06T19:35:00-04:00"
 }
