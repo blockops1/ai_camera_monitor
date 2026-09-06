@@ -55,7 +55,7 @@ WHY HERE:
     Module imports it for every path or env-derived constant. Keeping
     the source of truth in one place lets tests override FARMSURV_DATA_DIR
     in conftest.py and target a tmp_path copy without monkey-patching
-    individual call sites. Two-system isolation contract (AGENTS.md §1)
+    individual call sites. Two-system isolation contract (project docs §1 (internal))
     is enforced by _DEFAULT_PROJECT_ROOT pointing at the refactor tree,
     never at ~/farm-surveillance/.
 
