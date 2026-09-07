@@ -1,3 +1,9 @@
+# diagnostic output (tool-generated, not source)
+.desloppify/
+.qa/
+quality_status.json
+_ac1_verify.py
+
 # secrets
 .env
 *.env
