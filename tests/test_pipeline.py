@@ -9,8 +9,8 @@ Tests behaviors across all stages:
 
 from unittest.mock import MagicMock, patch
 
-from listener.pipeline import run
 from infra.gate import GateVerdict
+from listener.pipeline import run
 
 
 def _make_gate_verdict(decision="vehicle", class_label="car", confidence=0.85, reason="high_conf_vehicle"):
@@ -77,7 +77,7 @@ class TestPipelineRun:
         assert "gate" in result
 
     def test_run_ok_with_full_flow(self):
-        """run returns 'ok' with gate, vm1_result, and tg1 when flow completes."""
+        """run returns 'ok' with gate, vm1, tg1, vm2, tg2, match, tg3."""
         alert = _make_alert()
         gate_v = _make_gate_verdict()
 
@@ -86,12 +86,20 @@ class TestPipelineRun:
 
         vm1_result = {"class": "vehicle", "confidence": 0.92}
         tg1 = {"caption": "Detected: vehicle", "photos": []}
+        vm2_result = {"class_confirmed": "vehicle", "distinctive_features": []}
+        tg2 = {"caption": "Camera: Front Gate", "photos": []}
+        match_result = {"matched": False}
+        tg3 = {"caption": "Status: unrecognized vehicle", "photos": []}
 
         with (
             patch("listener.pipeline.PipelineCooldown", return_value=mock_cooldown),
             patch("listener.pipeline.run_gate", return_value=gate_v),
             patch("listener.pipeline.verify_class", return_value=vm1_result),
             patch("listener.pipeline.build_alert_message", return_value=tg1),
+            patch("listener.pipeline.detail_class", return_value=vm2_result),
+            patch("listener.pipeline.build_detail_message", return_value=tg2),
+            patch("listener.pipeline._load_candidates", return_value=[]),
+            patch("listener.pipeline.build_match_message", return_value=tg3),
         ):
             result = run(alert)
 
@@ -102,8 +110,16 @@ class TestPipelineRun:
         assert "gate" in result
         assert "vm1_result" in result
         assert "tg1" in result
+        assert "vm2_result" in result
+        assert "tg2" in result
+        assert "match_result" in result
+        assert "tg3" in result
         assert result["vm1_result"] == vm1_result
         assert result["tg1"] == tg1
+        assert result["vm2_result"] == vm2_result
+        assert result["tg2"] == tg2
+        assert result["match_result"] == match_result
+        assert result["tg3"] == tg3
 
     def test_run_ok_with_empty_frames(self):
         """run returns 'ok' with empty frames when alert has no frames key."""
@@ -115,12 +131,18 @@ class TestPipelineRun:
 
         vm1_result = {"class": "person", "confidence": 0.78}
         tg1 = {"caption": "Detected: person", "photos": []}
+        vm2_result = {"class_confirmed": "person", "distinctive_features": []}
+        tg2 = {"caption": "Camera: CAM2", "photos": []}
+        tg3 = {}
 
         with (
             patch("listener.pipeline.PipelineCooldown", return_value=mock_cooldown),
             patch("listener.pipeline.run_gate", return_value=gate_v),
             patch("listener.pipeline.verify_class", return_value=vm1_result),
             patch("listener.pipeline.build_alert_message", return_value=tg1),
+            patch("listener.pipeline.detail_class", return_value=vm2_result),
+            patch("listener.pipeline.build_detail_message", return_value=tg2),
+            patch("listener.pipeline.build_match_message", return_value=tg3),
         ):
             result = run(alert)
 
@@ -139,12 +161,19 @@ class TestPipelineRun:
 
         vm1_result = {"class": "vehicle", "confidence": 0.92}
         tg1 = {"caption": "test", "photos": []}
+        vm2_result = {"class_confirmed": "vehicle", "distinctive_features": []}
+        tg2 = {"caption": "test", "photos": []}
+        tg3 = {"caption": "test", "photos": []}
 
         with (
             patch("listener.pipeline.PipelineCooldown", return_value=mock_cooldown),
             patch("listener.pipeline.run_gate", return_value=gate_v),
             patch("listener.pipeline.verify_class", return_value=vm1_result),
             patch("listener.pipeline.build_alert_message", return_value=tg1),
+            patch("listener.pipeline.detail_class", return_value=vm2_result),
+            patch("listener.pipeline.build_detail_message", return_value=tg2),
+            patch("listener.pipeline._load_candidates", return_value=[]),
+            patch("listener.pipeline.build_match_message", return_value=tg3),
         ):
             run(alert)
 
