@@ -1,5 +1,7 @@
 """
-test_pipeline_synthetic.py — Fixtures for synthetic pipeline tests.
+test_pipeline_synthetic.py — Synthetic E2E pipeline test.
+
+Tests the full alert flow: handle_webhook -> pipeline -> Telegram sends.
 """
 
 from __future__ import annotations
@@ -9,12 +11,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+# Stub telegram module (listener imports "from telegram import Bot").
+import sys
+
+if "telegram" not in sys.modules:
+    _stub = sys.modules["telegram"] = MagicMock()
+    _stub.Bot = MagicMock
+
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 
 @pytest.fixture()
 def make_alert():
     """Callable that builds a synthetic alert dict."""
+
     def _make(camera_id="CAM1", classification="vehicle"):
         return {
             "id": f"evt-synth-{camera_id}",
@@ -25,17 +35,11 @@ def make_alert():
             "frames": [
                 os.path.join(_DATA_DIR, "frame1.jpg"),
                 os.path.join(_DATA_DIR, "frame2.jpg"),
+                os.path.join(_DATA_DIR, "frame3.jpg"),
+                os.path.join(_DATA_DIR, "frame4.jpg"),
             ],
         }
-    return _make
 
-
-@pytest.fixture()
-def make_frames():
-    """Callable that builds a list of fake frame dicts."""
-    def _make(n=4):
-        return [{"index": i, "path": os.path.join(_DATA_DIR, f"frame{i}.jpg")}
-                for i in range(n)]
     return _make
 
 
@@ -60,10 +64,41 @@ def mock_llama_server():
         yield mc
 
 
-@pytest.fixture()
-def mock_telegram():
-    """Captures telegram.Bot.send_message calls via AsyncMock."""
-    mb = MagicMock()
-    mb.send_message = AsyncMock()
-    with patch("telegram.Bot", return_value=mb):
-        yield mb
+def test_synthetic_webhook_reaches_all_3_telegram_stages(
+    make_alert,
+    mock_llama_server,
+    synthetic_webhook_patchers,
+):
+    """End-to-end: handle_webhook -> pipeline -> 3 Telegram sends."""
+    from listener import listener as lm
+
+    FakeBot, mb = synthetic_webhook_patchers
+
+    # VM responses
+    mock_llama_server.responses.append(
+        '{"class": "vehicle", "confidence": "likely"}'
+    )
+    mock_llama_server.responses.append(
+        '{"class_confirmed": "vehicle", "license_plate": "ABC123", '
+        '"distinctive_features": ["roof_rack"]}'
+    )
+
+    alert = make_alert(camera_id="CAM1", classification="vehicle")
+    lm.Bot = FakeBot
+
+    result = lm.handle_webhook(alert)
+
+    assert result["status"] == "ok"
+    assert result["classification"] == "vehicle"
+    assert mb.send_message.call_count == 3
+
+    tg2_caption = mb.send_message.call_args_list[1][1]["text"]
+    assert "ABC123" in tg2_caption
+    assert "roof_rack" in tg2_caption
+
+    vm2_result = {
+        "class_confirmed": "vehicle",
+        "license_plate": "ABC123",
+        "distinctive_features": ["roof_rack"],
+    }
+    assert "threat" not in vm2_result
