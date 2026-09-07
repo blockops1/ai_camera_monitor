@@ -1,36 +1,47 @@
 """
-pipeline.py — Stages 1-7 of the 11-stage linear alert pipeline.
+pipeline.py — Stages 1-11 of the 11-stage linear alert pipeline.
 
-STATUS: provisional (stages 1-7; stages 8-11 in US-008c)
+STATUS: stable
 THREAD SAFETY: single-threaded
 
 INPUTS:
     - alert: dict (required) — webhook alert payload
 
 OUTPUTS:
-    - return dict: {status, camera_id, classification, frames, gate, tg1}
+    - return dict: {status, camera_id, classification, frames, gate,
+                     vm1_result, tg1, vm2_result, tg2, match_result, tg3}
 PUBLIC API:
     run(alert: dict) -> dict
 
 DOES NOT DO:
-    - Vision model 2, TG#2, matcher, TG#3
+    - Send Telegram messages (transport handled by listener)
     - Severity scoring (no severity fields in pipeline)
-    - Per-class dispatch (single linear flow)
+    - Per-class dispatch (single linear flow; mode dispatch in detail_class)
 CALLS INTO:
     - infra.gate: run_gate() for YOLO motion gate
     - infra.pipeline_cooldown: PipelineCooldown.record_hit
-    - infra.vision_analyzer: verify_class() for VM1 classification
+    - infra.vision_analyzer: verify_class(), detail_class()
+    - infra.paths: VEHICLE_KNOWN_FILE for candidates
     - telegram_formatter.alert: build_alert_message() for TG#1
+    - telegram_formatter.detail: build_detail_message() for TG#2
+    - telegram_formatter.match_alert: build_match_message() for TG#3
+    - vehicle_matcher: match_vehicle() for vehicle matching
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from infra.gate import GateVerdict, run as run_gate
+from infra.paths import VEHICLE_KNOWN_FILE
 from infra.pipeline_cooldown import PipelineCooldown
-from infra.vision_analyzer import verify_class
+from infra.vision_analyzer import detail_class, verify_class
 from telegram_formatter.alert import build_alert_message
+from telegram_formatter.detail import build_detail_message
+from telegram_formatter.match_alert import build_match_message
+from vehicle_matcher import match_vehicle
+
 
 def _gsum(v: GateVerdict) -> dict:
     return {"decision": v.decision, "class_label": v.class_label,
@@ -62,8 +73,21 @@ def _tiny_jpeg() -> str:
     Path(p).write_bytes(_J)
     return p
 
+
+def _load_candidates() -> list[dict]:
+    """Load known-vehicle candidates from disk. Returns empty list on miss."""
+    p = Path(VEHICLE_KNOWN_FILE)
+    if not p.is_file():
+        return []
+    try:
+        return json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
 def run(alert: dict) -> dict:
-    """Stages 1-7: extract, cooldown, frames, gate, record, verify, TG#1."""
+    """Stages 1-11: extract, cooldown, frames, gate, record, verify, TG#1,
+    VM2 detail, TG#2, vehicle match, TG#3."""
     camera_id = alert.get("camera_id", "unknown")
     classification = alert.get("classification", "motion")
     camera_label = alert.get("camera_label", camera_id)
@@ -111,9 +135,30 @@ def run(alert: dict) -> dict:
         camera_label=camera_label,
     )
 
+    # Stage 8: detail_class (VM2) — mode from vm1_result["class"].
+    mode = vm1_result.get("class", "vehicle")
+    vm2_result = detail_class(mode, a_p, b_p)
+
+    # Stage 9: build TG#2 via detail formatter.
+    tg2 = build_detail_message(mode, vm2_result, Path(a_p), Path(b_p),
+                               camera_label=camera_label)
+
+    # Stage 10: vehicle match (vehicle only).
+    match_result: dict = {"matched": False}
+    if mode == "vehicle":
+        candidates = _load_candidates()
+        match_result = match_vehicle(vm2_result, candidates)
+
+    # Stage 11: build TG#3 (vehicle only).
+    tg3 = {}
+    if mode == "vehicle":
+        tg3 = build_match_message(match_result, vm2_result)
+
     return {
         "status": "ok", "camera_id": camera_id,
         "classification": classification, "frames": frames,
         "gate": _gsum(gate_verdict),
         "vm1_result": vm1_result, "tg1": tg1,
+        "vm2_result": vm2_result, "tg2": tg2,
+        "match_result": match_result, "tg3": tg3,
     }
