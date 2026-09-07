@@ -58,7 +58,9 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+
+UTC = timezone.utc  # compat shim for Python 3.9 (UTC was added in 3.11)
 from pathlib import Path
 
 import cv2  # only used for NMS in _postprocess
