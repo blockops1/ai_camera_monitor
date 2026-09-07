@@ -3,6 +3,9 @@ name = "farm-surveillance-v2"
 version = "0.1.0"
 description = "v2 vision pipeline listener (from-nothing rebuild)"
 requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0",
+]
 
 [tool.ruff.lint]
 # v2 module-style: one import line per source module.
@@ -15,6 +18,6 @@ isort.combine-as-imports = true
 "infra/*.py" = []
 
 [tool.pyright]
-include = ["infra", "telegram_formatter", "vehicle_matcher", "tests"]
+include = ["infra", "listener", "telegram_formatter", "vehicle_matcher", "tests"]
 exclude = ["**/__pycache__", ".venv", ".desloppify", ".qa"]
 reportMissingImports = "warning"
