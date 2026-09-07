@@ -1,0 +1,20 @@
+[project]
+name = "farm-surveillance-v2"
+version = "0.1.0"
+description = "v2 vision pipeline listener (from-nothing rebuild)"
+requires-python = ">=3.11"
+
+[tool.ruff.lint]
+# v2 module-style: one import line per source module.
+# Avoids splitting combined imports like `from x import a, b`.
+isort.split-on-trailing-comma = false
+isort.combine-as-imports = true
+
+[tool.ruff.lint.per-file-ignores]
+# Module docstrings may use words that look like keywords elsewhere (gate, classify).
+"infra/*.py" = []
+
+[tool.pyright]
+include = ["infra", "telegram_formatter", "vehicle_matcher", "tests"]
+exclude = ["**/__pycache__", ".venv", ".desloppify", ".qa"]
+reportMissingImports = "warning"
