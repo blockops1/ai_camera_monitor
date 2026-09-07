@@ -1,47 +1,56 @@
 """
-pipeline.py — 11-stage linear alert pipeline (stub for US-009).
+pipeline.py — Stages 1-3 of the 11-stage linear alert pipeline.
 
-STATUS: provisional (stub — full implementation in US-010)
-THREAD SAFETY: single-threaded (async function, called from single-threaded daemon)
+STATUS: provisional (stages 1-3 only; full pipeline in US-008b)
+THREAD SAFETY: single-threaded
 
 INPUTS:
-    - alert: dict (required) — webhook alert payload from camera
+    - alert: dict (required) — webhook alert payload (has camera_id, classification, frames)
 
 OUTPUTS:
-    - return value: dict with classification results and formatted message dicts
-      for TG#1, TG#2, TG#3 (empty dict keys when stages are skipped)
+    - return dict: {status, camera_id, classification} or {status, camera_id, classification, frames}
 
 PUBLIC API:
     run(alert: dict) -> dict
-        Execute the 11-stage pipeline on a camera webhook alert.
-        Returns a dict with 'classification', 'tg1', 'tg2', 'tg3' keys.
+        Execute stages 1-3: extract, cooldown check, load frames.
 
 DOES NOT DO:
-    - Send Telegram messages (that lives in handle_webhook)
-    - Run as a daemon (that lives in the listener daemon, US-011)
-    - Expose an HTTP endpoint (that lives in US-011)
+    - Gate, vision, Telegram, or cooldown record (stages 4-11 in US-008b/c)
+    - Use async (sync for easier extension across US-008b/US-008c)
 
 CALLED BY:
-    - listener.listener: handle_webhook() (US-009, deferred US-010)
+    - listener.listener: handle_webhook() via asyncio.run(pipeline_run(alert))
 
 CALLS INTO:
-    - (deferred: infra.gate, infra.vision_analyzer, infra.pipeline_cooldown,
-      telegram_formatter.alert, telegram_formatter.detail, telegram_formatter.match)
+    - infra.pipeline_cooldown: PipelineCooldown.should_suppress
 """
 
 from __future__ import annotations
 
+from infra.pipeline_cooldown import PipelineCooldown
 
-async def run(alert: dict) -> dict:
-    """Execute the 11-stage pipeline on a camera webhook alert.
 
-    Args:
-        alert: webhook alert payload from camera.
+def run(alert: dict) -> dict:
+    """Stages 1-3: extract camera_id/classification, check cooldown, load frames."""
+    # Stage 1: extract camera_id + classification from alert.
+    camera_id = alert.get("camera_id", "unknown")
+    classification = alert.get("classification", "motion")
 
-    Returns:
-        Dict with 'classification' and stage output keys (tg1, tg2, tg3).
-    """
-    # Stub — full implementation in US-010.
-    # The pipeline runs: capture -> crops -> gate -> cooldown -> VM1 -> TG1
-    # -> VM2 -> TG2 -> match -> TG3 -> record_hit.
-    return {"classification": "vehicle", "tg1": {}, "tg2": {}, "tg3": {}}
+    # Stage 2: cooldown check via PipelineCooldown.should_suppress.
+    cooldown = PipelineCooldown()
+    if cooldown.should_suppress(camera_id, classification):
+        return {
+            "status": "suppressed",
+            "camera_id": camera_id,
+            "classification": classification,
+        }
+
+    # Stage 3: load 4 frames from alert.
+    frames = list(alert.get("frames", []))
+
+    return {
+        "status": "ok",
+        "camera_id": camera_id,
+        "classification": classification,
+        "frames": frames,
+    }
