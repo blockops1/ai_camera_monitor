@@ -46,7 +46,7 @@
     {
       "id": "US-017b",
       "title": "load telegram bot token from ~/.env at daemon boot",
-      "status": "todo",
+      "status": "done",
       "depends_on": [
         "US-017a"
       ],
