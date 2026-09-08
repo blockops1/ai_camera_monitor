@@ -64,27 +64,6 @@
       ],
       "estimate_loc": 12,
       "rationale": "Without a real telegram token, even perfect YOLOv8n detections cannot deliver alerts. The placeholder was likely a deployment-time stub that was never replaced. Migrating the secret out of the plist (which is in a wider-readable location than ~/.env) is also better security posture. Merging env from ~/.env at startup keeps the daemon config-driven without leaking secrets into the repo."
-    },
-    {
-      "id": "US-017c",
-      "title": "reader-wedge watchdog: detect flat frames_decoded_total and force reconnect",
-      "status": "todo",
-      "depends_on": [
-        "US-017a"
-      ],
-      "card_body_fallback": "CameraCaptureRegistry._reconnect_loop polls is_healthy() every 5s. is_healthy() returns False only when _healthy=False OR _last_frame_time is None OR (now - last_frame) > 5s. In the 2026-09-08 incident the previous daemon's readers were connected (container open, TCP socket ESTABLISHED) but stuck in container.demux() with no frames; _last_frame_time stayed at its boot value (None) which SHOULD have made is_healthy() return False, yet no 'Reader X unhealthy' log line appeared for hours. Add a second watchdog: every 30s, snapshot frames_decoded_total per reader. If a reader has been connected for >30s and the snapshot count has not increased since the last check, force-stop and replace the reader. Log 'Reader X stuck (no frames in 30s); reconnecting.' with the frames_decoded_total before and after.",
-      "ac": [
-        "AC1: grep -nE 'frames_decoded_total' infra/frame_capture.py returns >=3 matches: the existing field declaration, the new snapshot in _reconnect_loop, and the comparison.",
-        "AC2: python3 -c 'from infra.frame_capture import CameraCaptureRegistry; print(hasattr(CameraCaptureRegistry, \"_wedge_watchdog\"))' prints True (or equivalent class method is present).",
-        "AC3: Unit test in tests/ simulates a wedge: stub a PersistentRTSPReader with frames_decoded_total that does not advance over two watchdog ticks; assert the watchdog calls reader.stop() and replaces it in the registry.",
-        "AC4: pytest tests/ -x --tb=short returns >= 117 passed (one new wedge-watchdog test added)."
-      ],
-      "files": [
-        "infra/frame_capture.py",
-        "tests/test_frame_capture_wedge_watchdog.py"
-      ],
-      "estimate_loc": 35,
-      "rationale": "Auto-recovery for the failure mode observed on 2026-09-08: a previous daemon ran for hours with readers wedged in container.demux() (TCP socket ESTABLISHED, _healthy=True after av.open(), _last_frame_time=None) and the existing is_healthy() chain did not log a reconnect. Without this watchdog, the operator must manually bounce the daemon to recover. The watchdog closes the class of failure rather than the instance."
     }
   ],
   "verification_post_stories": [
