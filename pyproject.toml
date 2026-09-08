@@ -5,6 +5,22 @@ description = "v2 vision pipeline listener (from-nothing rebuild)"
 requires-python = ">=3.11"
 dependencies = [
     "flask>=3.0",
+    "python-telegram-bot>=21.0",
+    "opencv-python-headless>=4.8",
+    "numpy>=1.24",
+    "Pillow>=10.0",
+    "onnxruntime>=1.16",
+    "av>=11.0",
+    "httpx>=0.25",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+    "pyright",
 ]
 
 [tool.ruff.lint]
