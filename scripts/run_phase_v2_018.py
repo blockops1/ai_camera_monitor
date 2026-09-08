@@ -51,7 +51,7 @@ TELEGRAM_CHAT_ID = _os.environ['OPERATOR_TELEGRAM_CHAT_ID']
 CODER_PROFILE = _os.environ.get('DRIVER_CODER_PROFILE', 'coder')
 MAX_STORY_ATTEMPTS = 2
 POLL_INTERVAL_SEC = 60
-MAX_STORY_DURATION_SEC = 45 * 60  # 45 minutes per story (coder + QA + reviewer)
+MAX_STORY_DURATION_SEC = 75 * 60  # 75 minutes per story (coder + QA + reviewer; big docs stories need ~30 min QA)
 
 
 # ----------------------------------------------------------------------------
