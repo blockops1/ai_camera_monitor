@@ -17,7 +17,7 @@ CALLED BY:
     - tests/test_pipeline_cooldown.py
     - tests/test_vision_analyzer.py
     - tests/test_pipeline.py
-    - tests/test_telegram_formatter.py
+    - tests/test_alert_route.py
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 @pytest.fixture()
 def sample_alert():
-    """Return a minimal sample alert dict as received from a camera webhook."""
+    """Return a minimal sample alert dict as received from a camera."""
     return {
         "id": "evt-test-001",
         "camera_id": "CAM1",
@@ -120,131 +120,3 @@ def mock_cooldown():
     mc = MagicMock()
     mc.should_suppress.return_value = False
     return mc
-
-
-@pytest.fixture()
-def fake_bot_message():
-    """Callable: (text, photos) -> {text, photos}."""
-    from unittest.mock import AsyncMock, MagicMock
-
-    mb = MagicMock()
-    mb.send_message = AsyncMock()
-    mb.send_photo = AsyncMock()
-
-    class FakeBot:
-        def __init__(self, token):
-            pass
-
-        send_message = mb.send_message
-        send_photo = mb.send_photo
-
-    return FakeBot, mb
-
-
-@pytest.fixture(autouse=False)
-def synthetic_webhook_patchers(
-    make_gate_verdict,
-    mock_cooldown,
-    fake_bot_message,
-    monkeypatch,
-):
-    """Patch everything needed to run handle_webhook end-to-end.
-
-    Returns the (FakeBot, mock_bot) pair for inspection.
-    """
-    from unittest.mock import MagicMock, patch
-
-    from listener import listener as lm
-    from listener.pipeline import (
-        build_alert_message,
-        build_detail_message,
-        build_match_message,
-    )
-
-    FakeBot, mb = fake_bot_message
-
-    # Patch asyncio.run: sync values pass through; coroutines are
-    # actually awaited so _send_telegram's Telegram sends work.
-    import asyncio as _real_asyncio
-    _running = False
-
-    def _fake_run(main):
-        if _real_asyncio.iscoroutine(main):
-            loop = _real_asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(main)
-            finally:
-                loop.close()
-        return main
-
-    fake_asyncio = MagicMock()
-    fake_asyncio.run = _fake_run
-
-    # Patch module-level Bot and asyncio
-    with (
-        patch.object(lm, "Bot", FakeBot),
-        patch.object(lm, "asyncio", fake_asyncio),
-        patch.object(lm, "BOT_TOKEN", "fake-token"),
-        patch.object(lm, "HOME_CHAT_ID", "12345"),
-        patch("listener.pipeline.PipelineCooldown", return_value=mock_cooldown),
-        patch(
-            "listener.pipeline.run_gate", return_value=make_gate_verdict
-        ),
-        patch(
-            "listener.pipeline.verify_class",
-            return_value={"class": "vehicle", "confidence": "likely"},
-        ),
-        patch(
-            "listener.pipeline.build_alert_message",
-            return_value={"caption": "Vehicle detected", "photos": []},
-        ),
-        patch(
-            "listener.pipeline.detail_class",
-            return_value={
-                "class_confirmed": "vehicle",
-                "license_plate": "ABC123",
-                "distinctive_features": ["roof_rack"],
-            },
-        ),
-        patch(
-            "listener.pipeline.build_detail_message",
-            return_value={
-                "caption": (
-                    "Camera: CAM1 Label\nClass confirmed: vehicle\n"
-                    "License plate: ABC123\nDistinctive features: roof_rack"
-                ),
-                "photos": [],
-            },
-        ),
-        patch(
-            "listener.pipeline._load_candidates",
-            return_value=[
-                {
-                    "license_plate": "ABC123",
-                    "distinctive_features": ["roof_rack"],
-                    "make": "Toyota",
-                    "model": "Sequoia",
-                    "color": "silver",
-                }
-            ],
-        ),
-        patch(
-            "listener.pipeline.match_vehicle",
-            return_value={
-                "license_plate": "ABC123",
-                "distinctive_features": ["roof_rack"],
-                "matched": True,
-            },
-        ),
-        patch(
-            "listener.pipeline.build_match_message",
-            return_value={
-                "caption": (
-                    "Recognized: ABC123\nStatus: recognized vehicle\n"
-                    "Distinctive features: roof_rack"
-                ),
-                "photos": [],
-            },
-        ),
-    ):
-        yield FakeBot, mb

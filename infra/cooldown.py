@@ -67,8 +67,8 @@ WHY HERE:
 
 CALLED BY:
     - infra.notifier.notify() — is_in_cooldown + is_in_bucket_cooldown
-    - listener.listener._process_alert_safe() — MOTION_COOLDOWN.is_cool / mark
-    - listener.listener.create_app() — MOTION_COOLDOWN.stats() for /status
+    - listener.pipeline.run() — MOTION_COOLDOWN.is_cool / mark
+    - listener.daemon.app() — MOTION_COOLDOWN.stats() for /status
 
 CALLS INTO:
     - threading.Lock: guards both maps + MotionCooldown state

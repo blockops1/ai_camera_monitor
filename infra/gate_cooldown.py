@@ -60,8 +60,8 @@ DOES NOT DO:
     - Track matcher failures → that lives in infra.matcher_failures
 
 CALLED BY:
-    - listener.listener._process_alert() — early-suppression check before
-      the motion gate runs. Phase 6B.154 (PLAN §11.77).
+    - listener.pipeline.run() — early-suppression check before the
+      motion gate runs. Phase 6B.154 (PLAN §11.77).
 
 CALLS INTO:
     - infra.paths.PROJECT_ROOT — locate motion_gate_thresholds.json

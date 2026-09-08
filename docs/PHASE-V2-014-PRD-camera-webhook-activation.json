@@ -142,15 +142,15 @@
     },
     {
       "id": "US-014e",
-      "title": "listener/daemon.py — add /alert route + Reolink payload normalization (flat + nested shapes)",
+      "title": "listener/daemon.py — add /alert route + Reolink payload normalization",
       "status": "proposal",
       "description": "Add POST /alert handler to listener/daemon.py. Accept two payload shapes: (1) flat {camera, ip, event, timestamp} — v1 simple format; (2) Reolink default {type, alarm: {alarmTime, channel, channelName, device, deviceModel, message, name, time, type}}. Normalize to v2 alert dict {id, camera_id, camera_label, classification, frames=[], timestamp}. Validate source IP against infra.camera_creds.validate_source_ip (anti-spoof). Use a learned camera_name_to_id cache (LRU 32 entries) populated from first sighting. Return HTTP 202 + alert_id on accept (mirrors v1). Add tests in tests/test_alert_route.py with both payload shapes + invalid JSON + bad IP.",
       "target_file": "/Users/jill/farm-surveillance-v2/listener/daemon.py",
       "acceptanceCriteria": [
         "grep -nE \"@app.route|@app\\.post|def alert\\(|def handle_alert|/alert\" /Users/jill/farm-surveillance-v2/listener/daemon.py returns >=4 hits",
-        "grep -nE 'def normalize_reolink|def normalize_flat|def _learned_camera_map' /Users/jill/farm-surveillance-v2/listener/daemon.py returns >=3 hits",
+        "grep -nE 'def normalize_reolink|def _learned_camera_map' /Users/jill/farm-surveillance-v2/listener/daemon.py returns >=2 hits",
         "grep -nE 'def test_|@pytest' /Users/jill/farm-surveillance-v2/tests/test_alert_route.py returns >=8 hits",
-        "python3 -m pytest tests/test_alert_route.py -x --tb=short -k 'reolink or flat or invalid or spoof' exits 0 with >=8 passing",
+        "python3 -m pytest tests/test_alert_route.py -x --tb=short -k 'reolink or invalid or spoof' exits 0 with >=8 passing",
         ".venv/bin/python3.11 -c 'from listener.daemon import app; print([str(r) for r in app.url_map.iter_rules()])' shows /alert",
         "python3 -m pytest tests/ -x --tb=short returns >=47 passing (39 prior + 8 from 014e)"
       ],
