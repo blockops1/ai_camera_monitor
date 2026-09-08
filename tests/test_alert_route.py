@@ -4,6 +4,10 @@ test_alert_route.py — Tests for listener/daemon.py /alert route.
 Tests: Reolink nested shape, invalid JSON, bad source IP (spoof),
 unknown payload shape, learned camera map, frame pull, pipeline
 integration, end-to-end full pipeline.
+
+Note: All IP addresses use the RFC 5737 documentation prefix
+(192.0.2.0/24, TEST-NET-1) to avoid leaking production camera
+addresses into the source tree. See RFC 5737, section 3.
 """
 
 from __future__ import annotations
@@ -27,7 +31,7 @@ class TestNormalizeReolink:
                 "device": "Front Door Outside",
             },
         }
-        result = normalize_reolink(payload, "192.168.1.39")
+        result = normalize_reolink(payload, "192.0.2.1")
         assert result is not None
         assert result["camera_id"] == "Front Door Outside"
         assert result["classification"] == "motion"
@@ -43,18 +47,18 @@ class TestNormalizeReolink:
                 "channelName": "Back Door Inside",
             },
         }
-        result = normalize_reolink(payload, "192.168.1.85")
+        result = normalize_reolink(payload, "192.0.2.2")
         assert result is not None
         assert result["classification"] == "person"
         assert result["camera_id"] == "Back Door Inside"
 
     def test_reolink_missing_alarm_returns_none(self):
         """Payload without alarm key returns None."""
-        assert normalize_reolink({"type": "motion"}, "192.168.1.39") is None
+        assert normalize_reolink({"type": "motion"}, "192.0.2.1") is None
 
     def test_reolink_alarm_not_dict_returns_none(self):
         """Payload with non-dict alarm returns None."""
-        assert normalize_reolink({"alarm": "bad"}, "192.168.1.39") is None
+        assert normalize_reolink({"alarm": "bad"}, "192.0.2.1") is None
 
     def test_reolink_outer_type_overrides(self):
         """Outer type overrides inner type when they differ."""
@@ -66,7 +70,7 @@ class TestNormalizeReolink:
                 "channelName": "Front Door Outside",
             },
         }
-        result = normalize_reolink(payload, "192.168.1.39")
+        result = normalize_reolink(payload, "192.0.2.1")
         assert result is not None
         assert result["classification"] == "vehicle"
 
@@ -80,7 +84,7 @@ class TestNormalizeReolink:
                 "device": "Outside Front Garage",
             },
         }
-        result = normalize_reolink(payload, "192.168.1.103")
+        result = normalize_reolink(payload, "192.0.2.3")
         assert result is not None
         assert result["camera_id"] == "Outside Front Garage"
 
