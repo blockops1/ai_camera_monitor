@@ -342,5 +342,37 @@ def main():
     app.run(host=host, port=port)
 
 
+# ---------------------------------------------------------------------------
+# /debug/rtsp — live RTSP reader ring-buffer stats (operator introspection).
+# Returns frame counts, ring fill levels, and last-frame age per camera.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/debug/rtsp")
+def debug_rtsp():
+    """Return live stats for all persistent RTSP readers."""
+    from infra.frame_capture import CameraCaptureRegistry
+
+    stats = CameraCaptureRegistry.stats_all()
+    payload = {
+        "registry_present": bool(stats),
+        "cameras": {
+            cid: {
+                "frames_decoded_total": s["frames_decoded_total"],
+                "ring_size": s["ring_size"],
+                "ring_capacity": s["ring_capacity"],
+                "healthy_flag": s["healthy_flag"],
+                "seconds_since_last_frame": s["seconds_since_last_frame"],
+                "consecutive_errors": s["consecutive_errors"],
+                "reconnects_total": s["reconnects_total"],
+                "container_open": s["container_open"],
+                "is_running": s["is_running"],
+            }
+            for cid, s in stats.items()
+        },
+    }
+    return (payload, 200)
+
+
 if __name__ == "__main__":
     main()
