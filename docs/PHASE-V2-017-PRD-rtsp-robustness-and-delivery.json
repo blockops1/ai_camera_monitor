@@ -91,10 +91,11 @@
     {
       "id": "US-017e",
       "title": "port v1-refactor max_reconnect_attempts cap (cap failure-driven reconnects, defer to watchdog)",
-      "status": "todo",
+      "status": "done",
       "depends_on": [
         "US-017d"
       ],
+      "completed_at": "2026-09-08",
       "card_body_fallback": "**Story.** Port v1-refactor's failure-driven reconnect cap into v2. After `FARMSV_RTSP_MAX_RETRIES` consecutive decode failures (default 10), the in-loop reconnect retries stop; the loop defers to `scheduled_reconnect_watchdog` from US-017d for the next attempt. Prevents log spam and CPU hammering during long camera outages (Reolink RTSP-session stickiness / CAM3 2026-08-28 incident) without losing the watchdog's hourly recovery cycle. **Reference implementation:** `/Users/jill/farm-surveillance-refactor/infra/persistent_rtsp.py` lines 932-1020 (inline in `_run_loop`) + `_resolve_max_reconnect_attempts` (~lines 260-280). **Behavior:** (1) on each `_decode_iteration` exception, increment `_consecutive_errors`; (2) while `_consecutive_errors < _max_reconnect_attempts`, log a warning + backoff retry as today; (3) once cap is hit, log `consecutive_reconnect_cap_reached`, set `cap_exhausted=True`, and sleep until either `stop_event` or the watchdog fires; (4) when the watchdog closes `_container` from its own thread, the demux loop raises, falls through to this except block, and re-attempts — either succeeding and resetting the cap (log recovery) or hitting the cap again (no-op since `cap_exhausted=True`). **Honor this env var** matching v1's interface: `FARMSV_RTSP_MAX_RETRIES` (default 10). **Why depends on US-017d:** the defer target IS the watchdog thread.",
       "ac": [
         "AC1: grep -nE 'def _resolve_max_reconnect_attempts|_consecutive_errors|_max_reconnect_attempts' infra/frame_capture.py returns >=4 matches (resolver + state field + assignment + read).",
