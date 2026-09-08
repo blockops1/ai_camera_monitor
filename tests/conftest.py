@@ -24,9 +24,23 @@ from __future__ import annotations
 
 import base64
 import os
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+# ---------------------------------------------------------------------------
+# PyAV stub — the project venv may lack av; tests mock av.open() anyway.
+# Must run at import time (before test collection) so infra.frame_capture
+# can `import av` successfully.
+# ---------------------------------------------------------------------------
+import sys as _sys
+_av_stub = MagicMock()
+_av_stub.__version__ = "15.1.0"
+_av_stub.container = MagicMock()
+_av_stub.container.InputContainer = MagicMock
+_sys.modules.setdefault("av", _av_stub)
 
 # Directory for test data assets.
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
