@@ -48,6 +48,7 @@ CALLS INTO:
 from __future__ import annotations
 
 import os
+import logging
 import uuid
 from collections import deque
 from collections.abc import MutableMapping
@@ -55,7 +56,25 @@ from datetime import UTC, datetime
 
 from flask import Flask, jsonify, request
 
+# ---------------------------------------------------------------------------
+# Logging — wire once at import time so every logger in the v2 codebase
+# (daemon, frame_capture, gate, pipeline, quick_classifier, …) routes to
+# stderr. launchd captures stderr → logs/daemon-error.log per the plist,
+# so all WARNING+ diagnostics from any module land in one place.
+#
+# Honor LOG_LEVEL env var (default INFO). Setting it BEFORE basicConfig
+# means operator can debug-class issues without redeploying code.
+# ---------------------------------------------------------------------------
+_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, _LOG_LEVEL, logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    stream=__import__("sys").stderr,
+    force=True,  # override any earlier basicConfig() (e.g. from a library)
+)
+
 app = Flask(__name__)
+log = logging.getLogger("daemon")
 
 
 # ---------------------------------------------------------------------------
@@ -300,9 +319,24 @@ def generate_plist() -> str:
 
 
 def main():
-    """Entry point for `python -m listener.daemon`."""
+    """Entry point for `python -m listener.daemon`.
+
+    Boots the persistent RTSP reader registry for all configured cameras
+    BEFORE the Flask server accepts requests, so the first /alert has
+    a reader ready. start_all() joins each reader's boot thread with a
+    30s timeout, so this blocks briefly at startup.
+    """
     host = os.environ.get("LISTEN_HOST", "0.0.0.0")
     port = int(os.environ.get("LISTEN_PORT", "8090"))
+
+    from infra.frame_capture import CameraCaptureRegistry
+    import infra.camera_creds as _camera_creds
+
+    n_cameras = len(_camera_creds.get_all_cameras())
+    log.info("Booting RTSP readers for %d camera(s)...", n_cameras)
+    CameraCaptureRegistry.start_all()
+    log.info("RTSP registry ready.")
+
     app.run(host=host, port=port)
 
 
