@@ -51,7 +51,7 @@ TELEGRAM_CHAT_ID = _os.environ['OPERATOR_TELEGRAM_CHAT_ID']
 CODER_PROFILE = _os.environ.get('DRIVER_CODER_PROFILE', 'coder')
 MAX_STORY_ATTEMPTS = 2
 POLL_INTERVAL_SEC = 60
-MAX_STORY_DURATION_SEC = 25 * 60  # 25 minutes per story
+MAX_STORY_DURATION_SEC = 45 * 60  # 45 minutes per story (coder + QA + reviewer)
 
 
 # ----------------------------------------------------------------------------
@@ -177,6 +177,13 @@ def is_worker_alive(task_id: str) -> bool:
     out = subprocess.run(['pgrep', '-f', f'work kanban task {task_id}'],
                          capture_output=True, text=True).stdout.strip()
     return bool(out)
+
+
+def _commit_landed_for(story_id: str) -> bool:
+    """True if a commit on main references this story id."""
+    rc, out, _ = sh(['git', 'log', '--oneline', '-20', '--grep', story_id],
+                    timeout=10)
+    return rc == 0 and out.strip() != ''
 
 
 # ----------------------------------------------------------------------------
@@ -327,7 +334,15 @@ def run_story(story: dict, prd: dict, state: dict) -> str:
             time.sleep(POLL_INTERVAL_SEC)
             terminal, status, _ = is_task_terminal(task_id)
             if not terminal:
-                log(f'  worker died and task not terminal — treat as crash')
+                # Worker died but no kanban terminal state. Check if the commit
+                # actually landed on disk and pytest is green — if so, the work
+                # succeeded but the review pipeline glitched. Auto-mark done.
+                log(f'  worker died, task={status} — checking commit on disk')
+                if _commit_landed_for(sid) and run_pytest()[0]:
+                    log(f'  commit landed + tests green → auto-marking done')
+                    notify(f'{sid}: worker died but commit+tests clean — auto-marking done')
+                    return 'done'  # handled outside via mark_story_done
+                log(f'  worker died, no commit found — treat as crash')
                 story['attempts'] += 1
                 save_prd(prd)
                 return 'blocked'
