@@ -49,7 +49,13 @@ def handle_webhook(alert: dict) -> dict:
     try/except so neither failure mode crashes the webhook handler.
     """
     try:
-        result = asyncio.run(pipeline_run(alert))
+        coro = pipeline_run(alert)
+        # pipeline.run() may be sync (returns dict) or async (returns coroutine).
+        # Tests patch asyncio.run, so check for the awaitable.
+        if asyncio.iscoroutine(coro):
+            result = asyncio.run(coro)
+        else:
+            result = coro
     except Exception as exc:
         return {
             "status": "error",
