@@ -86,6 +86,26 @@ class PersistentRTSPReader:
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
+    def stats(self) -> dict:
+        """Return live runtime stats for this reader (debug introspection)."""
+        with self._ring_lock:
+            ring_size = len(self._ring)
+        last = self._last_frame_time
+        return {
+            "frames_decoded_total": self.frames_decoded_total,
+            "ring_size": ring_size,
+            "ring_capacity": self._ring_size,
+            "healthy_flag": self._healthy,
+            "last_frame_time": last,
+            "seconds_since_last_frame": (
+                (time.monotonic() - last) if last is not None else None
+            ),
+            "consecutive_errors": self._consecutive_errors,
+            "reconnects_total": self.reconnects_total,
+            "container_open": self._container is not None,
+            "is_running": self.is_running,
+        }
+
     def is_healthy(self, stale_seconds: float = 5.0) -> bool:
         if not self._healthy or self._last_frame_time is None:
             return False
@@ -298,10 +318,16 @@ class CameraCaptureRegistry:
         threads: list[threading.Thread] = []
         for camera_id, cam_info in cameras.items():
             rtsp_url = cam_info.get("rtsp_url", "")
+            # Use the uppercase prefix as the registry key so it matches the
+            # camera_id that the /alert pipeline resolves via IP fallback.
+            # Without this, get_recent_frames("OUTSIDE_FRONT_SOLAR") misses the
+            # boot reader keyed by friendly name and the lazy get() fallback
+            # would create a second reader under the prefix key.
+            registry_key = cam_info.get("prefix") or camera_id
             t = threading.Thread(
                 target=cls._boot_one,
-                args=(camera_id, rtsp_url),
-                name=f"boot[{camera_id}]",
+                args=(registry_key, rtsp_url),
+                name=f"boot[{registry_key}]",
                 daemon=True,
             )
             threads.append(t)
@@ -336,6 +362,15 @@ class CameraCaptureRegistry:
             for reader in inst._readers.values():
                 reader.stop(timeout=3.0)
             inst._readers.clear()
+
+    @classmethod
+    def stats_all(cls) -> dict[str, dict]:
+        """Return {camera_id: stats_dict} for all registered readers."""
+        inst = cls._instance
+        if inst is None:
+            return {}
+        with inst._lock:
+            return {cid: r.stats() for cid, r in inst._readers.items()}
 
     @classmethod
     def is_healthy_all(cls) -> dict[str, bool]:
