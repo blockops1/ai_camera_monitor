@@ -159,13 +159,13 @@ def get_gate_cooldown_seconds(camera_name: str, event_type: str) -> int:
     Returns the window in seconds. 0 means "no cooldown; do not suppress".
     Does NOT touch the in-memory map.
 
-    Phase 6B.167 §13.4 Commit 17 (T3 C17): JSON keys are CAM{N} codes,
-    not friendly names. infra.cameras.code_for() translates; falls
-    back to the bare name if no registry match (test-fixture path).
+    Phase 6B.167 §13.4 (revised 2026-09-08 per Mr. V directive): JSON keys
+    are camera PREFIXES (FRONT, BACK, ...), not CAM{N} codes. Pipeline
+    passes camera_id directly; no translation layer required.
+    infra.cameras.code_for dropped.
     """
-    from infra.cameras import code_for  # §13.4: name → CAM{N}
     cfg = _load_thresholds_config()
-    cam_cfg = cfg.get(code_for(camera_name), {})
+    cam_cfg = cfg.get(camera_name, {})
     if not isinstance(cam_cfg, dict):
         return DEFAULT_GATE_COOLDOWN_SECONDS
 

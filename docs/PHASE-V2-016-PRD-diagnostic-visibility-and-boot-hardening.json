@@ -119,6 +119,15 @@
       "files": ["infra/quick_classifier.py", "models/yolov8n.onnx"],
       "estimate_loc": 15,
       "rationale": "infra/quick_classifier.QuickClassifier.__init__ raised FileNotFoundError when models/yolov8n.onnx was absent, killing every /alert after IP-validation passed. Operator 2026-09-08 directive: HARD FAIL, never silent degradation. Fix: ship the model + raise + log FATAL + sys.exit(1) when missing."
+    },
+    {
+      "id": "US-016f",
+      "title": "unblock gate pipeline: drop code_for indirection + ship motion_gate_thresholds.json",
+      "status": "todo",
+      "depends_on": ["US-016e"],
+      "files": ["infra/gate.py", "infra/gate_cooldown.py", "infra/paths.py", "config/motion_gate_thresholds.json"],
+      "estimate_loc": 30,
+      "rationale": "Discovered 2026-09-08 during v2 LIVE bounce verification (US-016d basicConfig revealed silent crash). gate.py:563 + gate_cooldown.py:166 import from infra.cameras (NEVER SHIPPED). config/motion_gate_thresholds.json (NEVER SHIPPED). Both per §13.4 NEW-schema camera registry that was scaffolded but never populated. Operator 2026-09-08 directive: drop the indirection entirely; pipeline already passes camera prefix (FRONT/BACK/...) directly; use prefix as JSON key. No translation module needed. Env file stays source of truth for camera identity."
     }
   ],
   "verification_post_stories": [

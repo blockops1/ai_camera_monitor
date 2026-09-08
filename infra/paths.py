@@ -216,10 +216,16 @@ LLM_CREDS_FILE = os.path.join(PROJECT_ROOT, "llm-creds.env")  # Phase 6B.146
 # Phase 6B.167 §13.2 NEW-schema camera registry. Precedence:
 #   1. $FARMSURV_CAMERAS_ENV (operator can pin an arbitrary path)
 #   2. CAMERAS_ENV_FILE (the default location, NEW schema)
-#   3. infra.cameras falls back to CAMERA_CREDS_FILE (legacy parse)
+#   3. CAMERA_CREDS_FILE (legacy parse — current v2 default)
 # The operator runs the listener with FARMSURV_CAMERAS_ENV unset,
 # so CAMERAS_ENV_FILE wins when present; if it's missing, the
 # legacy parser takes over (back-compat).
+#
+# §13.4 revised 2026-09-08 per Mr. V directive: JSON config keys
+# (motion_gate_thresholds.json, etc.) use camera PREFIXES (FRONT,
+# BACK, OUTSIDE_FRONT_GARAGE, ...) directly — pipeline passes
+# camera_id through unchanged. infra.cameras.code_for() indirection
+# was scaffolded in code but never shipped; removed.
 CAMERAS_ENV_FILE = os.path.join(PROJECT_ROOT, "cameras.env")
 
 # Motion recipe (Phase 6B.166 §11.87.3, 2026-08-30).
