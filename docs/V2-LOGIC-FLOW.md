@@ -1,6 +1,6 @@
 # v2 Logic Flow — Textual
 
-Source: `~/farm-surveillance-v2/` @ commit `4daabf3` (all 8 US-014 stories committed).
+Source: `<PROJECT_ROOT>/` @ commit `4daabf3` (all 8 US-014 stories committed).
 Last verified by reading source: 2026-09-08.
 
 ---
@@ -10,7 +10,7 @@ Last verified by reading source: 2026-09-08.
 A Reolink camera POSTs `/alert` on `0.0.0.0:8090` → Flask daemon normalizes the payload
 → validates the source IP against `camera-creds.env` → pulls 4 recent frames from a
 persistent RTSP reader → runs an 11-stage pipeline (cooldown → YOLO gate → VM1 → VM2 →
-vehicle match) → formats 1-3 Telegram messages → sends to home chat `374999219`.
+vehicle match) → formats 1-3 Telegram messages → sends to home chat `<TELEGRAM_CHAT_ID>`.
 
 ---
 
@@ -23,13 +23,13 @@ Two routes, both POST only:
 | `/alert`    | PRIMARY (Reolink POST)   | `daemon.alert()` → normalize → IP validate → frames → pipeline |
 
 launchd plist: `com.farm.surveillance.v2.plist`, `KeepAlive=true`, `RunAtLoad=true`.
-Currently PID 87987. Logs → `~/farm-surveillance-v2/logs/daemon.log`.
+Currently PID 87987. Logs → `<PROJECT_ROOT>/logs/daemon.log`.
 
 ---
 
 ## B. `/alert` HANDLER (the active path post-US-014f)
 
-```
+
 POST /alert (Flask)
 │
 ├─ source_ip = request.headers["X-Forwarded-For"].split(",")[0] || request.remote_addr
@@ -58,7 +58,7 @@ POST /alert (Flask)
 │   )                                             ← /tmp/frame_001.jpg..frame_004.jpg
 │
 └─ result = pipeline.run(alert_dict) → return 200 JSON
-```
+
 
 The learned-camera map (`_LearnedCameraMap(maxlen=32)`) caches the (label→prefix) match
 so future calls with the same friendly name skip the full scan.
@@ -70,7 +70,7 @@ so future calls with the same friendly name skip the full scan.
 ### `normalize_reolink(payload, source_ip)` → `dict | None`
 
 **Input** (Reolink default alert payload):
-```json
+json
 {
   "type": "motion",
   "alarm": {
@@ -83,10 +83,10 @@ so future calls with the same friendly name skip the full scan.
     "..."
   }
 }
-```
+
 
 **Output**:
-```json
+json
 {
   "id": "<uuid4>",
   "camera_id":     "Front Door Outside",
@@ -95,7 +95,7 @@ so future calls with the same friendly name skip the full scan.
   "frames": [],
   "timestamp": "2026-09-07T20:00:00Z"
 }
-```
+
 
 ---
 
@@ -115,7 +115,7 @@ so future calls with the same friendly name skip the full scan.
 
 ## E. FRAME PULL — `infra/frame_capture.py`
 
-```
+
 get_recent_frames(camera_id, n=4, offset_seconds=6) -> [path1, path2, path3, path4]
 │
 ├─ reader = CameraCaptureRegistry.get(camera_id)
@@ -129,7 +129,7 @@ get_recent_frames(camera_id, n=4, offset_seconds=6) -> [path1, path2, path3, pat
 │        cleans old frame_*.jpg first
 │
 └─ filter by mtime:  keep only frames whose file mtime ≥ now - offset_seconds=6
-```
+
 
 ### `PersistentRTSPReader` lifecycle
 - One thread per camera, daemon=True.
@@ -144,7 +144,7 @@ get_recent_frames(camera_id, n=4, offset_seconds=6) -> [path1, path2, path3, pat
 
 ## F. PIPELINE — `listener/pipeline.py` (single-threaded, 11 stages)
 
-```
+
 pipeline.run(alert) -> dict
 │
 ├─ [Stage 1] extract
@@ -224,7 +224,7 @@ pipeline.run(alert) -> dict
       vm2_result, tg2,
       match_result, tg3
     }
-```
+
 
 ---
 
@@ -263,12 +263,12 @@ pipeline.run(alert) -> dict
 
 ## I. VISION — `infra/vision_analyzer.py` → llama-server @ `127.0.0.1:8080`
 
-```
+
 POST /v1/chat/completions
   model:       "vm1_classify" | "vm2"    (PIDs: Qwen3-VL @ :8080)
   messages:    [{role:user, content:[{type:text, text:prompt()}, b64_image_a, b64_image_b, ...]}]
   response_format: <SCHEMA_JSON>          (vehicle/person/animal)
-```
+
 
 | Function        | Mode            | Prompt source                          | Schema source                 |
 |-----------------|-----------------|----------------------------------------|-------------------------------|
@@ -294,12 +294,12 @@ Errors → `VisionAnalyzerError` (HTTP non-200, connection failure, parse error)
 
 ## K. VEHICLE MATCHER — `vehicle_matcher/match.py`
 
-```
+
 match_vehicle(vm2_result: dict, candidates: list[dict]) -> dict
 │
 └─ candidates loaded from data/vehicles/known_vehicles.json (12 entries)
    Returns {"matched": bool, "entry": dict | None, "score": float, "reason": str}
-```
+
 
 ---
 
@@ -307,18 +307,18 @@ match_vehicle(vm2_result: dict, candidates: list[dict]) -> dict
 
 | Component          | Endpoint                              | Notes                          |
 |--------------------|---------------------------------------|--------------------------------|
-| Reolink cameras    | `192.168.1.{39,73,85,103,108,113}`    | POST /alert (X-Forwarded-For OK) |
+| Reolink cameras    | `<CAM_1_IP>,<CAM_2_IP>,<CAM_6_IP>,<CAM_4_IP>,<CAM_3_IP>,<CAM_7_IP>`    | POST /alert (X-Forwarded-For OK) |
 | vision llama-server| `127.0.0.1:8080/v1/chat/completions`  | Qwen3-VL, PID 76829, -np 4     |
 | Telegram bot       | env: `TELEGRAM_BOT_TOKEN`             | python-telegram-bot v21+      |
-| Home chat          | `374999219` (`TELEGRAM_HOME_CHAT_ID`) | Mr. V's home channel          |
-| launchd            | `~/Library/LaunchAgents/com.farm.surveillance.v2.plist` | KeepAlive=true, RunAtLoad=true |
+| Home chat          | `<TELEGRAM_CHAT_ID>` (`TELEGRAM_HOME_CHAT_ID`) | Mr. V's home channel          |
+| launchd            | `<HOME_DIR>/Library/LaunchAgents/com.farm.surveillance.v2.plist` | KeepAlive=true, RunAtLoad=true |
 
 ---
 
 ## N. KEY PATHS — `infra/paths.py`
 
-```
-PROJECT_ROOT = ~/farm-surveillance-v2     (env override)
+
+PROJECT_ROOT = <HOME_DIR>/farm-surveillance-v2     (env override)
 DATA_DIR     = $PROJECT_ROOT/data         (env: FARMSURV_DATA_DIR)
   FRAMES_DIR = DATA_DIR/frames
   ALERTS_DIR = DATA_DIR/alerts
@@ -326,17 +326,17 @@ DATA_DIR     = $PROJECT_ROOT/data         (env: FARMSURV_DATA_DIR)
     VEHICLE_KNOWN_FILE = $VEHICLES_DIR/known_vehicles.json   ← 12 entries
 LOGS_DIR     = $PROJECT_ROOT/logs
   daemon.log, daemon-error.log
-```
+
 
 ---
 
 ## O. DEPLOYMENT
 
-- LaunchAgent plist: `~/Library/LaunchAgents/com.farm.surveillance.v2.plist`
-- Command: `/Users/jill/farm-surveillance-v2/.venv/bin/python3.11 -m listener.daemon`
+- LaunchAgent plist: `<HOME_DIR>/Library/LaunchAgents/com.farm.surveillance.v2.plist`
+- Command: `<PROJECT_ROOT>/.venv/bin/python3.11 -m listener.daemon`
 - Env injected by plist: `LISTEN_HOST=0.0.0.0`, `LISTEN_PORT=8090`, `TELEGRAM_BOT_TOKEN`,
   `TELEGRAM_HOME_CHAT_ID`, `VISION_LLM_URL=http://127.0.0.1:8080`, `PATH`.
-- Working directory injected by plist: `/Users/jill/farm-surveillance-v2`.
+- Working directory injected by plist: `<PROJECT_ROOT>`.
 - Currently: **PID 87987** (post 22:02 bounce from PID 56850; old pre-US-014 binary).
 
 ---
