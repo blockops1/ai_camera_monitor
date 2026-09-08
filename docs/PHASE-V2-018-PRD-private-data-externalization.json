@@ -48,7 +48,7 @@
     {
       "id": "US-018b",
       "title": "replace production camera IPs in tests/test_alert_route.py and tests/test_camera_creds.py with RFC 5737 documentation prefixes",
-      "status": "todo",
+      "status": "done",
       "depends_on": [
         "US-018a"
       ],
@@ -65,11 +65,11 @@
         "AC4: a short comment in each test file explaining the prefix choice, citing RFC 5737."
       ],
       "rationale": "Tests must not propagate the operator's network topology. RFC 5737 prefixes are reserved for documentation and cannot collide with a real LAN.",
-      "passes": false,
-      "attempts": 0,
+      "passes": true,
+      "attempts": 1,
       "last_error": null,
-      "commit_sha": null,
-      "task_id": null
+      "commit_sha": "50962f3",
+      "task_id": "t_053f7eb5"
     },
     {
       "id": "US-018c",
