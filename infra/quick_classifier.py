@@ -234,11 +234,19 @@ class QuickClassifier:
                 Ultralytics default)
         """
         if not Path(model_path).is_file():
-            raise FileNotFoundError(
-                f"Model file not found: {model_path}. "
-                f"Download with: curl -sSL -o {model_path} "
-                f"https://github.com/yoobright/yolo-onnx/raw/master/yolov8n.onnx"
+            # Operator 2026-09-08 directive: HARD FAIL on missing model.
+            # Never silently degrade — a missing model means the gate cannot
+            # run, and silently letting the gate suppress every alert would
+            # mask the real problem. Log FATAL (visible in
+            # logs/daemon-error.log once US-016d wires basicConfig) and exit.
+            log.fatal(
+                "quick_classifier: model file missing at %s. "
+                "Download with: curl -sSL -o %s "
+                "https://github.com/yoobright/yolo-onnx/raw/master/yolov8n.onnx",
+                model_path,
+                model_path,
             )
+            raise SystemExit(1)
 
         # Use CoreML execution provider if available (Apple Silicon GPU/ANE),
         # fall back to CPU otherwise.
