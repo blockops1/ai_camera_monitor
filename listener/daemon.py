@@ -64,12 +64,14 @@ from flask import Flask, jsonify, request
 #
 # Honor LOG_LEVEL env var (default INFO). Setting it BEFORE basicConfig
 # means operator can debug-class issues without redeploying code.
+# US-016g (2026-09-08): consolidated to stream=sys.stdout so logs merge
+# with Flask/werkzeug in logs/daemon.log (the launchd StandardOutPath).
 # ---------------------------------------------------------------------------
 _LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, _LOG_LEVEL, logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    stream=__import__("sys").stderr,
+    stream=__import__("sys").stdout,
     force=True,  # override any earlier basicConfig() (e.g. from a library)
 )
 
