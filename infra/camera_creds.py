@@ -93,7 +93,7 @@ def _parse_env(env_path: str) -> dict:
         {
             "FRONT": {
                 "name": "Front Door Outside",
-                "ip": "192.168.1.39",
+                "ip": "192.0.2.1",
                 "user": "admin",
                 "pass": "...",
                 "rtsp_url": "rtsp://...",
