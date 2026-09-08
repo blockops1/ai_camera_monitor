@@ -28,12 +28,12 @@
     {
       "id": "US-017a",
       "title": "boot rtsp registry keyed by camera prefix (single reader per camera)",
-      "status": "todo",
+      "status": "done",
       "depends_on": [],
       "card_body_fallback": "CameraCaptureRegistry.start_all() currently iterates get_all_cameras() and registers each reader under the env-friendly key (e.g. 'Outside Front Solar'). The /alert handler in listener/daemon.py resolves camera_id to the prefix (e.g. 'OUTSIDE_FRONT_SOLAR') via the IP-fallback loop. get_recent_frames(prefix) misses the boot key and the lazy CameraCaptureRegistry.get() creates a SECOND reader. /debug/rtsp shows both entries. Fix: in _boot_one, look up cam.get('prefix', camera_id) and use that as the registry key. Friendly name stays for human-readable log lines only. Single reader per camera, registry keys are all uppercase prefixes.",
       "ac": [
         "AC1: grep -nE 'inst\\._readers\\[camera_id\\]\\s*=\\s*reader' infra/frame_capture.py returns exactly one match and the right-hand side is keyed by the prefix (use cam.get('prefix', camera_id)).",
-        "AC2: python3 -c 'from infra.frame_capture import CameraCaptureRegistry; CameraCaptureRegistry.start_all(); print(sorted(CameraCaptureRegistry.stats_all().keys()))' prints six uppercase-prefix keys (FRONT, BACK, OUTSIDE_FRONT_GARAGE, OUTSIDE_FRONT_POWER, OUTSIDE_FRONT_SOLAR, OUTSIDE_BACK_SOLAR) — no spaces, no duplicates.",
+        "AC2: python3 -c 'from infra.frame_capture import CameraCaptureRegistry; CameraCaptureRegistry.start_all(); print(sorted(CameraCaptureRegistry.stats_all().keys()))' prints six uppercase-prefix keys (FRONT, BACK, OUTSIDE_FRONT_GARAGE, OUTSIDE_FRONT_POWER, OUTSIDE_FRONT_SOLAR, OUTSIDE_BACK_SOLAR) \u2014 no spaces, no duplicates.",
         "AC3: pytest tests/ -x --tb=short returns >= 116 passed.",
         "AC4: After daemon bounce, /debug/rtsp returns exactly 6 camera entries (one per configured camera), all keyed by uppercase prefix."
       ],
@@ -47,7 +47,9 @@
       "id": "US-017b",
       "title": "load telegram bot token from ~/.env at daemon boot",
       "status": "todo",
-      "depends_on": ["US-017a"],
+      "depends_on": [
+        "US-017a"
+      ],
       "card_body_fallback": "The launchd plist at /Users/jill/Library/LaunchAgents/com.farm.surveillance.v2.plist hard-codes TELEGRAM_BOT_TOKEN='7832687030:***' (placeholder). Real token is in ~/.env (TELEGRAM_BOT_TOKEN, 46 chars). Daemon inherits launchd env and gets the placeholder. Remove the TELEGRAM_* keys from the plist EnvironmentVariables dict. At listener/daemon.py main(), dotenv_values('~/.env') and merge into os.environ before CameraCaptureRegistry.start_all(). Log a one-line INFO 'Loaded N env vars from ~/.env' so operators can confirm.",
       "ac": [
         "AC1: grep -nE 'TELEGRAM_BOT_TOKEN|TELEGRAM_HOME_CHAT_ID' /Users/jill/Library/LaunchAgents/com.farm.surveillance.v2.plist returns zero matches (plist is clean).",
@@ -67,7 +69,9 @@
       "id": "US-017c",
       "title": "reader-wedge watchdog: detect flat frames_decoded_total and force reconnect",
       "status": "todo",
-      "depends_on": ["US-017a"],
+      "depends_on": [
+        "US-017a"
+      ],
       "card_body_fallback": "CameraCaptureRegistry._reconnect_loop polls is_healthy() every 5s. is_healthy() returns False only when _healthy=False OR _last_frame_time is None OR (now - last_frame) > 5s. In the 2026-09-08 incident the previous daemon's readers were connected (container open, TCP socket ESTABLISHED) but stuck in container.demux() with no frames; _last_frame_time stayed at its boot value (None) which SHOULD have made is_healthy() return False, yet no 'Reader X unhealthy' log line appeared for hours. Add a second watchdog: every 30s, snapshot frames_decoded_total per reader. If a reader has been connected for >30s and the snapshot count has not increased since the last check, force-stop and replace the reader. Log 'Reader X stuck (no frames in 30s); reconnecting.' with the frames_decoded_total before and after.",
       "ac": [
         "AC1: grep -nE 'frames_decoded_total' infra/frame_capture.py returns >=3 matches: the existing field declaration, the new snapshot in _reconnect_loop, and the comparison.",
