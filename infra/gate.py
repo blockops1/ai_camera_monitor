@@ -528,12 +528,11 @@ def is_gate_enabled(camera_name: str, event_type: str) -> bool:
     capture, no YOLO, no verdict) and the alert routes directly to the
     vehicle/person pipeline downstream.
 
-    Phase 6B.167 §13.4 Commit 17 (T3 C17): JSON keys are CAM{N} codes,
-    not friendly names. Lookup translates via infra.cameras.code_for
-    which returns the camera code (or the input unchanged on miss).
+    Phase 6B.167 §13.4 (revised 2026-09-08 per Mr. V directive): JSON keys
+    are camera PREFIXES (FRONT, BACK, ...), not CAM{N} codes. Pipeline
+    passes camera_id directly; no translation layer required.
     """
-    from infra.cameras import code_for  # §13.4: name → CAM{N}
-    cfg = _load_thresholds_config().get(code_for(camera_name)) or {}
+    cfg = _load_thresholds_config().get(camera_name) or {}
     gate_enabled = cfg.get("gate_enabled") or DEFAULT_GATE_ENABLED
 
     # Normalize event_type → config key
@@ -556,16 +555,16 @@ def load_thresholds(camera_name: str) -> dict[str, float]:
 
     Returns dict mapping COCO class name → confidence threshold (0.0-1.0).
 
-    Phase 6B.167 §13.4 Commit 17 (T3 C17): JSON keys are CAM{N} codes,
-    not friendly names. Lookup translates via infra.cameras.code_for
-    which returns the camera code (or the input unchanged on miss).
+    Phase 6B.167 §13.4 (revised 2026-09-08 per Mr. V directive): JSON keys
+    are camera PREFIXES (FRONT, BACK, OUTSIDE_FRONT_GARAGE, ...), not
+    CAM{N} codes. The pipeline passes camera_id directly as camera_name;
+    no translation layer required. infra.cameras.code_for dropped.
     """
-    from infra.cameras import code_for  # §13.4: name → CAM{N}
     global _cached_thresholds
     if _cached_thresholds is None:
         _cached_thresholds = _load_thresholds_config()
 
-    camera_overrides = _cached_thresholds.get(code_for(camera_name), {})
+    camera_overrides = _cached_thresholds.get(camera_name, {})
 
     # Merge: per-camera overrides win over per-class defaults.
     # Phase 6B.154 (§11.77): skip metadata keys (start with "_") AND
