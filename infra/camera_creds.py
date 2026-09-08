@@ -122,13 +122,16 @@ def _parse_env(env_path: str) -> dict:
             for prefix, camera_name in _CAMERA_MAP.items():
                 if key == f"{prefix}_rtsp_url":
                     entry = result.setdefault(camera_name, {})
+                    entry["name"] = camera_name
                     entry["rtsp_url"] = value
                     entry["prefix"] = prefix.upper()
                     ip = _extract_ip_from_rtsp(value)
                     if ip:
                         entry["ip"] = ip
                 elif key == f"{prefix}_ip" and value:
-                    result.setdefault(camera_name, {})["ip"] = value
+                    entry = result.setdefault(camera_name, {})
+                    entry["name"] = camera_name
+                    entry["ip"] = value
                 elif key == f"{prefix}_user":
                     result.setdefault(camera_name, {})["user"] = value
                 elif key == f"{prefix}_pass":
