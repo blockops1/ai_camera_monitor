@@ -68,10 +68,11 @@
     {
       "id": "US-017d",
       "title": "port v1-refactor scheduled_reconnect_watchdog (proactive close+respawn every N seconds)",
-      "status": "todo",
+      "status": "done",
       "depends_on": [
         "US-017a"
       ],
+      "completed_at": "2026-09-08",
       "card_body_fallback": "**Story.** Port v1-refactor's proactive RTSP watchdog into v2. Every `FARMSV_RTSP_RECONNECT_SECONDS` (default 3600s) the reader closes its av container, joins its decode thread with a 10s bounded join, then spawns a fresh decode thread on the same RTSP URL. **Defense in depth, not a fix for any known wedge.** v2's existing `_reconnect_loop` only fires on actual demux failures; the watchdog prevents the failure modes where libav holds the demux thread in C-land without surfacing an exception. **Reference implementation:** `/Users/jill/farm-surveillance-refactor/infra/persistent_rtsp.py` — `_resolve_scheduled_reconnect_seconds` (~lines 240-260), `_scheduled_reconnect_watchdog` (~lines 824-866), `_scheduled_reconnect_fire` (~lines 879-931). **Honor this env var** matching v1's interface: `FARMSV_RTSP_RECONNECT_SECONDS` (default 3600s). **Out of scope:** the `max_reconnect_attempts` cap-and-defer logic is split into US-017e (separate story, separate risk surface). **Why standalone:** the watchdog is a self-contained mechanism. Even without the cap, it eliminates the 'decode thread stuck in C-land demux()' failure mode on a 1-hour cadence.",
       "ac": [
         "AC1: grep -nE 'def _scheduled_reconnect_watchdog|def _scheduled_reconnect_fire|def _resolve_scheduled_reconnect_seconds' infra/frame_capture.py returns >=3 matches inside PersistentRTSPReader (or module-level resolvers).",
