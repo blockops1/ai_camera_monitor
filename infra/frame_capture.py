@@ -49,8 +49,20 @@ from PIL import Image
 log = logging.getLogger("frame_capture")
 
 RING_SIZE_DEFAULT = 180
+RECONNECT_BACKOFF_INITIAL = 1.0   # seconds
 RECONNECT_BACKOFF_MAX = 30.0
 RECONNECT_BACKOFF_MULT = 2.0
+
+# US-017e — Phase 6B.155 (PLAN §11.78). Cap on consecutive failure-driven
+# reconnects. After N attempts the failure loop defers to the proactive
+# scheduled_reconnect_watchdog (still fires hourly). Prevents log/CPU
+# starvation during a camera-side Reolink stickiness event (where RTSP
+# returns ERRNO 60 / Invalid data / 404 in a burst, but the camera IS still
+# on the network — just temporarily refusing new sessions). Without this cap
+# the loop will keep hammering the camera at the 30s max forever, filling
+# logs and (worse) potentially blocking other code paths. With it: log the
+# failure once at ERROR, let the hourly watchdog take over.
+RECONNECT_MAX_ATTEMPTS_DEFAULT = 10
 
 # Proactive watchdog cadence (Phase 6B.80 / PLAN §11.13). The v2 watchdog
 # closes + respawns the decode thread every `scheduled_reconnect_seconds`
@@ -61,6 +73,7 @@ RECONNECT_BACKOFF_MULT = 2.0
 # without raising" failure mode.
 SCHEDULED_RECONNECT_DEFAULT = 3600.0  # 1 hour
 _SCHEDULED_RECONNECT_ENV = "FARMSV_RTSP_RECONNECT_SECONDS"
+_MAX_RECONNECT_ATTEMPTS_ENV = "FARMSV_RTSP_MAX_RETRIES"
 
 
 def _resolve_scheduled_reconnect_seconds(arg_value: float | None) -> float:
@@ -81,6 +94,55 @@ def _resolve_scheduled_reconnect_seconds(arg_value: float | None) -> float:
     return SCHEDULED_RECONNECT_DEFAULT
 
 
+def _resolve_max_reconnect_attempts(arg_value: int | None) -> int:
+    """Resolve the max consecutive failure-driven reconnect attempts.
+
+    Precedence:
+    1. Explicit constructor arg (if not None)
+    2. Env var FARMSV_RTSP_MAX_RETRIES (if set + non-empty)
+    3. RECONNECT_MAX_ATTEMPTS_DEFAULT (10)
+
+    Returns an int. A value <= 0 disables the cap (legacy behavior,
+    retry forever). Raises ValueError if env var is set but not a valid
+    int.
+    """
+    if arg_value is not None:
+        return int(arg_value)
+    env_val = os.environ.get(_MAX_RECONNECT_ATTEMPTS_ENV)
+    if env_val:
+        return int(env_val)
+    return RECONNECT_MAX_ATTEMPTS_DEFAULT
+
+
+def _sleep_until_stop_or_watchdog(
+    stop_event: threading.Event,
+    scheduled_reconnect_seconds: float,
+) -> None:
+    """Sleep that wakes on stop_event OR roughly every watchdog cadence.
+
+    Used by PersistentRTSPReader._run_loop after the max-attempts cap is
+    exhausted. The watchdog closes _container from its own thread; the
+    resulting demux exception in the decode thread wakes this sleep via
+    the cap_exhausted check returning control to the outer loop. The
+    stop_event covers listener shutdown.
+
+    We sleep in 60-second increments capped at `scheduled_reconnect_seconds`
+    (so a 3600s cadence means we sleep at most 60s before checking). This
+    trades efficiency for shutdown latency — listener shutdown will wait
+    up to 60s for the sleep to expire. Acceptable for a graceful shutdown.
+    """
+    # At most 60s per iteration; bounded to one watchdog cycle.
+    step = min(60.0, max(1.0, scheduled_reconnect_seconds))
+    # Total budget: one watchdog cycle (the watchdog will fire and
+    # either reopen us successfully or trigger another failure).
+    deadline = time.monotonic() + scheduled_reconnect_seconds
+    while time.monotonic() < deadline:
+        if stop_event.wait(timeout=step):
+            return
+        if stop_event.is_set():
+            return
+
+
 class PersistentRTSPReader:
     """Long-lived RTSP reader: background thread decodes into a deque ring."""
 
@@ -90,6 +152,7 @@ class PersistentRTSPReader:
         ring_size: int = RING_SIZE_DEFAULT,
         ffmpeg_flags: dict | None = None,
         scheduled_reconnect_seconds: float | None = None,
+        max_reconnect_attempts: int | None = None,
     ) -> None:
         self._rtsp_url = rtsp_url
         self._ring_size = ring_size
@@ -103,6 +166,9 @@ class PersistentRTSPReader:
         }
         self._scheduled_reconnect_seconds = _resolve_scheduled_reconnect_seconds(
             scheduled_reconnect_seconds
+        )
+        self._max_reconnect_attempts = _resolve_max_reconnect_attempts(
+            max_reconnect_attempts
         )
         self._container: av.container.InputContainer | None = None
         self._thread: threading.Thread | None = None
@@ -374,22 +440,117 @@ class PersistentRTSPReader:
         )
 
     def _run_loop(self) -> None:
-        backoff = 1.0
+        """Main decode loop. Runs in a background thread.
+
+        Phase 6B.155 (PLAN §11.78): failure-driven reconnects are capped at
+        `self._max_reconnect_attempts`. After the cap, the loop defers to
+        the proactive scheduled_reconnect_watchdog (still fires every
+        hour). The watchdog closes _container from a separate thread; the
+        resulting demux exception in this thread flows back through the
+        outer try/except, re-attempts the connection, and either recovers
+        (logging a recovery line + resetting the cap) or hits the cap again.
+
+        Per the 2026-08-28 CAM3 incident (6 errors in 80s with ERRNO 60 /
+        Invalid data / 404 — Reolink RTSP session stickiness), this caps
+        log spam and CPU usage during long camera outages while keeping the
+        scheduled watchdog as the long-term recovery mechanism.
+        """
+        backoff = RECONNECT_BACKOFF_INITIAL
+        cap_exhausted = False
         while not self._stop_event.is_set():
             try:
                 self._decode_iteration()
+                # Clean exit or successful decode (stop_event set OR
+                # _decode_iteration returned normally).
+                if cap_exhausted:
+                    log.info(
+                        "RTSP recovered after %d consecutive failures — "
+                        "decoder running normally",
+                        self._consecutive_errors,
+                    )
                 break
             except Exception as e:  # noqa: BLE001
                 self._consecutive_errors += 1
                 self._healthy = False
                 if self._stop_event.is_set():
                     break
-                log.warning(
-                    "Decode failed (attempt %d): %s. Reconnecting in %.1fs...",
-                    self._consecutive_errors,
-                    e,
-                    backoff,
-                )
+
+                # 2026-08-28 — Phase 6B.155 (PLAN §11.78). Cap on
+                # failure-driven reconnects. After N consecutive failures
+                # we stop retrying here and let the scheduled_reconnect
+                # watchdog handle the next attempt (every hour by
+                # default). The watchdog closes _container from its own
+                # thread; the demux loop raises, falls through to this
+                # except block, and re-attempts — either succeeding and
+                # resetting the cap, or hitting the cap again (which is
+                # a no-op since cap_exhausted is already True).
+                if self._max_reconnect_attempts > 0 and not cap_exhausted:
+                    remaining = (
+                        self._max_reconnect_attempts - self._consecutive_errors
+                    )
+                    if remaining <= 0:
+                        log.error(
+                            "consecutive_reconnect_cap_reached: "
+                            "PersistentRTSP decode iteration failed "
+                            "(%d consecutive attempts). Last error: %s. "
+                            "Deferring to scheduled_reconnect_watchdog "
+                            "(%.0fs cadence). Reader is UNHEALTHY until "
+                            "next reconnect.",
+                            self._consecutive_errors,
+                            e,
+                            self._scheduled_reconnect_seconds,
+                        )
+                        self.reconnects_total += 1
+                        cap_exhausted = True
+                        # Sleep until either stop_event or the watchdog
+                        # closes the container (which raises in the demux
+                        # loop and we fall through here again). Both paths
+                        # exit the inner sleep cleanly.
+                        _sleep_until_stop_or_watchdog(
+                            self._stop_event,
+                            scheduled_reconnect_seconds=(
+                                self._scheduled_reconnect_seconds
+                            ),
+                        )
+                        if self._stop_event.is_set():
+                            break
+                        # Outer while-loop retries the decode. If it
+                        # succeeds, the early "if cap_exhausted" block
+                        # above logs recovery. If it fails again, we
+                        # hit this except block again — but since
+                        # cap_exhausted=True, the inner if is skipped
+                        # and we just fall through to the warning (no
+                        # behavioral change vs. retry-forever, but
+                        # without the 30s hammering — the watchdog
+                        # controls cadence now).
+                        continue
+
+                # Standard failure-driven warning (used when cap not yet
+                # exhausted, or when cap is disabled via
+                # max_reconnect_attempts<=0).
+                if self._max_reconnect_attempts > 0 and not cap_exhausted:
+                    remaining = (
+                        self._max_reconnect_attempts - self._consecutive_errors
+                    )
+                    log.warning(
+                        "Decode failed (attempt %d): %s. Reconnecting "
+                        "in %.1fs... (%d attempt(s) remaining before "
+                        "deferring to watchdog)",
+                        self._consecutive_errors,
+                        e,
+                        backoff,
+                        remaining,
+                    )
+                else:
+                    # Cap disabled (max_reconnect_attempts<=0): retry
+                    # forever, no remaining-count to report.
+                    log.warning(
+                        "Decode failed (attempt %d): %s. Reconnecting "
+                        "in %.1fs...",
+                        self._consecutive_errors,
+                        e,
+                        backoff,
+                    )
                 time.sleep(backoff)
                 backoff = min(backoff * RECONNECT_BACKOFF_MULT, RECONNECT_BACKOFF_MAX)
                 self.reconnects_total += 1

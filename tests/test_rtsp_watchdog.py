@@ -1,20 +1,33 @@
 """
-test_rtsp_watchdog.py — US-017d.
+test_rtsp_watchdog.py — US-017d + US-017e.
 
-Verifies the proactive scheduled_reconnect_watchdog ported from
+US-017d verifies the proactive scheduled_reconnect_watchdog ported from
 v1-refactor (PLAN §11.13): every `scheduled_reconnect_seconds` the
 reader closes its av container and spawns a fresh decode thread.
+
+US-017e verifies the max_reconnect_attempts cap-and-defer ported from
+v1-refactor (PLAN §11.78): after N consecutive decode failures the
+in-loop reconnect retries stop and the loop defers to the watchdog.
 
 AC4 (PRD US-017d card_body_fallback): "A unit test stubs
 PersistentRTSPReader with mocked av.container, calls start(), waits
 until scheduled_reconnect_seconds elapses (mock the sleep), and
 asserts container.close() was called and a fresh decode thread was
 spawned (frames_decoded_total reset OR thread id changed)."
+
+AC3 (PRD US-017e card_body_fallback): "A unit test stubs a
+PersistentRTSPReader whose _decode_iteration always raises
+av.error.EOFError, calls start(), and asserts that after N+1 fires
+the failure loop logs 'consecutive_reconnect_cap_reached' and enters
+the defer sleep (no further _decode_iteration calls until watchdog
+fires)."
 """
 
 from __future__ import annotations
 
+import logging
 import threading
+import time as _time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -132,3 +145,138 @@ class TestScheduledReconnectWatchdog:
             )
 
             reader.stop(timeout=2.0)
+
+
+class TestMaxReconnectAttemptsCap:
+    """US-017e AC3: max-attempts cap logs + defers to watchdog."""
+
+    def test_cap_reached_logged_and_decode_iteration_halted(
+        self, monkeypatch, caplog
+    ):
+        """After N consecutive decode failures, the loop:
+        1. logs 'consecutive_reconnect_cap_reached',
+        2. enters the defer sleep (no further _decode_iteration calls
+           until the watchdog closes _container from its own thread).
+
+        Strategy:
+          - max_reconnect_attempts=3 (small for fast test)
+          - _decode_iteration always raises av.error.EOFError
+          - Patch _sleep_until_stop_or_watchdog to: (a) record that the
+            defer sleep was entered, (b) close the watch-dog-visible
+            container after a short delay so the demux-side of the loop
+            would surface an exception if it were still running, then
+            (c) set the stop_event so the defer sleep returns and the
+            test ends. (v1 calls _sleep_until_stop_or_watchdog with a
+            real timed sleep; the watchdog closes _container from its
+            own thread in production. Here we shortcut that for speed.)
+          - Patch time.sleep to a no-op so backoff doesn't slow the
+            test (the cap fires before backoff matters).
+          - Count _decode_iteration invocations: should be exactly
+            (N + 1) — once per warning, once on the N+1th that tips
+            the cap — and then stop.
+        """
+        from infra import frame_capture as fc
+
+        # Track every _decode_iteration call.
+        decode_calls = {"n": 0}
+        sleep_until_calls = {"n": 0}
+
+        def always_fail_decode() -> None:
+            decode_calls["n"] += 1
+            # conftest.py stubs the `av` module with a MagicMock, so we
+            # can't import av.error.EOFError here — the production
+            # exception is irrelevant to this test, only the cap
+            # behavior matters. RuntimeError is caught by the broad
+            # `except Exception` branch in _run_loop just like EOFError
+            # would be.
+            raise RuntimeError("simulated RTSP decode failure")
+
+        # Replace the defer sleep with a recordable shim. Returns
+        # promptly after marking the call so the test can observe the
+        # "no further _decode_iteration" invariant while we still hold
+        # the cap_exhausted pause.
+        def fake_sleep_until_stop_or_watchdog(stop_event, scheduled_reconnect_seconds):
+            sleep_until_calls["n"] += 1
+            # Mark the cap_exhausted window "entered" by snapshotting
+            # the current decode-call count for the assertion below.
+            sleep_until_calls["decode_calls_at_entry"] = decode_calls["n"]
+            # Yield briefly so a watchdog-thread tick could have
+            # arrived. The test asserts no further decode happens
+            # during this window.
+            stop_event.wait(timeout=0.05)
+            # Test ends after the defer sleep returns; stop() in the
+            # test body sets the event.
+
+        monkeypatch.setattr(
+            fc, "_sleep_until_stop_or_watchdog", fake_sleep_until_stop_or_watchdog
+        )
+        # Backoff sleeps in the warning branch — make them no-ops.
+        monkeypatch.setattr(fc.time, "sleep", lambda _s: None)
+
+        # Watchdog cadence: irrelevant to the cap-and-defer path because
+        # we shim the sleep helper. Set short for clarity.
+        watchdog_cadence = 0.1
+
+        reader = PersistentRTSPReader(
+            "rtsp://u:p@h:554/h",
+            scheduled_reconnect_seconds=watchdog_cadence,
+            max_reconnect_attempts=3,
+        )
+        # Stub the per-iteration decode to always raise. Use setattr
+        # so the bound method is replaced on the instance.
+        reader._decode_iteration = always_fail_decode  # type: ignore[method-assign]
+
+        with caplog.at_level(logging.ERROR, logger="frame_capture"):
+            reader.start()
+            # Wait for the cap to fire (decode thread runs
+            # ~instantly because sleeps are no-ops) + the fake defer
+            # sleep to return.
+            deadline = _time.monotonic() + 2.0
+            while _time.monotonic() < deadline and sleep_until_calls["n"] < 1:
+                _time.sleep(0.01)
+            # Give the decode thread an extra beat to settle.
+            _time.sleep(0.1)
+            reader.stop(timeout=2.0)
+
+        # AC3.1 — cap_reached log line emitted.
+        cap_logs = [
+            r for r in caplog.records
+            if "consecutive_reconnect_cap_reached" in r.getMessage()
+        ]
+        assert len(cap_logs) == 1, (
+            f"Expected exactly one consecutive_reconnect_cap_reached log, "
+            f"got {len(cap_logs)}: {[r.getMessage() for r in cap_logs]}"
+        )
+        # The log line should identify the defer target (watchdog).
+        assert "scheduled_reconnect_watchdog" in cap_logs[0].getMessage()
+
+        # AC3.2 — the defer sleep was entered exactly once.
+        assert sleep_until_calls["n"] == 1, (
+            f"Expected exactly one _sleep_until_stop_or_watchdog call, "
+            f"got {sleep_until_calls['n']}"
+        )
+
+        # AC3.3 — _decode_iteration was called N times (the cap fires
+        # when _consecutive_errors == N, i.e. the Nth failure tips the
+        # cap). Crucially NO FURTHER calls happened during the defer
+        # sleep window. Snapshot the count when defer sleep was
+        # entered and assert no new calls were made after — that's
+        # the "no further _decode_iteration calls until watchdog
+        # fires" invariant from AC3.
+        assert decode_calls["n"] == 3, (
+            f"Expected 3 _decode_iteration calls (cap tipped on 3rd "
+            f"failure when max_reconnect_attempts=3), got "
+            f"{decode_calls['n']}"
+        )
+        calls_at_entry = sleep_until_calls["decode_calls_at_entry"]
+        assert decode_calls["n"] == calls_at_entry, (
+            f"_decode_iteration kept firing after the cap fired: "
+            f"{calls_at_entry} at defer-entry vs {decode_calls['n']} now"
+        )
+
+        # AC3.4 — _consecutive_errors counter advanced exactly N
+        # (matches decode-call count).
+        assert reader._consecutive_errors == 3, (
+            f"_consecutive_errors should be 3 (cap tipped on 3rd "
+            f"failure), got {reader._consecutive_errors}"
+        )
