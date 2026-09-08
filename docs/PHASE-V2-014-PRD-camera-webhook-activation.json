@@ -1,0 +1,215 @@
+{
+  "prd_id": "PHASE-V2-014-PRD-camera-webhook-activation",
+  "title": "v2 camera webhook activation: persistent RTSP frame capture + /alert route + camera creds loader + known_vehicles data + pyproject deps",
+  "author": "Jill",
+  "status": "proposal",
+  "phase": "v2-014",
+  "plan_section": null,
+  "trigger": "Operator said (2026-09-07, verbatim): 'I am not repointing cameras. Make the listener work with the existing camera webhooks'. Then: 'B. It should have been part of the original prd. Was anything else missed?' followed by an audit confirming (a) infra/frame_capture.py referenced but absent; (b) infra/camera_creds.py referenced but absent; (c) daemon.py /alert route absent (live camera at 192.168.1.103 POSTing to /alert currently gets 404); (d) data/vehicles/known_vehicles.json empty (v1 has 12 entries, 463 lines); (e) pyproject.toml empty of deps; (f) .env.example files partially committed. v2 daemon is currently live on :8090 (PID 56850) accepting webhooks but every real alert is silently dropped at the gate with reason 'wrong_frame_count' because pipeline.run() expects 4 RTSP frame paths in alert['frames'] and listener.py never populates them.",
+  "background": "v2's 11-stage pipeline (PLAN.md) describes a fully wired flow from camera webhook through Telegram output. The shipped code (16/16 stories, f033b8c + activation commit 78abf23) covers stages 2 (cooldown), 3 (frame_diff), 4 (gate), 5-6 (vision_analyzer verify_class + TG#1), 7-8 (vision_analyzer detail_class + TG#2), 9-10 (vehicle_matcher + TG#3), 11 (cooldown.record_hit). What is NOT shipped: stage 0 (RTSP frame capture upstream of the pipeline) and stage 0b (camera webhook receiver that normalizes Reolink payloads to the pipeline's expected alert shape). PLAN.md §11.117 documented this as deferred work; the activation phase (2026-09-07) surfaced the gap when v2 went live and immediately started returning 404s to /alert and dropping any frames that did arrive at /webhook. v1 (~/farm-surveillance/) has the working version: persistent_rtsp.py (398 LOC, 24/7 long-lived RTSP connection + ring buffer), frame_capture.py (640 LOC, capture API on top), frame_selector.py (112 LOC, picks frames at alert timestamp), and the original /alert handler at alert_listener.py:1063-1330. This PRD ports that work into v2's tree. Per operator directive: 'don't archive v1, but don't run it either' — v1 source stays on disk as the cross-reference.",
+  "goal": "Real camera alerts on :8090/alert produce real Telegram messages. Reolink cameras POSTing motion/person/vehicle events at 192.168.1.103/73/108/113/39/85 land in v2 listener, get 4 RTSP frames pulled buffered-6-8s-back from the alert timestamp, run the full 11-stage pipeline, and fire TG#1 / TG#2 / TG#3 in the operator's Telegram Home chat.",
+  "non_goals": [
+    "Do NOT archive /Users/jill/farm-surveillance/ (v1). Operator 2026-09-07: 'don't archive v1, but don't run it either'.",
+    "Do NOT bounce or restart v2 daemon (PID 56850 on :8090) during this PRD. New code lands; operator reviews commits and decides when to bounce.",
+    "Do NOT modify the 8 lifted infra modules: cooldown, gate_cooldown, frame_diff, classify_schema, quick_classifier, vision_cache, motion_types, gate.",
+    "Do NOT modify the 4 vision prompts: vm1_prompt, vehicle_prompt, person_prompt, animal_prompt.",
+    "Do NOT modify the 4 vehicle_position modules.",
+    "Do NOT modify listener/pipeline.py — its signature (run(alert: dict) -> dict) is the contract; stages 3-11 already work.",
+    "Do NOT modify the 4 *.env files in /Users/jill/farm-surveillance-v2/ (camera-creds.env, telegram-creds.env, llm-creds.env) — they are operator-authored and already populated.",
+    "Do NOT touch the launchd plist at ~/Library/LaunchAgents/com.farm.surveillance.v2.plist.",
+    "Do NOT git push. Operator reviews and pushes.",
+    "Do NOT install new skills or new top-level dependencies beyond what pyproject.toml declares (US-014h).",
+    "Do NOT fan out parallel coder workers. Single-specialist queue, one story at a time.",
+    "Do NOT write a ThreatLevel field anywhere. PRD-V2-CORE: NO threat-level.",
+    "Do NOT add per-class pipeline modules. One listener/pipeline.py, no per-class dispatch."
+  ],
+  "constraints": [
+    "Each story targets <=100 LOC new code; 150 absolute max. Split before authoring if larger.",
+    "Each card body <=2500 chars (Qwen 35B context ceiling after AGENTS.md auto-inject).",
+    "Sequential dependency chain via hermes kanban link. Only the head of the chain is in `ready`. No parallel dispatch.",
+    "Each AC is a shell-runnable command (grep -nE / python3 -c / python3 -m py_compile / pytest). No prose ACs.",
+    "Each story ends with `python3 -m pytest tests/ -x --tb=short` returning prior-pass-count (current baseline: 21 passing). No regression AC, no green light.",
+    "Workspace is `dir:/Users/jill/farm-surveillance-v2`. No fresh worktree.",
+    "All new code is ASCII only. No Unicode, no em-dashes.",
+    "Use /Users/jill/.hermes/.venv/bin/python3.11 — NOT `.venv/bin/python` (macOS CLT Python 3.9 shim hijacks the bare `python` symlink; see 78abf23 commit message).",
+    "Tests sandbox isolation: any test that reads/writes files uses tests/sandbox/data/ as the source of truth (conftest.py fixture pattern, see US-013a).",
+    "Pre-dispatch gate before US-014a: confirm llama-server :8093 reports 4+ slots AND v2 daemon PID 56850 still listening on :8090.",
+    "After dispatch, STOP parallel tool calls until worker emits first assistant turn.",
+    "v1 is the cross-reference for port logic and frame timing — read ~/farm-surveillance/src/persistent_rtsp.py and frame_capture.py as the source of truth for the algorithm. Reimplement in v2 idioms (no copy-paste of v1 module headers; fresh v2 module headers per refactor-module-header skill)."
+  ],
+  "test_strategy": "Per-story: pytest tests/ -x --tb=short with prior baseline (21 passing) as the floor. US-014a/b/c/d land unit tests in tests/test_frame_capture.py (mocked cv2.VideoCapture). US-014e/f land integration tests in tests/test_alert_route.py that POST synthetic Reolink payloads to daemon.app.test_client() and assert pipeline.run() was called with the normalized shape. US-014g lands a smoke test that vehicle_matcher.match_vehicle() returns >=1 candidate for at least 3 known vehicles. US-014h lands a fresh-clone smoke test in tests/test_pyproject_install.py that creates a temp venv, runs `pip install -e .`, and asserts `from infra.frame_capture import PersistentRTSPReader` imports cleanly. Final shipping walkthrough: operator fires a synthetic webhook from /tmp/synthetic_alert.json with the Reolink payload shape for FRONT; daemon returns 200 within 30s; pipeline.run() reports status=ok with frame_paths present; cooldown record lands in data/cooldown/. At least 1 unit test asserts frame_age_seconds <= 12 (must be buffered 6-8s back from the alert timestamp, not stale 30s+).",
+  "shipping_definition": "Operator curl: curl -X POST http://127.0.0.1:8090/alert -H 'Content-Type: application/json' -d @tests/data/synthetic_reolink_alert.json. Expected: HTTP 200 within 30s with body containing 'status: ok' and 'frames: 4'. v2 daemon log shows pipeline stages 1-11 transitioning. Pipeline result lands in data/alerts/<YYYY-MM-DD>.jsonl. Cooldown record lands in data/cooldown/<camera>.json. Failure mode: HTTP 200 with 'status: dropped' or 'status: error' indicates the frame capture path returned zero or too-old frames; check daemon.log for 'frame_age too old' / 'rtsp_disconnect' markers.",
+  "files_out_of_scope": [
+    "/Users/jill/farm-surveillance/** (v1 frozen source — read-only cross-reference, do not modify)",
+    "/Users/jill/farm-surveillance-refactor/**",
+    "/Users/jill/farm-surveillance-internal/**",
+    "/Users/jill/farm-surveillance-v2/.env* (operator-authored, mode 600)",
+    "/Users/jill/farm-surveillance-v2/listener/pipeline.py (signature is the contract)",
+    "/Users/jill/farm-surveillance-v2/infra/{cooldown,gate_cooldown,frame_diff,classify_schema,quick_classifier,vision_cache,motion_types,gate}.py (8 lifted modules — byte-identical)",
+    "/Users/jill/farm-surveillance-v2/infra/{vm1_prompt,vehicle_prompt,person_prompt,animal_prompt}.py (4 vision prompts — frozen Phase B)",
+    "/Users/jill/farm-surveillance-v2/vehicle_position/** (4 lifted vehicle modules)",
+    "/Users/jill/farm-surveillance-v2/docs/V2-LIFT-PLAN.md, /Users/jill/farm-surveillance-v2/docs/PLAN.md",
+    "/Users/jill/Library/LaunchAgents/com.farm.surveillance.v2.plist",
+    "/tmp/** (build lives at /Users/jill/farm-surveillance-v2/)"
+  ],
+  "related": [
+    "/Users/jill/farm-surveillance/src/persistent_rtsp.py (v1, 398 LOC, source of truth for ring-buffer algorithm)",
+    "/Users/jill/farm-surveillance/src/frame_capture.py (v1, 640 LOC, source of truth for capture API + RTSP connect)",
+    "/Users/jill/farm-surveillance/src/frame_selector.py (v1, 112 LOC, source of truth for offset selection)",
+    "/Users/jill/farm-surveillance/src/alert_listener.py:1063-1330 (v1, source of truth for Reolink payload normalization + /alert route)",
+    "/Users/jill/farm-surveillance-v2/listener/pipeline.py (signature contract: run(alert: dict) -> dict)",
+    "/Users/jill/farm-surveillance-v2/infra/paths.py (single source of truth for path constants; PROJECT_ROOT defaults to ~/farm-surveillance-refactor which is wrong for v2 — US-014a fixes this)",
+    "/Users/jill/farm-surveillance-v2/infra/vision_cache.py:43 (references infra.frame_capture — currently absent)",
+    "/Users/jill/farm-surveillance-v2/vehicle_position/motion_detector_impl.py:57 (references infra.frame_capture — currently absent)",
+    "/Users/jill/farm-surveillance-v2/camera-creds.env (operator-authored, 6 cameras × 6 keys = 36 keys, mode 600)",
+    "/Users/jill/farm-surveillance/data/vehicles/known_vehicles.json (v1, 12 entries, 463 lines, port to v2 in US-014g)",
+    "MEMORY.md 2026-09-07 'v2 activation commit 78abf23' (the daemon-bind fix that this PRD builds on)",
+    "skills/devops/coder-pipeline/SKILL.md (story-sizing discipline, link-chain pattern)",
+    "skills/autonomous-ai-agents/kanban-orchestrator/SKILL.md (single-specialist queue)"
+  ],
+  "stories": [
+    {
+      "id": "US-014a",
+      "title": "infra/camera_creds.py — camera-creds.env parser, RTSP URL builder, anti-spoof IP validator",
+      "status": "proposal",
+      "description": "Port v1's camera-creds parsing from alert_listener.py:182-330 into v2's infra/camera_creds.py. Parse camera-creds.env from PROJECT_ROOT, expose get_camera(camera_id) returning {name, ip, user, pass, rtsp_url}, get_all_cameras() returning the dict, and validate_source_ip(camera_id, request_ip) for anti-spoof. Also fix infra/paths.py:_DEFAULT_PROJECT_ROOT from ~/farm-surveillance-refactor to ~/farm-surveillance-v2 (referenced by 6 callers). Add tests in tests/test_camera_creds.py.",
+      "target_file": "/Users/jill/farm-surveillance-v2/infra/camera_creds.py",
+      "acceptanceCriteria": [
+        "grep -nE 'def get_camera|def get_all_cameras|def validate_source_ip|def _parse_env' /Users/jill/farm-surveillance-v2/infra/camera_creds.py returns >=4 hits",
+        "grep -nE 'PROJECT_ROOT|_DEFAULT_PROJECT_ROOT' /Users/jill/farm-surveillance-v2/infra/paths.py returns 1 hit on 'farm-surveillance-v2'",
+        "python3 -m py_compile /Users/jill/farm-surveillance-v2/infra/camera_creds.py /Users/jill/farm-surveillance-v2/infra/paths.py exits 0",
+        "FARM_CAMERA_CREDS_FILE=/Users/jill/farm-surveillance-v2/camera-creds.env .venv/bin/python3.11 -c 'from infra.camera_creds import get_all_cameras; print(len(get_all_cameras()))' prints 6",
+        "FARM_CAMERA_CREDS_FILE=/Users/jill/farm-surveillance-v2/camera-creds.env .venv/bin/python3.11 -c 'from infra.camera_creds import validate_source_ip; print(validate_source_ip(\"FRONT\", \"192.168.1.39\"))' prints True",
+        "FARM_CAMERA_CREDS_FILE=/Users/jill/farm-surveillance-v2/camera-creds.env .venv/bin/python3.11 -c 'from infra.camera_creds import validate_source_ip; print(validate_source_ip(\"FRONT\", \"1.2.3.4\"))' prints False",
+        "grep -nE 'def test_|@pytest' /Users/jill/farm-surveillance-v2/tests/test_camera_creds.py returns >=4 hits",
+        "python3 -m pytest tests/test_camera_creds.py -x --tb=short exits 0 with >=4 passing",
+        "python3 -m pytest tests/ -x --tb=short returns prior baseline-or-better (>=21 passing)"
+      ],
+      "dependsOn": [],
+      "estimated_lines": 80
+    },
+    {
+      "id": "US-014b",
+      "title": "infra/frame_capture.py — PersistentRTSPReader class (long-lived RTSP + ring buffer)",
+      "status": "proposal",
+      "description": "Port v1's persistent_rtsp.py:PersistentRTSPReader into v2. One background thread per camera holds av.open() open 24/7, decodes packets into PIL.Image, writes to a deque(maxlen=30) ring buffer. After ~5s warmup the camera transitions to live-stream mode (v1 lesson). API: start(), stop(), get_recent_frames(n, max_age_seconds), is_healthy(), uptime_seconds(). Depends on US-014a (uses get_rtsp_url). Add tests with mocked av.open().",
+      "target_file": "/Users/jill/farm-surveillance-v2/infra/frame_capture.py",
+      "acceptanceCriteria": [
+        "grep -nE '^class PersistentRTSPReader|def start|def stop|def get_recent_frames|def is_healthy|def uptime_seconds' /Users/jill/farm-surveillance-v2/infra/frame_capture.py returns >=6 hits",
+        "grep -nE '^import av|^from av ' /Users/jill/farm-surveillance-v2/infra/frame_capture.py returns >=1 hit",
+        "grep -nE 'deque\\(' /Users/jill/farm-surveillance-v2/infra/frame_capture.py returns >=1 hit",
+        "python3 -m py_compile /Users/jill/farm-surveillance-v2/infra/frame_capture.py exits 0",
+        "wc -l /Users/jill/farm-surveillance-v2/infra/frame_capture.py prints <=200",
+        "grep -nE 'def test_|@pytest' /Users/jill/farm-surveillance-v2/tests/test_frame_capture.py returns >=6 hits (US-014b-only tests; 014c adds more)",
+        "python3 -m pytest tests/test_frame_capture.py -x --tb=short -k 'PersistentRTSPReader' exits 0 with >=6 passing",
+        "python3 -m pytest tests/ -x --tb=short returns >=27 passing (21 prior + 6 from 014a + 014b)"
+      ],
+      "dependsOn": ["US-014a"],
+      "estimated_lines": 150
+    },
+    {
+      "id": "US-014c",
+      "title": "infra/frame_capture.py — capture API on top of PersistentRTSPReader (get_recent_frames with offsets + tests)",
+      "status": "proposal",
+      "description": "Add module-level functions to infra/frame_capture.py: get_recent_frames(camera_id, n=4, offset_seconds=6), get_frames_by_offset(camera_id, indices), and a CameraCaptureRegistry singleton that lazily starts a PersistentRTSPReader per camera on first access. Files saved as JPEGs to FRAMES_DIR/<camera_id>/<timestamp>.jpg. Depends on US-014b. Add tests covering ring-buffer aging, multi-camera isolation, and offset math (v1 frame_selector.py port).",
+      "target_file": "/Users/jill/farm-surveillance-v2/infra/frame_capture.py",
+      "acceptanceCriteria": [
+        "grep -nE '^def get_recent_frames|^def get_frames_by_offset|^class CameraCaptureRegistry' /Users/jill/farm-surveillance-v2/infra/frame_capture.py returns >=3 hits",
+        "grep -nE 'def test_|@pytest' /Users/jill/farm-surveillance-v2/tests/test_frame_capture.py returns >=12 hits",
+        "python3 -m pytest tests/test_frame_capture.py -x --tb=short -k 'get_recent_frames or CameraCaptureRegistry or frame_age or offset' exits 0 with >=6 passing",
+        "wc -l /Users/jill/farm-surveillance-v2/infra/frame_capture.py prints <=350",
+        "python3 -m pytest tests/ -x --tb=short returns >=33 passing (27 prior + 6 from 014c)"
+      ],
+      "dependsOn": ["US-014b"],
+      "estimated_lines": 150
+    },
+    {
+      "id": "US-014d",
+      "title": "infra/frame_capture.py — per-camera lifecycle (start_all/stop_all/health endpoint + reconnect logic)",
+      "status": "proposal",
+      "description": "Add lifecycle management: CameraCaptureRegistry.start_all() boots one reader per camera concurrently (threading). stop_all() drains. is_healthy_all() returns {camera_id: bool}. _reconnect_loop() detects dead readers (is_healthy()=False for 10s+) and restarts them. Add integration test that boots a fake reader, kills its underlying connection, verifies reconnect within 30s. Depends on US-014c.",
+      "target_file": "/Users/jill/farm-surveillance-v2/infra/frame_capture.py",
+      "acceptanceCriteria": [
+        "grep -nE '^def start_all|^def stop_all|^def is_healthy_all|^def _reconnect_loop' /Users/jill/farm-surveillance-v2/infra/frame_capture.py returns >=4 hits",
+        "grep -nE 'threading\\.|Thread\\(' /Users/jill/farm-surveillance-v2/infra/frame_capture.py returns >=3 hits",
+        "grep -nE 'def test_|@pytest' /Users/jill/farm-surveillance-v2/tests/test_frame_capture.py returns >=18 hits",
+        "python3 -m pytest tests/test_frame_capture.py -x --tb=short -k 'start_all or stop_all or reconnect or is_healthy_all' exits 0 with >=6 passing",
+        "wc -l /Users/jill/farm-surveillance-v2/infra/frame_capture.py prints <=450 (cumulative 014b+c+d)",
+        "python3 -m pytest tests/ -x --tb=short returns >=39 passing (33 prior + 6 from 014d)"
+      ],
+      "dependsOn": ["US-014c"],
+      "estimated_lines": 150
+    },
+    {
+      "id": "US-014e",
+      "title": "listener/daemon.py — add /alert route + Reolink payload normalization (flat + nested shapes)",
+      "status": "proposal",
+      "description": "Add POST /alert handler to listener/daemon.py. Accept two payload shapes: (1) flat {camera, ip, event, timestamp} — v1 simple format; (2) Reolink default {type, alarm: {alarmTime, channel, channelName, device, deviceModel, message, name, time, type}}. Normalize to v2 alert dict {id, camera_id, camera_label, classification, frames=[], timestamp}. Validate source IP against infra.camera_creds.validate_source_ip (anti-spoof). Use a learned camera_name_to_id cache (LRU 32 entries) populated from first sighting. Return HTTP 202 + alert_id on accept (mirrors v1). Add tests in tests/test_alert_route.py with both payload shapes + invalid JSON + bad IP.",
+      "target_file": "/Users/jill/farm-surveillance-v2/listener/daemon.py",
+      "acceptanceCriteria": [
+        "grep -nE \"@app.route|@app\\.post|def alert\\(|def handle_alert|/alert\" /Users/jill/farm-surveillance-v2/listener/daemon.py returns >=4 hits",
+        "grep -nE 'def normalize_reolink|def normalize_flat|def _learned_camera_map' /Users/jill/farm-surveillance-v2/listener/daemon.py returns >=3 hits",
+        "grep -nE 'def test_|@pytest' /Users/jill/farm-surveillance-v2/tests/test_alert_route.py returns >=8 hits",
+        "python3 -m pytest tests/test_alert_route.py -x --tb=short -k 'reolink or flat or invalid or spoof' exits 0 with >=8 passing",
+        ".venv/bin/python3.11 -c 'from listener.daemon import app; print([str(r) for r in app.url_map.iter_rules()])' shows /alert",
+        "python3 -m pytest tests/ -x --tb=short returns >=47 passing (39 prior + 8 from 014e)"
+      ],
+      "dependsOn": ["US-014a"],
+      "estimated_lines": 150
+    },
+    {
+      "id": "US-014f",
+      "title": "listener/daemon.py — /alert integration with pipeline.run() + frame pull via infra.frame_capture",
+      "status": "proposal",
+      "description": "Wire /alert handler to: (1) validate_source_ip, (2) normalize payload, (3) call infra.frame_capture.get_recent_frames(camera_id, n=4, offset_seconds=6) to populate alert['frames'], (4) call pipeline.run(alert), (5) return the result as JSON. Add async-aware wrapper (pipeline.run is sync def per US-008c; tests/conftest.py already patches asyncio.run to handle both cases — preserve that). Add integration test that POSTs a synthetic Reolink payload to /alert, asserts HTTP 200 and pipeline result status field. Depends on US-014d + US-014e.",
+      "target_file": "/Users/jill/farm-surveillance-v2/listener/daemon.py",
+      "acceptanceCriteria": [
+        "grep -nE 'pipeline\\.run|infra\\.frame_capture|get_recent_frames|offset_seconds' /Users/jill/farm-surveillance-v2/listener/daemon.py returns >=4 hits",
+        "grep -nE 'def test_|@pytest' /Users/jill/farm-surveillance-v2/tests/test_alert_route.py returns >=12 hits",
+        "python3 -m pytest tests/test_alert_route.py -x --tb=short -k 'integration or end_to_end or full_pipeline' exits 0 with >=4 passing",
+        ".venv/bin/python3.11 -c 'from listener.daemon import app; c=app.test_client(); r=c.post(\"/alert\", json={\"type\":\"motion\",\"alarm\":{\"name\":\"Front Door Outside\",\"type\":\"motion\",\"time\":\"2026-09-07T20:00:00Z\"}}); print(r.status_code, r.json)' prints 200 with a non-None body",
+        "python3 -m pytest tests/ -x --tb=short returns >=51 passing (47 prior + 4 from 014f)"
+      ],
+      "dependsOn": ["US-014d", "US-014e"],
+      "estimated_lines": 150
+    },
+    {
+      "id": "US-014g",
+      "title": "data/vehicles/known_vehicles.json — port 12 v1 entries to v2",
+      "status": "proposal",
+      "description": "Copy /Users/jill/farm-surveillance/data/vehicles/known_vehicles.json (12 entries, 463 lines) to /Users/jill/farm-surveillance-v2/data/vehicles/known_vehicles.json. Verify vehicle_matcher.match_vehicle() returns >=1 candidate for at least 3 known vehicles using synthetic tests. data/ directory already exists (v2 ships data/frames/); create data/vehicles/ subdir. Add tests/smoke test.",
+      "target_file": "/Users/jill/farm-surveillance-v2/data/vehicles/known_vehicles.json",
+      "acceptanceCriteria": [
+        "ls -la /Users/jill/farm-surveillance-v2/data/vehicles/known_vehicles.json shows file exists",
+        "wc -l /Users/jill/farm-surveillance-v2/data/vehicles/known_vehicles.json prints >=463",
+        "python3 -c 'import json; print(len(json.load(open(\"/Users/jill/farm-surveillance-v2/data/vehicles/known_vehicles.json\"))))' prints 12",
+        ".venv/bin/python3.11 -c 'from infra.paths import VEHICLE_KNOWN_FILE; print(VEHICLE_KNOWN_FILE)' prints a path ending in data/vehicles/known_vehicles.json (NOT farm-surveillance-refactor)",
+        ".venv/bin/python3.11 -c 'from listener.pipeline import _load_candidates; print(len(_load_candidates()))' prints 12",
+        "grep -nE 'def test_|@pytest' /Users/jill/farm-surveillance-v2/tests/test_known_vehicles.py returns >=3 hits",
+        "python3 -m pytest tests/test_known_vehicles.py -x --tb=short exits 0 with >=3 passing",
+        "python3 -m pytest tests/ -x --tb=short returns >=54 passing (51 prior + 3 from 014g)"
+      ],
+      "dependsOn": [],
+      "estimated_lines": 5
+    },
+    {
+      "id": "US-014h",
+      "title": "pyproject.toml — declare runtime deps; commit .env.example files",
+      "status": "proposal",
+      "description": "Update pyproject.toml [project] section with real runtime deps: flask>=3.0, python-telegram-bot>=21.0, opencv-python-headless>=4.8, numpy>=1.24, Pillow>=10.0, onnxruntime>=1.16, av>=11.0 (PyAV for RTSP), httpx>=0.25, python-dotenv>=1.0. Add [project.optional-dependencies] dev with pytest, pytest-asyncio, ruff, pyright. Commit the existing .env.example files (camera-creds.env.example, telegram-creds.env.example, llm-creds.env.example) — confirm they exist and contain accurate shape per the populated .env siblings. Add tests/test_pyproject_install.py that creates a tmp venv, runs `pip install -e .`, and asserts the entry-point imports clean.",
+      "target_file": "/Users/jill/farm-surveillance-v2/pyproject.toml",
+      "acceptanceCriteria": [
+        "grep -nE 'flask|python-telegram-bot|opencv|numpy|Pillow|onnxruntime|av>=|httpx|python-dotenv' /Users/jill/farm-surveillance-v2/pyproject.toml returns >=9 hits",
+        "ls -la /Users/jill/farm-surveillance-v2/camera-creds.env.example /Users/jill/farm-surveillance-v2/telegram-creds.env.example /Users/jill/farm-surveillance-v2/llm-creds.env.example shows all 3 exist",
+        "git -C /Users/jill/farm-surveillance-v2 status --short shows camera-creds.env.example / telegram-creds.env.example / llm-creds.env.example tracked (NOT in .gitignore)",
+        "grep -nE 'def test_|@pytest' /Users/jill/farm-surveillance-v2/tests/test_pyproject_install.py returns >=3 hits",
+        "python3 -m pytest tests/test_pyproject_install.py -x --tb=short exits 0 with >=3 passing",
+        ".venv/bin/python3.11 -c 'from infra.frame_capture import PersistentRTSPReader, CameraCaptureRegistry; from listener.daemon import app; from telegram import Bot; print(\"all imports OK\")' prints 'all imports OK'",
+        "python3 -m pytest tests/ -x --tb=short returns >=57 passing (54 prior + 3 from 014h)"
+      ],
+      "dependsOn": [],
+      "estimated_lines": 30
+    }
+  ],
+  "updated_at": "2026-09-07"
+}
