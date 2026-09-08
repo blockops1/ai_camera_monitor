@@ -52,6 +52,34 @@ RING_SIZE_DEFAULT = 180
 RECONNECT_BACKOFF_MAX = 30.0
 RECONNECT_BACKOFF_MULT = 2.0
 
+# Proactive watchdog cadence (Phase 6B.80 / PLAN §11.13). The v2 watchdog
+# closes + respawns the decode thread every `scheduled_reconnect_seconds`
+# so PyAV's container.demux() can't wedge silently in C-land (observed
+# on Reolink CAM5 after 41h uptime: frames_decoded_total frozen, zero
+# exceptions surfaced). Defense in depth — the existing _reconnect_loop
+# handles failure-driven recoveries; the watchdog handles the "stuck
+# without raising" failure mode.
+SCHEDULED_RECONNECT_DEFAULT = 3600.0  # 1 hour
+_SCHEDULED_RECONNECT_ENV = "FARMSV_RTSP_RECONNECT_SECONDS"
+
+
+def _resolve_scheduled_reconnect_seconds(arg_value: float | None) -> float:
+    """Resolve the scheduled-reconnect cadence. Precedence:
+    1. Explicit constructor arg (if not None)
+    2. Env var FARMSV_RTSP_RECONNECT_SECONDS (if set + non-empty)
+    3. SCHEDULED_RECONNECT_DEFAULT (3600s)
+
+    Returns a float (seconds). Raises ValueError if env var is set
+    but not a valid float — same shape as the existing ring-size
+    resolver pattern.
+    """
+    if arg_value is not None:
+        return float(arg_value)
+    env_val = os.environ.get(_SCHEDULED_RECONNECT_ENV)
+    if env_val:
+        return float(env_val)
+    return SCHEDULED_RECONNECT_DEFAULT
+
 
 class PersistentRTSPReader:
     """Long-lived RTSP reader: background thread decodes into a deque ring."""
@@ -61,6 +89,7 @@ class PersistentRTSPReader:
         rtsp_url: str,
         ring_size: int = RING_SIZE_DEFAULT,
         ffmpeg_flags: dict | None = None,
+        scheduled_reconnect_seconds: float | None = None,
     ) -> None:
         self._rtsp_url = rtsp_url
         self._ring_size = ring_size
@@ -72,8 +101,12 @@ class PersistentRTSPReader:
             "fflags": "+genpts",
             "buffer_size": "20000000",
         }
+        self._scheduled_reconnect_seconds = _resolve_scheduled_reconnect_seconds(
+            scheduled_reconnect_seconds
+        )
         self._container: av.container.InputContainer | None = None
         self._thread: threading.Thread | None = None
+        self._watchdog_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._start_time: float | None = None
         self._last_frame_time: float | None = None
@@ -127,13 +160,36 @@ class PersistentRTSPReader:
             daemon=True,
         )
         self._thread.start()
+        # Proactive watchdog (PLAN §11.13). Closes the av container every
+        # `scheduled_reconnect_seconds` so PyAV's C demux() can't wedge
+        # silently. Idempotent with respect to the failure-driven reconnect
+        # in _run_loop — both paths target the same _container slot.
+        self._watchdog_thread = threading.Thread(
+            target=self._scheduled_reconnect_watchdog,
+            name=f"RTSPWatchdog[{self._rtsp_url.split('@')[-1]}]",
+            daemon=True,
+        )
+        self._watchdog_thread.start()
+        log.info(
+            "PersistentRTSPReader started for %s "
+            "(scheduled_reconnect_seconds=%.0f)",
+            self._rtsp_url.split("@")[-1],
+            self._scheduled_reconnect_seconds,
+        )
 
     def stop(self, timeout: float = 5.0) -> None:
-        if not self.is_running:
+        if not self.is_running and self._watchdog_thread is None:
             return
         self._stop_event.set()
+        # Watchdog sleeps on _stop_event.wait() — it'll exit promptly.
+        # Join with a short timeout for cleanliness (it just breaks the
+        # sleep loop, no I/O to drain).
+        if self._watchdog_thread is not None:
+            self._watchdog_thread.join(timeout=timeout)
+            self._watchdog_thread = None
         if self._thread is not None:
             self._thread.join(timeout=timeout)
+            self._thread = None
         if self._container is not None:
             try:
                 self._container.close()
@@ -210,6 +266,112 @@ class PersistentRTSPReader:
             img.thumbnail(max_size, Image.Resampling.LANCZOS)
         img.save(out_path, quality=85)
         out_paths.append(out_path)
+
+    def _scheduled_reconnect_watchdog(self) -> None:
+        """PLAN §11.13. Proactive cycle of stop-then-restart on the decode
+        thread every `scheduled_reconnect_seconds`. Replaces the container-
+        close approach (§11.13.2) after the v1-refactor probe showed that
+        closing av.container from outside the decode loop can segfault
+        PyAV's C demux() loop.
+
+        Cycle (each fire):
+          1. Set stop_event so the decode thread breaks out of
+             `_decode_iteration`'s packet loop on the next packet. In
+             practice the demux() loop is blocked on libav so the thread
+             does NOT exit until libav times out or yields — see
+             "failure modes" below.
+          2. Join the decode thread with a 10 s timeout. If alive, the
+             thread is stuck in C-land demux() (zombie state). Log a
+             warning and proceed anyway.
+          3. Close the container (now safe — decode thread is gone or
+             stuck in C). Set _container = None.
+          4. Spin up a fresh decode thread via the same code path
+             `.start()` uses.
+
+        Failure modes:
+        - If PyAV's C demux() doesn't yield on stop_event (the zombie
+          scenario we're trying to break out of): the decode thread may
+          stay stuck past the 10 s join timeout. We log
+          `decode_thread_did_not_exit` and proceed. In the worst case,
+          the new decode thread spins up alongside the stuck one —
+          mitigated by the next watchdog fire 1 h later, which would
+          re-attempt. The `is_healthy()` staleness check still trips
+          within ~30 s of frames stopping, so alerts fail-loud as
+          expected.
+        - If container.close() raises (socket already torn down):
+          caught at debug; _container set to None regardless.
+
+        Trade-off vs. the original §11.13 design: stop+start preserves
+        the ring buffer (frames captured up to the moment of stop are
+        still in self._ring), but briefly pauses frame ingest for ~1-2 s
+        during the close+reopen window.
+        """
+        while not self._stop_event.is_set():
+            # Sleep on stop_event until the next deadline.
+            self._stop_event.wait(timeout=self._scheduled_reconnect_seconds)
+            if self._stop_event.is_set():
+                break
+            self._scheduled_reconnect_fire()
+        # On exit (stop_event set), we don't fire — .stop() handles the
+        # rest of the lifecycle.
+
+    def _scheduled_reconnect_fire(self) -> None:
+        """One fire of the proactive reconnect cycle. Called by the
+        watchdog after the cadence elapses. Stops the decode thread
+        (gracefully via stop_event + bounded join), closes the container,
+        then spawns a fresh decode thread.
+        """
+        log.info(
+            "scheduled_reconnect_fire: starting (uptime=%.0fs, "
+            "frames_decoded=%d, reconnects_total=%d)",
+            self.uptime_seconds(),
+            self.frames_decoded_total,
+            self.reconnects_total,
+        )
+        # Signal the decode thread to break out on its next packet. The
+        # decode loop checks self._stop_event.is_set() on every packet,
+        # but the demux() generator blocks in C waiting for a packet —
+        # so this signal alone may not free the thread.
+        self._stop_event.set()
+        # Join the decode thread. If it's stuck in demux() (the very
+        # zombie state we're trying to recover from), the join will time
+        # out — proceed anyway.
+        old_thread = self._thread
+        if old_thread is not None and old_thread.is_alive():
+            old_thread.join(timeout=10.0)
+            if old_thread.is_alive():
+                log.warning(
+                    "scheduled_reconnect_fire: decode thread did not exit "
+                    "within 10s (stuck in container.demux()). "
+                    "Proceeding with reconnect anyway."
+                )
+        # Now safe to close the container — decode thread is gone or
+        # stuck in C-land and we can't reach it from here.
+        if self._container is not None:
+            try:
+                self._container.close()
+            except Exception as e:  # noqa: BLE001
+                log.debug(
+                    "scheduled_reconnect_fire: container.close() "
+                    "raised (ignored): %s",
+                    e,
+                )
+            self._container = None
+        # Reset the stop_event and start a fresh decode thread.
+        # self._thread was set to the old (now-exited) Thread object;
+        # .start() will overwrite it with a new Thread on the next call.
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._run_loop,
+            name=f"RTSP[{self._rtsp_url.split('@')[-1]}]",
+            daemon=True,
+        )
+        self._thread.start()
+        self.reconnects_total += 1
+        log.info(
+            "scheduled_reconnect_fire: completed (reconnects_total=%d)",
+            self.reconnects_total,
+        )
 
     def _run_loop(self) -> None:
         backoff = 1.0
