@@ -6,7 +6,7 @@ THREAD SAFETY: single-threaded (constants computed at import time)
 
 INPUTS:
     - env FARMSURV_PRODUCTION (default "0") — bool flag, gates file handlers
-    - env FARMSURV_PROJECT_ROOT (default ~/farm-surveillance-refactor)
+    - env FARMSURV_PROJECT_ROOT (default ~/farm-surveillance-v2)
     - env FARMSURV_DATA_DIR (default $PROJECT_ROOT/data)
     - env FARM_IDENTITY_BACKUP_DIR (default "") — face-recognition backup dir
     - env FARM_VEHICLE_ARRIVING_ENABLED (default "0") — bool feature flag
@@ -56,7 +56,7 @@ WHY HERE:
     the source of truth in one place lets tests override FARMSURV_DATA_DIR
     in conftest.py and target a tmp_path copy without monkey-patching
     individual call sites. Two-system isolation contract (project docs §1 (internal))
-    is enforced by _DEFAULT_PROJECT_ROOT pointing at the refactor tree,
+    is enforced by _DEFAULT_PROJECT_ROOT pointing at ~/farm-surveillance-v2,
     never at ~/farm-surveillance/.
 
 CALLED BY:
@@ -93,11 +93,11 @@ PRODUCTION_MODE = os.environ.get("FARMSURV_PRODUCTION", "0") == "1"
 # ZoneInfo is the stdlib tz implementation since 3.9 — no pytz dependency.
 LOCAL_TZ = ZoneInfo("America/New_York")
 
-# PROJECT_ROOT — the refactor listener is its own self-contained tree.
-# Hardcoded to the refactor root by default; tests override with
+# PROJECT_ROOT — the v2 listener is its own self-contained tree.
+# Hardcoded to the v2 root by default; tests override with
 # FARMSURV_PROJECT_ROOT. There is NO FARMSURV_PROJECT_ROOT pointing at
 # the old repo — that would defeat the two-system isolation contract.
-_DEFAULT_PROJECT_ROOT = os.path.expanduser("~/farm-surveillance-refactor")
+_DEFAULT_PROJECT_ROOT = os.path.expanduser("~/farm-surveillance-v2")
 PROJECT_ROOT = os.environ.get(
     "FARMSURV_PROJECT_ROOT", _DEFAULT_PROJECT_ROOT
 )
