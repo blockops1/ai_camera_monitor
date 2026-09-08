@@ -25,7 +25,7 @@
     {
       "id": "US-018a",
       "title": "externalize home-directory paths from launchd plist generator template",
-      "status": "todo",
+      "status": "done",
       "depends_on": [],
       "estimate_loc": 50,
       "files": [
@@ -38,7 +38,12 @@
         "AC3: pytest 122/122 (or higher) green after the change.",
         "AC4: the change is one commit, message 'fix(v2): US-018a \u2014 externalize home paths from plist generator template'."
       ],
-      "rationale": "The only production-code source file that still hard-codes a home-directory username literal. Closes the largest single source-side leak (operator username + project root path) in one shot."
+      "rationale": "The only production-code source file that still hard-codes a home-directory username literal. Closes the largest single source-side leak (operator username + project root path) in one shot.",
+      "passes": true,
+      "attempts": 1,
+      "last_error": null,
+      "commit_sha": "9a17df2",
+      "task_id": "t_244d5b97"
     },
     {
       "id": "US-018b",
@@ -59,7 +64,12 @@
         "AC3: pytest 122/122 (or higher) green; the IP-validation test paths still execute (same assertion semantics, different IPs).",
         "AC4: a short comment in each test file explaining the prefix choice, citing RFC 5737."
       ],
-      "rationale": "Tests must not propagate the operator's network topology. RFC 5737 prefixes are reserved for documentation and cannot collide with a real LAN."
+      "rationale": "Tests must not propagate the operator's network topology. RFC 5737 prefixes are reserved for documentation and cannot collide with a real LAN.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
     },
     {
       "id": "US-018c",
@@ -78,7 +88,12 @@
         "AC2: the docstring example still demonstrates _parse_env() return shape correctly.",
         "AC3: pytest 122/122 (or higher) green; no behavioral change."
       ],
-      "rationale": "Docstring example was a residual from the original author's environment. Replacing it is a one-line edit that closes the last production-prefix leak in production-code source files outside the plist generator (which US-018a handles)."
+      "rationale": "Docstring example was a residual from the original author's environment. Replacing it is a one-line edit that closes the last production-prefix leak in production-code source files outside the plist generator (which US-018a handles).",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
     },
     {
       "id": "US-018d",
@@ -103,7 +118,12 @@
         "AC4: pytest not affected (docs only), but the docs/PRIVACY.md (US-018i) must cite these files as the sanitization contract once US-018i lands.",
         "AC5: one commit per file OR a single combined commit; commit message 'docs(v2): US-018d \u2014 sanitize production-prefix IPs and home paths in PRD/markdown prose'."
       ],
-      "rationale": "Operator-facing prose is what gets screen-shared, blogged about, or quoted in tickets. Even non-public docs should not contain the operator's actual network topology once the repo is GitHub-public."
+      "rationale": "Operator-facing prose is what gets screen-shared, blogged about, or quoted in tickets. Even non-public docs should not contain the operator's actual network topology once the repo is GitHub-public.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
     },
     {
       "id": "US-018e",
@@ -125,7 +145,12 @@
         "AC4: a CONSISTENCY.md-style header comment (or a JSON 'anonymization_note' field) documents the helper tag mapping ([helper-A] = the first helper whose handle appears in the file pre-anonymization, [helper-B] = the second) so future operators can audit, but the actual first names are NOT in the file.",
         "AC5: pytest 122/122 (or higher) green; tests/test_known_vehicles.py assertions updated to match the anonymized values; no test for disambiguation logic removed."
       ],
-      "rationale": "The largest single-source leak in tracked data files. Operators routinely enroll their own vehicles and helpers' vehicles into this list, so the leak recurs every enrollment \u2014 that's exactly the regression class US-018i (PRIVACY.md + scanner) will guard against."
+      "rationale": "The largest single-source leak in tracked data files. Operators routinely enroll their own vehicles and helpers' vehicles into this list, so the leak recurs every enrollment \u2014 that's exactly the regression class US-018i (PRIVACY.md + scanner) will guard against.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
     },
     {
       "id": "US-018f",
@@ -150,7 +175,12 @@
         "AC2: pytest 122/122 (or higher) green; comment edits don't affect behavior.",
         "AC3: spot-check: a sampling of comments retains the phase/release-date references intact."
       ],
-      "rationale": "Code comments are public by default once on GitHub. Even header docstrings should not name the operator."
+      "rationale": "Code comments are public by default once on GitHub. Even header docstrings should not name the operator.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
     },
     {
       "id": "US-018g",
@@ -175,7 +205,12 @@
         "AC3: visual confirmation: opening LOGIC-FLOW-DIAGRAM.html shows '<HOME_CHAT_ID>' in place of the digit literal in each of its 3 <text> elements; the diagram still renders the same flow.",
         "AC4: pytest not affected (docs only)."
       ],
-      "rationale": "Chat identifier is a long-lived secret that cannot rotate trivially (the operator's phone must re-subscribe). Even one literal leak in a committed file means the identifier is permanently in git history; sanitization is irreversible only by force-pushing or rotating the chat."
+      "rationale": "Chat identifier is a long-lived secret that cannot rotate trivially (the operator's phone must re-subscribe). Even one literal leak in a committed file means the identifier is permanently in git history; sanitization is irreversible only by force-pushing or rotating the chat.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
     },
     {
       "id": "US-018h",
@@ -192,7 +227,12 @@
         "AC2: grep -nE '^TELEGRAM_HOME_CHAT_ID=' telegram-creds.env.example returns one hit.",
         "AC3: a comment near the var explains the runtime read path."
       ],
-      "rationale": "Pre-existing misnaming risk that would silently break delivery for new operators following the public example file."
+      "rationale": "Pre-existing misnaming risk that would silently break delivery for new operators following the public example file.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
     },
     {
       "id": "US-018i",
@@ -222,7 +262,12 @@
         "AC4: a Makefile target (e.g. 'make check-privacy') invokes the scanner, OR a .git/hooks/pre-push hook is installed that invokes the scanner and blocks the push on a non-zero exit.",
         "AC5: pytest 122/122 (or higher) green; one new test under tests/test_check_no_private_data.py asserts both the exit-0 (clean tree) and exit-1 (injected leak) paths."
       ],
-      "rationale": "Sanitization without a regression guard is a one-time fix. The scanner is the difference between 'safe today' and 'safe forever'."
+      "rationale": "Sanitization without a regression guard is a one-time fix. The scanner is the difference between 'safe today' and 'safe forever'.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
     },
     {
       "id": "US-018j",
@@ -249,7 +294,12 @@
         "AC4: git push github main completes (exit 0) on the first attempt; no force-push; no merge commits.",
         "AC5: verification pass on GitHub: a `git clone` of the GitHub remote into a temp directory, followed by the canonical grep on the freshly cloned tree, returns zero hits. (This proves the push is clean \u2014 local-tree-clean \u2260 remote-clean if any local hooks fired during push.)"
       ],
-      "rationale": "The user-visible deliverable. Until this story lands, the repo is sanitized but not yet public."
+      "rationale": "The user-visible deliverable. Until this story lands, the repo is sanitized but not yet public.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
     }
   ],
   "verification_post_stories": {
