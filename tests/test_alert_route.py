@@ -1,42 +1,16 @@
 """
 test_alert_route.py — Tests for listener/daemon.py /alert route.
 
-Tests: flat payload normalization, Reolink nested shape, invalid JSON,
-bad source IP (spoof), unknown payload shape, learned camera map,
-frame pull, pipeline integration, end-to-end full pipeline.
+Tests: Reolink nested shape, invalid JSON, bad source IP (spoof),
+unknown payload shape, learned camera map, frame pull, pipeline
+integration, end-to-end full pipeline.
 """
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from listener.daemon import app, normalize_flat, normalize_reolink
-
-
-class TestNormalizeFlat:
-    """Tests for normalize_flat() helper."""
-
-    def test_flat_all_keys(self):
-        """Flat payload with all required keys produces valid alert dict."""
-        payload = {
-            "camera": "FRONT",
-            "ip": "192.168.1.39",
-            "event": "motion",
-            "timestamp": "2026-09-07T12:00:00Z",
-        }
-        result = normalize_flat(payload)
-        assert result is not None
-        assert result["camera_id"] == "FRONT"
-        assert result["camera_label"] == "FRONT"
-        assert result["classification"] == "motion"
-        assert result["frames"] == []
-        assert result["timestamp"] == "2026-09-07T12:00:00Z"
-        assert "id" in result
-
-    def test_flat_missing_keys_returns_none(self):
-        """Flat payload missing required keys returns None."""
-        partial = {"camera": "FRONT", "ip": "192.168.1.39"}
-        assert normalize_flat(partial) is None
+from listener.daemon import app, normalize_reolink
 
 
 class TestNormalizeReolink:
@@ -165,28 +139,6 @@ class TestAlertRoute:
         """Return Flask test client with /alert route registered."""
         return app.test_client()
 
-    def test_flat_payload_returns_200_with_pipeline_result(self):
-        """Flat payload returns HTTP 200 with pipeline result dict."""
-        c = self._client()
-        payload = {
-            "camera": "FRONT",
-            "ip": "192.168.1.39",
-            "event": "motion",
-            "timestamp": "2026-09-07T12:00:00Z",
-        }
-        mock_run, mock_frames = _mock_pipeline()
-        with (
-            patch("infra.camera_creds.validate_source_ip", return_value=True),
-            patch("listener.pipeline.run", mock_run),
-            patch("infra.frame_capture.get_recent_frames", mock_frames),
-        ):
-            r = c.post("/alert", json=payload)
-        assert r.status_code == 200
-        body = r.get_json()
-        assert body["status"] == "ok"
-        assert body["camera_id"] == "FRONT"
-        assert "gate" in body
-
     def test_reolink_payload_returns_200_with_pipeline_result(self):
         """Reolink nested payload returns HTTP 200 with pipeline result."""
         c = self._client()
@@ -233,15 +185,20 @@ class TestAlertRoute:
         assert body["status"] == "error"
 
     def test_spoofed_ip_returns_403(self):
-        """IP that doesn't match any camera returns HTTP 403."""
+        """Reolink payload with spoofed IP returns 403."""
         c = self._client()
         payload = {
-            "camera": "FRONT",
-            "ip": "1.2.3.4",  # not FRONT's registered IP
-            "event": "motion",
-            "timestamp": "2026-09-07T12:00:00Z",
+            "type": "motion",
+            "alarm": {
+                "type": "motion",
+                "time": "2026-09-07T12:00:00Z",
+                "channelName": "Front Door Outside",
+            },
         }
-        with patch("infra.camera_creds.validate_source_ip", return_value=False):
+        with (
+            patch("infra.camera_creds.validate_source_ip", return_value=False),
+            patch("infra.camera_creds.get_all_cameras", return_value={}),
+        ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 403
         body = r.get_json()
@@ -266,13 +223,15 @@ class TestAlertRoute:
         assert r.status_code == 403
 
     def test_alert_has_pipeline_status_field(self):
-        """Pipeline result status field appears in response."""
+        """Pipeline result status field appears in response (Reolink payload)."""
         c = self._client()
         payload = {
-            "camera": "FRONT",
-            "ip": "192.168.1.39",
-            "event": "motion",
-            "timestamp": "2026-09-07T12:00:00Z",
+            "type": "motion",
+            "alarm": {
+                "type": "motion",
+                "time": "2026-09-07T12:00:00Z",
+                "channelName": "Front Door Outside",
+            },
         }
         mock_run, mock_frames = _mock_pipeline()
         with (
@@ -281,18 +240,21 @@ class TestAlertRoute:
             patch("infra.frame_capture.get_recent_frames", mock_frames),
         ):
             r = c.post("/alert", json=payload)
+        assert r.status_code == 200
         body = r.get_json()
         assert "status" in body
         assert body["status"] in ("ok", "dropped", "suppressed")
 
     def test_pipeline_run_called_with_alert_dict(self):
-        """pipeline.run receives the normalized alert dict."""
+        """pipeline.run receives the normalized Reolink alert dict."""
         c = self._client()
         payload = {
-            "camera": "FRONT",
-            "ip": "192.168.1.39",
-            "event": "vehicle",
-            "timestamp": "2026-09-07T12:00:00Z",
+            "type": "vehicle",
+            "alarm": {
+                "type": "vehicle",
+                "time": "2026-09-07T12:00:00Z",
+                "channelName": "Front Door Outside",
+            },
         }
         mock_run, mock_frames = _mock_pipeline()
         with (
@@ -302,20 +264,22 @@ class TestAlertRoute:
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
-        # Verify pipeline.run was called
+        # Verify pipeline.run was called with a Reolink-normalized alert dict
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
-        assert call_args["camera_id"] == "FRONT"
+        assert call_args["camera_id"] == "Front Door Outside"
         assert call_args["classification"] == "vehicle"
 
     def test_get_recent_frames_called_with_camera_id(self):
-        """infra.frame_capture.get_recent_frames called with camera_id."""
+        """infra.frame_capture.get_recent_frames called with Reolink camera_id."""
         c = self._client()
         payload = {
-            "camera": "FRONT",
-            "ip": "192.168.1.39",
-            "event": "motion",
-            "timestamp": "2026-09-07T12:00:00Z",
+            "type": "motion",
+            "alarm": {
+                "type": "motion",
+                "time": "2026-09-07T12:00:00Z",
+                "channelName": "Front Door Outside",
+            },
         }
         mock_run, mock_frames = _mock_pipeline()
         with (
@@ -325,12 +289,26 @@ class TestAlertRoute:
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
-        # Verify get_recent_frames was called with correct args
+        # Verify get_recent_frames was called with the Reolink camera_id
         mock_frames.assert_called_once()
         call_args = mock_frames.call_args
-        assert call_args[0][0] == "FRONT"
+        assert call_args[0][0] == "Front Door Outside"
         assert call_args[1]["n"] == 4
         assert call_args[1]["offset_seconds"] == 6
+
+    def test_unknown_route_returns_404(self):
+        """POST to an unregistered path returns 404."""
+        c = self._client()
+        payload = {
+            "type": "motion",
+            "alarm": {
+                "type": "motion",
+                "time": "2026-09-07T12:00:00Z",
+                "channelName": "Front Door Outside",
+            },
+        }
+        r = c.post("/some_unregistered_path", json=payload)
+        assert r.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -343,39 +321,6 @@ class TestAlertRouteIntegration:
 
     def _client(self):
         return app.test_client()
-
-    def test_full_pipeline_integration_flat(self):
-        """Full pipeline integration: flat payload → 200 with complete result."""
-        c = self._client()
-        payload = {
-            "camera": "FRONT",
-            "ip": "192.168.1.39",
-            "event": "motion",
-            "timestamp": "2026-09-07T12:00:00Z",
-        }
-        mock_run, mock_frames = _mock_pipeline()
-        with (
-            patch("infra.camera_creds.validate_source_ip", return_value=True),
-            patch("listener.pipeline.run", mock_run),
-            patch("infra.frame_capture.get_recent_frames", mock_frames),
-        ):
-            r = c.post("/alert", json=payload)
-        assert r.status_code == 200
-        body = r.get_json()
-        # Full pipeline result contains all expected keys
-        for key in (
-            "status",
-            "camera_id",
-            "classification",
-            "gate",
-            "vm1_result",
-            "tg1",
-            "vm2_result",
-            "tg2",
-            "match_result",
-            "tg3",
-        ):
-            assert key in body, f"Missing key: {key}"
 
     def test_full_pipeline_integration_reolink(self):
         """Full pipeline integration: Reolink payload → 200 with result."""
@@ -401,13 +346,15 @@ class TestAlertRouteIntegration:
         assert body["classification"] == "person"
 
     def test_end_to_end_pipeline_result_has_frames(self):
-        """End-to-end: frames populated from get_recent_frames."""
+        """End-to-end: Reolink payload → frames populated from get_recent_frames."""
         c = self._client()
         payload = {
-            "camera": "FRONT",
-            "ip": "192.168.1.39",
-            "event": "motion",
-            "timestamp": "2026-09-07T12:00:00Z",
+            "type": "motion",
+            "alarm": {
+                "type": "motion",
+                "time": "2026-09-07T12:00:00Z",
+                "channelName": "Front Door Outside",
+            },
         }
         expected_frames = ["/tmp/frame_001.jpg"]
 
@@ -415,7 +362,7 @@ class TestAlertRouteIntegration:
             """Pipeline mock that echoes frames back."""
             result = _pipeline_result(
                 classification=alert.get("classification", "motion"),
-                camera_id=alert.get("camera_id", "FRONT"),
+                camera_id=alert.get("camera_id", "Front Door Outside"),
             )
             result["frames"] = list(alert.get("frames", []))
             return result
@@ -435,17 +382,19 @@ class TestAlertRouteIntegration:
         assert body["frames"] == expected_frames
 
     def test_end_to_end_gated_alert(self):
-        """End-to-end: gate-suppressed alert returns status 'dropped'."""
+        """End-to-end: Reolink payload, gate-suppressed alert returns status 'dropped'."""
         c = self._client()
         payload = {
-            "camera": "FRONT",
-            "ip": "192.168.1.39",
-            "event": "motion",
-            "timestamp": "2026-09-07T12:00:00Z",
+            "type": "motion",
+            "alarm": {
+                "type": "motion",
+                "time": "2026-09-07T12:00:00Z",
+                "channelName": "Front Door Outside",
+            },
         }
         suppressed_result = {
             "status": "dropped",
-            "camera_id": "FRONT",
+            "camera_id": "Front Door Outside",
             "classification": "motion",
             "reason": "no_vehicle",
             "gate": {

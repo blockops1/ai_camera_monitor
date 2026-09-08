@@ -234,8 +234,8 @@
     },
     {
       "id": "US-009",
-      "title": "listener/listener.py::handle_webhook() \u2014 webhook entrypoint",
-      "status": "todo",
+      "title": "listener/listener.py::handle_webhook() \u2014 entrypoint",
+      "status": "deprecated",
       "target_file": "/Users/jill/farm-surveillance-v2/listener/listener.py",
       "dependsOn": [
         "US-008"
@@ -254,7 +254,7 @@
     {
       "id": "US-010",
       "title": "listener/daemon.py \u2014 Flask app + launchctl plist generator",
-      "status": "todo",
+      "status": "deprecated",
       "target_file": "/Users/jill/farm-surveillance-v2/listener/daemon.py",
       "dependsOn": [
         "US-009"
@@ -307,8 +307,8 @@
     },
     {
       "id": "US-013",
-      "title": "tests/test_pipeline_end_to_end.py \u2014 synthetic webhook reaches all 3 telegram stages",
-      "status": "superseded",
+      "title": "tests/test_pipeline_end_to_end.py \u2014 synthetic entrypoint reaches all 3 telegram stages",
+      "status": "deprecated",
       "target_file": "/Users/jill/farm-surveillance-v2/tests/test_pipeline_end_to_end.py",
       "dependsOn": [
         "US-012"

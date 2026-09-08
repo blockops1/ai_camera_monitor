@@ -11,12 +11,12 @@ INPUTS:
     - POST body: JSON dict — camera alert payload (flat or Reolink shape)
 
 OUTPUTS:
-    - HTTP 200 with JSON response from handle_webhook()
+    - HTTP 200 with JSON response from pipeline.run() (via /alert)
     - HTTP 202 with alert_id on /alert accept
     - generate_plist() returns a str: a launchd plist XML
 
 PUBLIC API:
-    app — Flask app instance with POST /webhook + /alert routes
+    app — Flask app instance with POST /alert route
     generate_plist() -> str
         Return a plist XML string for manual installation.
 
@@ -24,7 +24,7 @@ DOES NOT DO:
     - Install or start the daemon (operator copies plist manually)
     - Auto-start the service (no auto-start, but plist has KeepAlive=true
       so launchd restarts on crash)
-    - Validate camera request signatures (listener handles that)
+    - Validate camera request signatures (camera_creds handles that)
     - Run as a multi-worker server (dev server only)
 
 WHY HERE:
@@ -34,12 +34,13 @@ WHY HERE:
     copying to ~/Library/LaunchAgents/.
 
 CALLED BY:
-    (external: Reolink camera sends POST /webhook, /alert)
+    (external: Reolink camera sends POST /alert)
 
 CALLS INTO:
-    - listener.listener: handle_webhook() for the pipeline
+    - listener.pipeline: run() for the 11-stage pipeline
     - flask: HTTP server + request parsing
     - infra.camera_creds: validate_source_ip() for anti-spoof
+    - infra.frame_capture: get_recent_frames() for RTSP frame pull
     - uuid: generate alert_id strings
     - collections: defaultdict for learned camera maps
 """
@@ -104,26 +105,6 @@ _learned_camera_map = _LearnedCameraMap(maxlen=32)
 # ---------------------------------------------------------------------------
 # Payload normalization helpers
 # ---------------------------------------------------------------------------
-
-
-def normalize_flat(payload: dict) -> dict | None:
-    """Normalize a flat payload {camera, ip, event, timestamp} to v2 alert dict.
-
-    Returns None if required keys are missing.
-    """
-    if not all(k in payload for k in ("camera", "ip", "event", "timestamp")):
-        return None
-    camera = payload["camera"]
-    # Check if camera is already a known camera_id (FRONT, BACK, etc.)
-    # or if it's a friendly name that needs resolution.
-    return {
-        "id": str(uuid.uuid4()),
-        "camera_id": camera,
-        "camera_label": camera,
-        "classification": payload.get("event", "unknown"),
-        "frames": [],
-        "timestamp": payload["timestamp"],
-    }
 
 
 def normalize_reolink(payload: dict, source_ip: str) -> dict | None:
@@ -200,13 +181,11 @@ def alert():
     if not payload:
         return jsonify({"status": "error", "reason": "invalid json"}), 400
 
-    # Try Reolink shape first (nested), then flat
+    # Normalize Reolink nested payload to v2 alert dict.
     alert_dict = normalize_reolink(payload, source_ip)
-    if alert_dict is None:
-        alert_dict = normalize_flat(payload)
 
     if alert_dict is None:
-        return jsonify({"status": "error", "reason": "unrecognized payload shape"}), 400
+        return jsonify({"status": "error", "reason": "unrecognized payload shape (Reolink nested expected)"}), 400
 
     camera_id = alert_dict["camera_id"]
     camera_label = alert_dict["camera_label"]
@@ -246,23 +225,6 @@ def alert():
     from listener import pipeline
 
     result = pipeline.run(alert_dict)
-    return jsonify(result), 200
-
-
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    """Accept camera alerts from Reolink webhooks.
-
-    Parses the JSON body, passes it to the pipeline via
-    handle_webhook(), and returns the result as JSON 200.
-    """
-    from listener.listener import handle_webhook
-
-    alert = request.get_json(silent=True)
-    if alert is None:
-        return jsonify({"status": "error", "reason": "invalid json"}), 400
-
-    result = handle_webhook(alert)
     return jsonify(result), 200
 
 
