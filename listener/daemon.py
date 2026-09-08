@@ -8,14 +8,15 @@ INPUTS:
     - env var LISTEN_HOST (default 0.0.0.0) — bind interface
     - env var LISTEN_PORT (default 8090) — TCP port to bind (matches v1)
     - env var TELEGRAM_BOT_TOKEN, TELEGRAM_HOME_CHAT_ID, VISION_LLM_URL
-    - POST body: JSON dict — camera alert payload
+    - POST body: JSON dict — camera alert payload (flat or Reolink shape)
 
 OUTPUTS:
     - HTTP 200 with JSON response from handle_webhook()
+    - HTTP 202 with alert_id on /alert accept
     - generate_plist() returns a str: a launchd plist XML
 
 PUBLIC API:
-    app — Flask app instance with POST /webhook route
+    app — Flask app instance with POST /webhook + /alert routes
     generate_plist() -> str
         Return a plist XML string for manual installation.
 
@@ -33,22 +34,219 @@ WHY HERE:
     copying to ~/Library/LaunchAgents/.
 
 CALLED BY:
-    (external: Reolink camera sends POST /webhook)
+    (external: Reolink camera sends POST /webhook, /alert)
 
 CALLS INTO:
     - listener.listener: handle_webhook() for the pipeline
     - flask: HTTP server + request parsing
-    - os.environ: LISTEN_HOST, LISTEN_PORT, TELEGRAM_BOT_TOKEN,
-      TELEGRAM_HOME_CHAT_ID, VISION_LLM_URL
+    - infra.camera_creds: validate_source_ip() for anti-spoof
+    - uuid: generate alert_id strings
+    - collections: defaultdict for learned camera maps
 """
 
 from __future__ import annotations
 
 import os
+import uuid
+from collections import deque
+from collections.abc import MutableMapping
+from datetime import UTC, datetime
 
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Learned camera name → camera_id cache (LRU 32)
+# ---------------------------------------------------------------------------
+class _LearnedCameraMap(MutableMapping):
+    """LRU 32 cache mapping camera friendly names to camera IDs.
+
+    Populated from the first sighting of a new camera name in a payload.
+    Falls back to a fallback map derived from camera-creds env file.
+    """
+
+    def __init__(self, maxlen: int = 32):
+        self._maxlen = maxlen
+        self._cache: deque[str] = deque(maxlen=maxlen)
+        self._map: dict[str, str] = {}
+
+    def __getitem__(self, key: str) -> str:
+        return self._map[key]
+
+    def __setitem__(self, key: str, value: str) -> None:
+        if key not in self._map:
+            if len(self._map) >= self._maxlen:
+                oldest = self._cache.popleft()
+                self._map.pop(oldest, None)
+            self._cache.append(key)
+        self._map[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        self._cache.remove(key)
+        del self._map[key]
+
+    def __iter__(self):
+        return iter(self._map)
+
+    def __len__(self):
+        return len(self._map)
+
+    def learn(self, friendly_name: str, camera_id: str) -> None:
+        """Learn a mapping from friendly name to camera_id."""
+        self[friendly_name] = camera_id
+
+
+_learned_camera_map = _LearnedCameraMap(maxlen=32)
+
+
+# ---------------------------------------------------------------------------
+# Payload normalization helpers
+# ---------------------------------------------------------------------------
+
+
+def normalize_flat(payload: dict) -> dict | None:
+    """Normalize a flat payload {camera, ip, event, timestamp} to v2 alert dict.
+
+    Returns None if required keys are missing.
+    """
+    if not all(k in payload for k in ("camera", "ip", "event", "timestamp")):
+        return None
+    camera = payload["camera"]
+    # Check if camera is already a known camera_id (FRONT, BACK, etc.)
+    # or if it's a friendly name that needs resolution.
+    return {
+        "id": str(uuid.uuid4()),
+        "camera_id": camera,
+        "camera_label": camera,
+        "classification": payload.get("event", "unknown"),
+        "frames": [],
+        "timestamp": payload["timestamp"],
+    }
+
+
+def normalize_reolink(payload: dict, source_ip: str) -> dict | None:
+    """Normalize a Reolink default webhook payload to v2 alert dict.
+
+    Accepts:
+        {
+          "type": "motion",
+          "alarm": {
+            "alarmTime": "...",
+            "channelName": "Front Door Outside",
+            "device": "Front Door Outside",
+            "name": "...",
+            "time": "2026-09-07T20:00:00Z",
+            "type": "person|vehicle|animal|motion",
+            ...
+          }
+        }
+
+    Returns None if required keys are missing.
+    """
+    alarm = payload.get("alarm")
+    if not isinstance(alarm, dict):
+        return None
+
+    # Prefer channelName, then device, then name for camera identification
+    device_name = alarm.get("channelName") or alarm.get("device") or alarm.get("name")
+    if not device_name:
+        return None
+
+    event_type = alarm.get("type", "unknown")
+    outer_type = payload.get("type", "")
+    if outer_type and outer_type != event_type:
+        event_type = outer_type
+    event_type = event_type.lower() if isinstance(event_type, str) else "unknown"
+
+    timestamp = (
+        alarm.get("time") or alarm.get("alarmTime") or datetime.now(UTC).isoformat()
+    )
+
+    return {
+        "id": str(uuid.uuid4()),
+        "camera_id": device_name,
+        "camera_label": device_name,
+        "classification": event_type,
+        "frames": [],
+        "timestamp": timestamp,
+    }
+
+
+# ---------------------------------------------------------------------------
+# /alert route
+# ---------------------------------------------------------------------------
+
+
+@app.post("/alert")
+def alert():
+    """Accept camera alerts from Reolink webhooks (v2 alert shape).
+
+    Accepts two payload shapes:
+    1. Flat: {camera, ip, event, timestamp} — v1 simple format
+    2. Reolink default: {type, alarm: {...}} — nested Reolink format
+
+    Normalizes to v2 alert dict, validates source IP, returns 202 + alert_id.
+    """
+    source_ip = (
+        request.headers.get("X-Forwarded-For", request.remote_addr or "")
+        .split(",")[0]
+        .strip()
+    )
+
+    # Parse JSON
+    payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({"status": "error", "reason": "invalid json"}), 400
+
+    # Try Reolink shape first (nested), then flat
+    alert_dict = normalize_reolink(payload, source_ip)
+    if alert_dict is None:
+        alert_dict = normalize_flat(payload)
+
+    if alert_dict is None:
+        return jsonify({"status": "error", "reason": "unrecognized payload shape"}), 400
+
+    camera_id = alert_dict["camera_id"]
+    camera_label = alert_dict["camera_label"]
+
+    # Validate source IP via camera_creds
+    from infra.camera_creds import validate_source_ip
+
+    if not validate_source_ip(camera_id, source_ip):
+        # Try to find a camera whose friendly name matches camera_label
+        from infra.camera_creds import get_all_cameras
+
+        all_cameras = get_all_cameras()
+        matched_cam_id = None
+        for cam in all_cameras.values():
+            if cam.get("name") == camera_label and source_ip == cam.get("ip"):
+                matched_cam_id = cam.get("prefix", camera_id)
+                break
+        if matched_cam_id is None:
+            return jsonify({"status": "error", "reason": "IP validation failed"}), 403
+
+        # Learn the mapping for next time
+        _learned_camera_map.learn(camera_label, matched_cam_id)
+        alert_dict["camera_id"] = matched_cam_id
+        camera_id = matched_cam_id
+
+    # Pull recent frames from the persistent RTSP reader.
+    # `get_recent_frames` is imported from `infra.frame_capture`.
+    from infra.frame_capture import get_recent_frames
+
+    n_frames = 4
+    offset_seconds = 6
+    alert_dict["frames"] = get_recent_frames(
+        camera_id, n=n_frames, offset_seconds=offset_seconds
+    )
+
+    # Run the alert through the full pipeline
+    from listener import pipeline
+
+    result = pipeline.run(alert_dict)
+    return jsonify(result), 200
 
 
 @app.route("/webhook", methods=["POST"])
