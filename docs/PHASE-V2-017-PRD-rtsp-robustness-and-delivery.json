@@ -64,6 +64,30 @@
       ],
       "estimate_loc": 12,
       "rationale": "Without a real telegram token, even perfect YOLOv8n detections cannot deliver alerts. The placeholder was likely a deployment-time stub that was never replaced. Migrating the secret out of the plist (which is in a wider-readable location than ~/.env) is also better security posture. Merging env from ~/.env at startup keeps the daemon config-driven without leaking secrets into the repo."
+    },
+    {
+      "id": "US-017d",
+      "title": "port v1-refactor rtsp robustness (scheduled_reconnect_watchdog + max_reconnect_attempts)",
+      "status": "todo",
+      "depends_on": [
+        "US-017a"
+      ],
+      "card_body_fallback": "v2's PersistentRTSPReader (~270 LOC at infra/frame_capture.py) opens a long-lived av.container per camera, decodes packets into a 180-frame ring, and runs a per-reader reconnect loop inside CameraCaptureRegistry. Compared to the v1 refactor's PersistentRTSPReader (~1100 LOC at /Users/jill/farm-surveillance-refactor/infra/persistent_rtsp.py), v2 is MISSING two watchdog capabilities that prevent the 'stuck in demux' failure mode: (1) a per-reader _scheduled_reconnect_watchdog that periodically (default 1h) sets stop_event, joins the decode thread with a 10s timeout, closes the container, and spawns a fresh decode thread; (2) a _max_reconnect_attempts watchdog that caps consecutive failure-driven reconnects (default 10) and then defers to the scheduled reconnect. Port both into v2's PersistentRTSPReader. The proactive cycle trades a 1-2s ingest pause per fire for protection against the demux-loop zombie state, which v2 has no other defense against.",
+      "ac": [
+        "AC1: grep -nE 'def _scheduled_reconnect_watchdog|def _scheduled_reconnect_fire' infra/frame_capture.py returns 2 matches inside PersistentRTSPReader.",
+        "AC2: grep -nE 'self\\._scheduled_reconnect_seconds' infra/frame_capture.py returns >=3 matches (constructor assignment + watchdog sleep + config log line).",
+        "AC3: grep -nE 'def _max_reconnect_attempts_maxed|max_reconnect_attempts' infra/frame_capture.py returns >=2 matches (state field + watchdog method).",
+        "AC4: After .start(), both _thread (decode) and _watchdog_thread are alive; both have distinct names ('rtsp-decode' and 'rtsp-watchdog' or equivalent).",
+        "AC5: A unit test stubs PersistentRTSPReader with mocked av.container, calls start(), waits until scheduled_reconnect_seconds elapses, and asserts container.close() was called and a fresh decode thread was spawned (frames_decoded_total reset OR thread id changed).",
+        "AC6: A unit test stubs a PersistentRTSPReader whose _decode_iteration always raises av.error.EOFError, calls start(), and asserts that after N+1 fires the failure loop stops and defers to scheduled_reconnect_watchdog (logs 'consecutive_reconnect_cap_reached').",
+        "AC7: pytest tests/ -x --tb=short returns >=120 passed."
+      ],
+      "files": [
+        "infra/frame_capture.py",
+        "tests/test_rtsp_watchdog.py"
+      ],
+      "estimate_loc": 90,
+      "rationale": "US-017c was filed and removed because we couldn't reproduce a wedge in this session's logs. The v1 refactor — which has been running on real Reolink streams for months — ships both watchdogs. They are defense-in-depth, not a fix for an active failure mode, but the cost of carrying them is small (~90 LOC) and the cost of NOT carrying them is the same 'stuck for hours' failure mode that originally motivated US-017c. Port the proven v1 refactor implementation directly rather than re-deriving it; the design notes in v1 (PLAN §11.13, §11.78) document the failure modes the watchdogs cover. v2's existing _reconnect_loop in CameraCaptureRegistry is kept for the cross-reader registry-level recoveries (US-017a single-key fix); the new per-reader watchdogs handle single-reader stuck-in-demux. env vars honored: FARMSV_RTSP_RECONNECT_SECONDS (default 3600), FARMSV_RTSP_MAX_RETRIES (default 10)."
     }
   ],
   "verification_post_stories": [
