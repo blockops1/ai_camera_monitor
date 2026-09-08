@@ -74,7 +74,7 @@
     {
       "id": "US-018c",
       "title": "sanitize production-prefix example in infra/camera_creds.py docstring",
-      "status": "todo",
+      "status": "done",
       "depends_on": [
         "US-018b"
       ],
@@ -89,16 +89,16 @@
         "AC3: pytest 122/122 (or higher) green; no behavioral change."
       ],
       "rationale": "Docstring example was a residual from the original author's environment. Replacing it is a one-line edit that closes the last production-prefix leak in production-code source files outside the plist generator (which US-018a handles).",
-      "passes": false,
+      "passes": true,
       "attempts": 0,
       "last_error": null,
-      "commit_sha": null,
-      "task_id": null
+      "commit_sha": "982426c",
+      "task_id": "t_c5979c4a"
     },
     {
       "id": "US-018d",
       "title": "sanitize production-prefix IPs and /Users/<name> paths in PRD JSON prose and operator-facing markdown docs",
-      "status": "todo",
+      "status": "done",
       "depends_on": [
         "US-018c"
       ],
@@ -119,11 +119,11 @@
         "AC5: one commit per file OR a single combined commit; commit message 'docs(v2): US-018d \u2014 sanitize production-prefix IPs and home paths in PRD/markdown prose'."
       ],
       "rationale": "Operator-facing prose is what gets screen-shared, blogged about, or quoted in tickets. Even non-public docs should not contain the operator's actual network topology once the repo is GitHub-public.",
-      "passes": false,
-      "attempts": 0,
+      "passes": true,
+      "attempts": 1,
       "last_error": null,
-      "commit_sha": null,
-      "task_id": null
+      "commit_sha": "c98b838",
+      "task_id": "t_a1418102"
     },
     {
       "id": "US-018e",
