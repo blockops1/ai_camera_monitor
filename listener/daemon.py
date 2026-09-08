@@ -327,7 +327,15 @@ def main():
     BEFORE the Flask server accepts requests, so the first /alert has
     a reader ready. start_all() joins each reader's boot thread with a
     30s timeout, so this blocks briefly at startup.
+
+    US-017b: also loads ~/.env (gitignored) into os.environ at boot so the
+    daemon can pick up secrets like TELEGRAM_BOT_TOKEN without them living
+    in the launchd plist. Existing env vars (set by launchd) take precedence.
     """
+    # US-017b: load ~/.env so TELEGRAM_BOT_TOKEN + TELEGRAM_HOME_CHAT_ID
+    # come from the operator's home directory rather than the launchd plist.
+    _load_home_env()
+
     host = os.environ.get("LISTEN_HOST", "0.0.0.0")
     port = int(os.environ.get("LISTEN_PORT", "8090"))
 
@@ -340,6 +348,39 @@ def main():
     log.info("RTSP registry ready.")
 
     app.run(host=host, port=port)
+
+
+def _load_home_env() -> None:
+    """Load ~/.env into os.environ. Existing keys win over file values.
+
+    US-017b: secrets (telegram token, etc.) live in ~/.env rather than the
+    launchd plist so they can be rotated without plist edits and so the
+    plist does not contain plaintext credentials.
+    """
+    from dotenv import dotenv_values  # python-dotenv
+
+    env_path = os.path.expanduser("~/.env")
+    if not os.path.exists(env_path):
+        log.info("No %s found; skipping home-env load.", env_path)
+        return
+    values = dotenv_values(env_path) or {}
+    loaded = 0
+    for k, v in values.items():
+        if v is None:
+            continue
+        # Launchd-injected values win so operators can override without
+        # touching ~/.env. Telegram token specifically is the one we
+        # explicitly want to NOT live in the plist, so even if the plist
+        # does NOT set it, this still loads from ~/.env.
+        if k not in os.environ:
+            os.environ[k] = v
+            loaded += 1
+    log.info(
+        "Loaded %d env var(s) from %s (telegram_token_len=%d)",
+        loaded,
+        env_path,
+        len(os.environ.get("TELEGRAM_BOT_TOKEN", "")),
+    )
 
 
 # ---------------------------------------------------------------------------
