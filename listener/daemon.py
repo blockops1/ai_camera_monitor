@@ -56,6 +56,8 @@ from datetime import UTC, datetime
 
 from flask import Flask, jsonify, request
 
+import infra.paths
+
 # ---------------------------------------------------------------------------
 # Logging — wire once at import time so every logger in the v2 codebase
 # (daemon, frame_capture, gate, pipeline, quick_classifier, …) routes to
@@ -265,7 +267,7 @@ def generate_plist() -> str:
     vision_url = os.environ.get("VISION_LLM_URL", "http://127.0.0.1:8080")
 
     # WorkingDirectory must be the v2 repo root so relative imports resolve.
-    workdir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    workdir = infra.paths.PROJECT_ROOT
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -277,7 +279,7 @@ def generate_plist() -> str:
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/jill/farm-surveillance-v2/.venv/bin/python3.11</string>
+        <string>{os.path.join(workdir, ".venv", "bin", "python3.11")}</string>
         <string>-m</string>
         <string>listener.daemon</string>
     </array>
@@ -288,7 +290,7 @@ def generate_plist() -> str:
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/Users/jill/farm-surveillance-v2/.venv/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>{os.path.join(workdir, ".venv", "bin")}:/usr/local/bin:/usr/bin:/bin</string>
         <key>LISTEN_HOST</key>
         <string>{host}</string>
         <key>LISTEN_PORT</key>
@@ -308,10 +310,10 @@ def generate_plist() -> str:
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/Users/jill/farm-surveillance-v2/logs/daemon.log</string>
+    <string>{os.path.join(workdir, "logs", "daemon.log")}</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/jill/farm-surveillance-v2/logs/daemon-error.log</string>
+    <string>{os.path.join(workdir, "logs", "daemon-error.log")}</string>
 
     <key>SoftResourceLimits</key>
     <integer>256</integer>
