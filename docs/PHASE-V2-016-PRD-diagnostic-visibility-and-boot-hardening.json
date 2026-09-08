@@ -1,0 +1,131 @@
+{
+  "prd_id": "PHASE-V2-016-PRD-diagnostic-visibility-and-boot-hardening",
+  "title": "v2 operational diagnostic visibility + daemon boot hardening",
+  "author": "Jill",
+  "status": "active",
+  "phase": "v2-ops",
+  "plan_section": "Discovered 2026-09-08 during v2 LIVE troubleshooting; not in PLAN.md",
+  "trigger": "Operator 2026-09-08 (verbatim): \"OK good so tell me why I haven't been getting Telegram alerts for vehicles driving around my property today.\" Root-cause audit identified 7 distinct issues, of which 5 were SILENT in production because the daemon emitted no INFO-level logs and stderr captured only Flask's exception handler. This PRD scopes the fixes as a structured change so the same class of failure cannot recur.",
+  "background": "v2 went LIVE on 2026-09-08 with code-complete pipeline + 8 US-014 webhook-activation stories committed. Telegram alerts stopped. Root-cause audit on 2026-09-08 10:30 EDT found the following silent production failures: (1) infra/camera_creds._parse_env never sets entry[\"name\"], so validate_source_ip always fails for the first lookup, and the /alert handler's fallback loop never matches. (2) pyproject.toml declares av>=11.0 but the venv had no av installed, so the first /alert after IP-validation-passed would 500 with ModuleNotFoundError. (3) listener/daemon.main() never called CameraCaptureRegistry.start_all(), so the persistent RTSP readers never boot — every /alert receives \"No reader for camera X; returning empty\" and the gate suppresses every alert. (4) No module ever called logging.basicConfig(); six modules instantiate getLogger() but only Flask's WARNING-level exception handler emits to stderr. INFO/DEBUG-level diagnostics from frame_capture, gate, pipeline, quick_classifier, etc. are completely silent. (5) infra/quick_classifier raises FileNotFoundError on first /alert because models/yolov8n.onnx was never downloaded. (6) macOS ObjC class collision between av/.dylibs/libavdevice.62 and cv2/.dylibs/libavdevice.61 may corrupt the av FFmpeg binding (TBD; need post-fix logging to confirm). (7) registry instance verification (does start_all() actually populate _readers?) was impossible without (4).",
+  "goal": "All seven identified issues fixed end-to-end with verifier commands that prove each, plus an audit-the-class pass that catches every other silent failure of the same shape. Daemon launches fully booted; first /alert from a legit camera returns 200 with frames captured + cooldown recorded + (when classification is vehicle) Telegram alert delivered. Tests pass 116/116+.",
+  "non_goals": [
+    "Do NOT touch /Users/jill/farm-surveillance-refactor/ or /Users/jill/farm-surveillance-internal/. They are frozen archives.",
+    "Do NOT touch ~/farm-surveillance/ (v1). v1 is OFF and stays OFF.",
+    "Do NOT git push. Operator reviews and pushes.",
+    "Do NOT install new skills. Use the existing skill set.",
+    "Do NOT add per-class pipeline modules (vehicle_pipeline/, etc.). ONE listener/pipeline.py.",
+    "Do NOT introduce a new logging framework (structlog, loguru). Use stdlib logging only.",
+    "Do NOT modify pyproject.toml dependencies (av is already declared; install it instead).",
+    "Do NOT touch v1's logging setup; out of scope."
+  ],
+  "constraints": [
+    "Each story targets <=100 LOC; 150 absolute max. Split before authoring.",
+    "Each card body <=2500 chars (Qwen 35B context ceiling).",
+    "Sequential dependency chain via hermes kanban link. Only the head of the chain is in `ready`.",
+    "Each AC is a shell-runnable command (grep -nE / python3 -c / python3 -m py_compile / pytest). No prose ACs.",
+    "Each story ends with `python3 -m pytest tests/ -x --tb=short` returning baseline-or-better test count.",
+    "All new code ASCII only. No Unicode, no em-dashes.",
+    "Workspace is `dir:/Users/jill/farm-surveillance-v2`. No fresh worktree.",
+    "Destructive ops (kill/restart/rm) need explicit operator approval per absolute boundary rule — never self-authorize.",
+    "Audit-the-class: when one silent failure is identified in a category, scan the WHOLE SYSTEM for the same category and fix all instances.",
+    "Logging must be wired ONCE at the daemon entry point so every logger in the v2 codebase (daemon, frame_capture, gate, pipeline, quick_classifier, vision_cache, gate_cooldown, motion_detector) routes to stderr with one consistent format.",
+    "Boot verification: every fix that affects daemon startup must be verified by bouncing the daemon and reading logs/daemon-error.log to confirm the new diagnostics land."
+  ],
+  "test_strategy": "Per-story `pytest tests/ -x --tb=short`. Stories that only restructure logging / add boot verification add ZERO new tests; they prove correctness via shell-runnable ACs (kill+bounce+grep, not pytest). Stories that change code semantics add 1-3 tests minimum.",
+  "shipping_definition": "After US-016 stories land and merge, a synthetic Reolink alert from camera 192.168.1.39 (FRONT) returns HTTP 200 with frame_paths > 0 and Telegram chat 374999219 receives the alert within 30s. Daemon stderr shows: 'Booting RTSP readers for 6 camera(s)...', 'RTSP registry ready.', per-reader decode progress at DEBUG or WARNING on failures, full pipeline stage transitions, and any Telegram send/result. No FileNotFoundError. No ModuleNotFoundError. No 'No reader for camera X' on legit cameras.",
+  "files_out_of_scope": [
+    "/Users/jill/farm-surveillance-refactor/**",
+    "/Users/jill/farm-surveillance-internal/**",
+    "/Users/jill/farm-surveillance/**",
+    "/Users/jill/archive/**",
+    "/Users/jill/.hermes/**"
+  ],
+  "stories": [
+    {
+      "id": "US-016a",
+      "title": "infra/camera_creds._parse_env: set entry.name from _CAMERA_MAP prefix",
+      "status": "todo",
+      "depends_on": [],
+      "card_body_fallback": "Full ACs in PRD. Run: grep -n 'entry\\[\"name\"\\] = camera_name' infra/camera_creds.py | wc -l  (expect >= 2: one for _rtsp_url branch, one for _ip branch). Run: python3 -c 'from infra.camera_creds import get_all_cameras; [print(c.get(\"name\")) for c in get_all_cameras().values()]'  (expect 6 names, no None). Run: pytest tests/ -x --tb=short  (expect 116 passed). Commit: 'US-016a: _parse_env populates entry.name from _CAMERA_MAP'.",
+      "ac": [
+        "AC1: grep -nE 'entry\\[\"name\"\\]\\s*=\\s*camera_name' infra/camera_creds.py returns 2 lines (one in _rtsp_url branch, one in _ip branch).",
+        "AC2: python3 -c 'import sys; sys.path.insert(0, \".\"); from infra.camera_creds import get_all_cameras; assert all(c.get(\"name\") for c in get_all_cameras().values())' returns exit 0.",
+        "AC3: pytest tests/ -x --tb=short returns >= 116 passed."
+      ],
+      "files": ["infra/camera_creds.py"],
+      "estimate_loc": 5,
+      "rationale": "validate_source_ip's fallback loop in listener/daemon.py matches by name. _parse_env never set entry.name, so the loop never matched, every /alert got 403, no Telegram alerts fired."
+    },
+    {
+      "id": "US-016b",
+      "title": "venv install: pyproject-declared runtime deps (av)",
+      "status": "todo",
+      "depends_on": ["US-016a"],
+      "card_body_fallback": "Full ACs in PRD. Run: pip install av>=11.0  (resolve the only declared-but-missing dep). Run: python3 -c 'import av; print(av.__version__)'  (expect >= 11.0). Add a CI-style check or document the venv-build step. Commit: 'US-016b: install pyproject-declared deps (av) into venv'.",
+      "ac": [
+        "AC1: grep -E '^\\s*\"av>=' pyproject.toml returns 1 line.",
+        "AC2: .venv/bin/python3.11 -c 'import av; print(av.__version__)' prints a version >= 11.0.",
+        "AC3: pytest tests/ -x --tb=short returns >= 116 passed."
+      ],
+      "files": [".venv/ (binaries only)"],
+      "estimate_loc": 0,
+      "rationale": "infra/frame_capture.py imports av at module load; missing dep caused 500 ModuleNotFoundError on first /alert after IP validation passed. Fix: ensure venv matches pyproject.toml declared deps."
+    },
+    {
+      "id": "US-016c",
+      "title": "listener/daemon.main: boot CameraCaptureRegistry.start_all() before app.run()",
+      "status": "todo",
+      "depends_on": ["US-016a"],
+      "card_body_fallback": "Full ACs in PRD. Add 4 lines to listener/daemon.main(): import + log + start_all() + log. Run: grep -n 'CameraCaptureRegistry.start_all' listener/daemon.py  (expect 1 line). After bouncing daemon (kill + launchctl respawn), daemon-error.log should show the boot log (note: requires US-016d first to make INFO visible). Commit: 'US-016c: daemon.main boots RTSP readers before app.run'.",
+      "ac": [
+        "AC1: grep -n 'CameraCaptureRegistry.start_all()' listener/daemon.py returns 1 line (inside main(), before app.run()).",
+        "AC2: grep -n 'from infra.frame_capture import CameraCaptureRegistry' listener/daemon.py returns 1 line.",
+        "AC3: pytest tests/ -x --tb=short returns >= 116 passed."
+      ],
+      "files": ["listener/daemon.py"],
+      "estimate_loc": 8,
+      "rationale": "Without this, the singleton never instantiates; every CameraCaptureRegistry.get() returns None; _get_healthy_reader logs 'No reader for camera X' for every /alert; gate suppresses every alert."
+    },
+    {
+      "id": "US-016d",
+      "title": "listener/daemon: logging.basicConfig at module-import + LOG_LEVEL env var",
+      "status": "todo",
+      "depends_on": ["US-016c"],
+      "card_body_fallback": "Full ACs in PRD. Add logging.basicConfig block at module-import time, BEFORE app = Flask(__name__), honoring LOG_LEVEL env var (default INFO), format '%%(asctime)s %%(levelname)s %%(name)s: %%(message)s', stream=sys.stderr, force=True. Run: grep -n 'logging.basicConfig' listener/daemon.py  (expect 1 line at module scope, not inside a function). Run: LOG_LEVEL=DEBUG .venv/bin/python3.11 -c 'from listener import daemon'  (expect no error). After bounce, daemon-error.log should show INFO-level diagnostics from frame_capture / pipeline / quick_classifier. Commit: 'US-016d: wire stdlib logging at daemon module-import (LOG_LEVEL=DEBUG)'.",
+      "ac": [
+        "AC1: grep -n '^logging\\.basicConfig' listener/daemon.py returns 1 line.",
+        "AC2: grep -nE '^\\s*log\\s*=\\s*logging\\.getLogger\\(\"daemon\"\\)' listener/daemon.py returns 1 line at module scope.",
+        "AC3: grep -n 'LOG_LEVEL' listener/daemon.py returns 1+ lines (env var is honored).",
+        "AC4: pytest tests/ -x --tb=short returns >= 116 passed (logging must not break tests)."
+      ],
+      "files": ["listener/daemon.py"],
+      "estimate_loc": 12,
+      "rationale": "Six modules instantiate getLogger() but never configure root. Without basicConfig, only Flask's WARNING+ exception handler emits to stderr. Silent failures in frame_capture / gate / pipeline / quick_classifier were invisible. Audit-the-class: also verify all 6 loggers are reachable via this single basicConfig (root logger).",
+      "audit_class_note": "When this lands, every getLogger() across the v2 codebase (daemon, frame_capture, gate, gate_cooldown, vision_cache, quick_classifier, motion_detector) routes to stderr via the same root handler. Verify by running US-016d smoke test and grepping logs/daemon-error.log for each logger name."
+    },
+    {
+      "id": "US-016e",
+      "title": "infra/quick_classifier: hard-fail at startup when model missing + ship yolov8n.onnx",
+      "status": "todo",
+      "depends_on": ["US-016d"],
+      "card_body_fallback": "Full ACs in PRD. Two parts: (a) download models/yolov8n.onnx from the URL into models/yolov8n.onnx. (b) QuickClassifier.__init__ MUST log FATAL and call sys.exit(1) when models/yolov8n.onnx is missing — operator 2026-09-08 directive: hard-fail, never silently degrade. Per US-016d, the FATAL message will land in logs/daemon-error.log so the failure is visible. Run: ls -la models/yolov8n.onnx  (expect file present, ~6.5MB). Run: rm models/yolov8n.onnx && python3 -m listener.daemon 2>&1 | grep -i 'fatal\\|missing'  (expect FATAL logged + daemon exits with non-zero code). Commit: 'US-016e: ship yolov8n.onnx model + hard-fail in QuickClassifier'.",
+      "ac": [
+        "AC1: ls -la models/yolov8n.onnx returns a file >= 6MB.",
+        "AC2: grep -nE 'sys\\.exit\\(1\\)' infra/quick_classifier.py returns >= 1 line (hard-fail path exists).",
+        "AC3: grep -nE 'raise FileNotFoundError' infra/quick_classifier.py returns 0 lines (no more soft raise on missing model).",
+        "AC4: pytest tests/ -x --tb=short returns >= 116 passed.",
+        "AC5: rm models/yolov8n.onnx && LOG_LEVEL=INFO .venv/bin/python3.11 -m listener.daemon 2>&1 | grep -iE 'fatal.*yolov8n|model missing' (expect FATAL message); same command's exit code is non-zero."
+      ],
+      "files": ["infra/quick_classifier.py", "models/yolov8n.onnx"],
+      "estimate_loc": 15,
+      "rationale": "infra/quick_classifier.QuickClassifier.__init__ raised FileNotFoundError when models/yolov8n.onnx was absent, killing every /alert after IP-validation passed. Operator 2026-09-08 directive: HARD FAIL, never silent degradation. Fix: ship the model + raise + log FATAL + sys.exit(1) when missing."
+    }
+  ],
+  "verification_post_stories": [
+    "kill (lsof -nP -iTCP:8090 -sTCP:LISTEN | awk '{print $2}') ; sleep 3 ; launchctl list | grep farm.surveillance.v2  (expect new PID)",
+    "tail -20 logs/daemon-error.log  (expect 'Booting RTSP readers for 6 camera(s)...', 'RTSP registry ready.', no traceback)",
+    "curl -X POST http://127.0.0.1:8090/alert -H 'Content-Type: application/json' -H 'X-Forwarded-For: 192.168.1.39' -d '{\"type\":\"motion\",\"alarm\":{\"type\":\"motion\",\"time\":\"2026-09-08T12:00:00Z\",\"channelName\":\"Front Door Outside\"}}'  (expect 200 with frame_paths > 0)",
+    "tail -10 logs/daemon-error.log  (expect per-stage pipeline logs, no ModuleNotFoundError, no FileNotFoundError)",
+    "Check Telegram chat 374999219 for the alert message"
+  ]
+}
