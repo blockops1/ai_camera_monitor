@@ -6,12 +6,16 @@ Tests the following behaviors:
   2. verify_class raises VisionAnalyzerError on non-200.
   3. detail_class dispatch keys match mode names.
   4. detail_class raises on unknown mode.
-  5. ALL call sites send response_format with type=json_schema + strict=True
-     + the canonical SCHEMA_JSON dict from the prompt module.
+  5. ALL call sites send response_format nested under json_schema with
+     strict=True and the canonical SCHEMA_JSON dict from the prompt
+     module. The NESTED shape (not flat) is what llama-server actually
+     enforces — flat shape gets 200 OK but no schema enforcement
+     (model emits bare text). Verified 2026-09-09 against
+     qwen3-vl-8b on localhost:8080.
   6. ALL call sites use the canonical model name "qwen3-vl-8b".
   7. VM2 prompt schemas declare the keys downstream code reads.
-  8. Schema-prompt contract: VM1 declares class+confidence; VM2 modes declare
-     class_confirmed + detail keys; NO schema has threat-level fields.
+  8. Schema-prompt contract: VM1 declares class+confidence; VM2 modes
+     declare class_confirmed + detail keys; NO schema has threat fields.
 """
 
 from unittest.mock import MagicMock, patch
@@ -98,20 +102,34 @@ class TestDetailClass:
 class TestLlamaServerPayload:
     """Regression tests for the llama-server payload shape.
 
-    llama-server (Qwen3-VL backend) accepts response_format of shape:
-        {"type": "json_schema", "strict": True, "schema": <dict>}
-    Per the refactor (infra/vision_analyzer.py:classify_vehicle_crop).
-    Using strict=True enforces key names + required fields + enums
-    server-side. Without it, the model can emit arbitrary keys, and
-    the entire pipeline crashes downstream when key lookups miss.
+    llama-server (qwen3-vl-8b backend) enforces strict-mode schema
+    ONLY when response_format is shaped:
+        {
+          "type": "json_schema",
+          "json_schema": {
+            "name": "<schema-name>",
+            "strict": True,
+            "schema": <dict>
+          }
+        }
+    The flat shape (`type/strict/schema` at top level) returns 200 OK
+    but the model emits bare text — silent failure mode.
 
-    These tests assert the wire format is correct so a future regression
-    gets caught here, not from camera traffic.
+    `strict: True` enforces key names + required fields + enums
+    server-side. Without it, downstream key lookups can miss and
+    crash the pipeline.
+
+    These tests assert both the wire format AND that the nested
+    envelope is used (so a regression that flattened the shape gets
+    caught here, not from camera traffic).
     """
 
-    def test_verify_class_payload_uses_strict_json_schema(self, sample_frames):
-        """verify_class sends response_format=json_schema with strict=True
-        + the VM1 schema dict."""
+    def test_verify_class_payload_uses_nested_strict_json_schema(
+        self, sample_frames
+    ):
+        """verify_class nests response_format under json_schema with
+        strict=True and the VM1 schema dict. Nested shape is what
+        llama-server actually enforces."""
         mock_resp = _mock_httpx_post(
             200,
             {"choices": [{"message": {"content": '{"class": "vehicle"}'}}]},
@@ -126,21 +144,23 @@ class TestLlamaServerPayload:
         payload = _extract_payload(post)
         rf = payload["response_format"]
         assert rf["type"] == "json_schema", (
-            f"response_format.type must be 'json_schema' (llama-server strict mode), "
-            f"got {rf['type']!r}"
+            f"response_format.type must be 'json_schema', got {rf['type']!r}"
         )
-        assert rf["strict"] is True, (
-            f"strict must be True for server-side schema enforcement, "
-            f"got {rf['strict']!r}"
+        # Envelope is NESTED under json_schema, not flat.
+        nested = rf["json_schema"]
+        assert nested["strict"] is True, (
+            f"nested.strict must be True, got {nested['strict']!r}"
         )
-        assert rf["schema"] is VM1_SCHEMA, (
+        assert nested["schema"] is VM1_SCHEMA, (
             "VM1 response_format must reference the canonical SCHEMA_JSON "
             "from infra.vm1_prompt"
         )
         assert payload["model"] == "qwen3-vl-8b"
 
-    def test_detail_class_vehicle_payload_uses_strict_json_schema(self, sample_frames):
-        """detail_class(vehicle) sends the vehicle schema."""
+    def test_detail_class_vehicle_payload_uses_nested_strict_json_schema(
+        self, sample_frames
+    ):
+        """detail_class(vehicle) sends nested strict-json_schema envelope."""
         mock_resp = _mock_httpx_post(
             200,
             {"choices": [{"message": {"content": '{"class_confirmed": "vehicle"}'}}]},
@@ -154,15 +174,18 @@ class TestLlamaServerPayload:
             detail_class("vehicle", sample_frames[0], sample_frames[1])
         payload = _extract_payload(post)
         rf = payload["response_format"]
+        nested = rf["json_schema"]
         assert rf["type"] == "json_schema"
-        assert rf["strict"] is True
-        assert rf["schema"] is VEHICLE_SCHEMA, (
+        assert nested["strict"] is True
+        assert nested["schema"] is VEHICLE_SCHEMA, (
             "vehicle response_format must reference the vehicle SCHEMA_JSON"
         )
         assert payload["model"] == "qwen3-vl-8b"
 
-    def test_detail_class_person_payload_uses_strict_json_schema(self, sample_frames):
-        """detail_class(person) sends the person schema."""
+    def test_detail_class_person_payload_uses_nested_strict_json_schema(
+        self, sample_frames
+    ):
+        """detail_class(person) sends nested strict-json_schema envelope."""
         mock_resp = _mock_httpx_post(
             200,
             {"choices": [{"message": {"content": '{"class_confirmed": "person"}'}}]},
@@ -176,13 +199,16 @@ class TestLlamaServerPayload:
             detail_class("person", sample_frames[0], sample_frames[1])
         payload = _extract_payload(post)
         rf = payload["response_format"]
+        nested = rf["json_schema"]
         assert rf["type"] == "json_schema"
-        assert rf["strict"] is True
-        assert rf["schema"] is PERSON_SCHEMA
+        assert nested["strict"] is True
+        assert nested["schema"] is PERSON_SCHEMA
         assert payload["model"] == "qwen3-vl-8b"
 
-    def test_detail_class_animal_payload_uses_strict_json_schema(self, sample_frames):
-        """detail_class(animal) sends the animal schema."""
+    def test_detail_class_animal_payload_uses_nested_strict_json_schema(
+        self, sample_frames
+    ):
+        """detail_class(animal) sends nested strict-json_schema envelope."""
         mock_resp = _mock_httpx_post(
             200,
             {"choices": [{"message": {"content": '{"class_confirmed": "animal"}'}}]},
@@ -196,9 +222,10 @@ class TestLlamaServerPayload:
             detail_class("animal", sample_frames[0], sample_frames[1])
         payload = _extract_payload(post)
         rf = payload["response_format"]
+        nested = rf["json_schema"]
         assert rf["type"] == "json_schema"
-        assert rf["strict"] is True
-        assert rf["schema"] is ANIMAL_SCHEMA
+        assert nested["strict"] is True
+        assert nested["schema"] is ANIMAL_SCHEMA
         assert payload["model"] == "qwen3-vl-8b"
 
 
