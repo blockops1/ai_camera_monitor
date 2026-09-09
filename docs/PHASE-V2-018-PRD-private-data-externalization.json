@@ -161,7 +161,7 @@
     {
       "id": "US-018f",
       "title": "scrub operator handle from infra/ code comments (prompt headers + gate/paths/cooldown)",
-      "status": "todo",
+      "status": "done",
       "depends_on": [
         "US-018e"
       ],
@@ -182,16 +182,17 @@
         "AC3: spot-check: a sampling of comments retains the phase/release-date references intact."
       ],
       "rationale": "Code comments are public by default once on GitHub. Even header docstrings should not name the operator.",
-      "passes": false,
-      "attempts": 0,
+      "passes": true,
+      "attempts": 1,
       "last_error": null,
-      "commit_sha": null,
-      "task_id": null
+      "commit_sha": "20690d9",
+      "task_id": "t_7011badd",
+      "last_verified_at": "2026-09-08T22:44"
     },
     {
       "id": "US-018g",
       "title": "replace chat identifier digits in PRD/markdown/HTML prose with <HOME_CHAT_ID> placeholder",
-      "status": "todo",
+      "status": "in_progress",
       "depends_on": [
         "US-018f"
       ],
@@ -216,7 +217,7 @@
       "attempts": 0,
       "last_error": null,
       "commit_sha": null,
-      "task_id": null
+      "task_id": "t_d2396f4e"
     },
     {
       "id": "US-018h",
