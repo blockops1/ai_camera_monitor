@@ -151,11 +151,12 @@
       "passes": true,
       "attempts": 2,
       "last_error": null,
-      "commit_sha": "e14ff1b",
+      "commit_sha": "8c3f731",
       "task_id": "t_c6f9e837",
-      "last_verified_at": "2026-09-08T19:55",
+      "last_verified_at": "2026-09-08T21:29",
       "reviewer_id": "jill-manual-recovery",
-      "notes": "Coder did the work (renamed owner/label/verify_note) but did not git commit; QA passed. Manual sanitization completed: renamed IDs v_carson_white/v_grant_*/v_rolf_* to descriptive names, fixed _load_candidates() to unwrap new wrapper format, fixed test docstring/variable name. Tests 126/126."
+      "notes": "Coder did the work (renamed owner/label/verify_note) but did not git commit; QA passed. Manual sanitization completed: renamed IDs v_carson_white/v_grant_*/v_rolf_* to descriptive names, fixed _load_candidates() to unwrap new wrapper format, fixed test docstring/variable name. Tests 126/126.",
+      "manual_recovery_note": "Coder left ruff-format-reformatted JSON with trailing commas (invalid JSON, json.loads crashes silently). QA run 5 found this and made root-cause fixes (pyproject.toml ruff exclude + per-file-ignores + pyright exclude for data). Manual recovery picked up: removed trailing commas from JSON, kept QA pyproject.toml fix, added check_no_private_data.py scanner to repo. Scanner exits 0 on US-018e data scope. US-018e marked done at this commit."
     },
     {
       "id": "US-018f",
