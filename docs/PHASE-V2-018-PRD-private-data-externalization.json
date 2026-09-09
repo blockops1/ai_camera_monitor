@@ -213,16 +213,15 @@
       ],
       "rationale": "Chat identifier is a long-lived secret that cannot rotate trivially (the operator's phone must re-subscribe). Even one literal leak in a committed file means the identifier is permanently in git history; sanitization is irreversible only by force-pushing or rotating the chat.",
       "passes": true,
-      "attempts": 1,
+      "attempts": 0,
       "last_error": null,
       "commit_sha": "46dec63",
-      "task_id": "t_d2396f4e",
-      "last_verified_at": "2026-09-08T23:35"
+      "task_id": "t_d2396f4e"
     },
     {
       "id": "US-018h",
       "title": "rename TELEGRAM_CHAT_ID placeholder in telegram-creds.env.example to match the runtime env var name",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [],
       "estimate_loc": 10,
       "files": [
@@ -235,16 +234,17 @@
         "AC3: a comment near the var explains the runtime read path."
       ],
       "rationale": "Pre-existing misnaming risk that would silently break delivery for new operators following the public example file.",
-      "passes": false,
-      "attempts": 0,
+      "passes": true,
+      "attempts": 1,
       "last_error": null,
-      "commit_sha": null,
-      "task_id": "t_64f296df"
+      "commit_sha": "27c83a8",
+      "task_id": "t_64f296df",
+      "last_verified_at": "2026-09-08T23:42"
     },
     {
       "id": "US-018i",
       "title": "docs/PRIVACY.md + scripts/check_no_private_data.py + pre-push hook to prevent regression",
-      "status": "todo",
+      "status": "in_progress",
       "depends_on": [
         "US-018b",
         "US-018c",
@@ -274,7 +274,7 @@
       "attempts": 0,
       "last_error": null,
       "commit_sha": null,
-      "task_id": null
+      "task_id": "t_aee8cf4a"
     },
     {
       "id": "US-018j",
