@@ -246,17 +246,14 @@ def _write_pairwise_diff_image(
     # vehicles (Sequoia) are OUTSIDE the bbox.
     if bbox_a is not None or bbox_b is not None:
         from PIL import ImageDraw
+
         draw = ImageDraw.Draw(diff_img)
         if bbox_a is not None:
             x, y, w, h = bbox_a
-            draw.rectangle(
-                [(x, y), (x + w, y + h)], outline=(0, 255, 0), width=4
-            )
+            draw.rectangle([(x, y), (x + w, y + h)], outline=(0, 255, 0), width=4)
         if bbox_b is not None:
             x, y, w, h = bbox_b
-            draw.rectangle(
-                [(x, y), (x + w, y + h)], outline=(0, 200, 255), width=4
-            )
+            draw.rectangle([(x, y), (x + w, y + h)], outline=(0, 200, 255), width=4)
 
     out_dir = Path(output_dir)
     # §11.88 (2026-09-01) — PNG lossless, NOT JPEG q90.
@@ -266,9 +263,7 @@ def _write_pairwise_diff_image(
         diff_img.save(out_path, format="PNG")
         return str(out_path)
     except Exception as err:
-        log.warning(
-            f"[{alert_id}] pairwise_diff: failed to write {out_path}: {err}"
-        )
+        log.warning(f"[{alert_id}] pairwise_diff: failed to write {out_path}: {err}")
         return None
 
 
@@ -287,8 +282,7 @@ class ClassifierProtocol(Protocol):
 
     def classify_frame(
         self, frame: str | Image.Image, timestamp: datetime | None = None
-    ) -> QuickVerdict:
-        ...
+    ) -> QuickVerdict: ...
 
 
 # ---------------------------------------------------------------------------
@@ -365,8 +359,10 @@ def is_v2_enabled() -> bool:
 
 
 # V2 routing thresholds (used in rule 5 only)
-V2_VEHICLE_OVERRIDE_MIN_CONF: float = 0.6  # vehicle must be at or above to override person
-V2_PERSON_OVERRIDE_MAX_CONF: float = 0.4   # person at or below is overridden by vehicle
+V2_VEHICLE_OVERRIDE_MIN_CONF: float = (
+    0.6  # vehicle must be at or above to override person
+)
+V2_PERSON_OVERRIDE_MAX_CONF: float = 0.4  # person at or below is overridden by vehicle
 
 
 # ---------------------------------------------------------------------------
@@ -486,9 +482,7 @@ def _load_thresholds_config() -> dict:
         with config_path.open() as f:
             data = json.load(f)
         # Strip the "_comment" / "_default_thresholds_reference" keys
-        return {
-            k: v for k, v in data.items() if not k.startswith("_")
-        }
+        return {k: v for k, v in data.items() if not k.startswith("_")}
     except Exception as e:
         log.warning(f"motion_gate: failed to load thresholds config: {e!r}")
         return {}
@@ -672,7 +666,12 @@ def _route_decision(
         # first; if it has no reason, try the other crop.
         other = verdict_a if top is verdict_b else verdict_b
         reason: str = top.reason or other.reason or "no_object_detected"
-        return ("suppress", top.top_class if top.top_confidence > 0 else None, top.top_confidence, reason)
+        return (
+            "suppress",
+            top.top_class if top.top_confidence > 0 else None,
+            top.top_confidence,
+            reason,
+        )
 
     # Sort by confidence desc — highest-confidence verdict drives the decision
     high_conf.sort(key=lambda v: v.top_confidence, reverse=True)
@@ -690,9 +689,8 @@ def _route_decision(
     if top.top_class == "person":
         if v2:
             # V2: single high-conf person with empty other slot → person pipeline.
-            other_empty = (
-                len(high_conf) == 1
-                or (len(high_conf) >= 2 and high_conf[1].top_class in (None, "none"))
+            other_empty = len(high_conf) == 1 or (
+                len(high_conf) >= 2 and high_conf[1].top_class in (None, "none")
             )
             if other_empty or (
                 len(high_conf) == 2 and high_conf[1].top_class == "person"
@@ -703,7 +701,12 @@ def _route_decision(
 
     # Rule 3: ANY crop high-conf animal → suppress (no animal pipeline)
     if top.top_class in ANIMAL_CLASSES:
-        return ("suppress", top.top_class, top.top_confidence, "animal_suppressed_no_pipeline")
+        return (
+            "suppress",
+            top.top_class,
+            top.top_confidence,
+            "animal_suppressed_no_pipeline",
+        )
 
     # Rule 5: Mixed (person + other-not-vehicle, or other-not-vehicle alone)
     # Vehicle wins on ambiguity.
@@ -899,8 +902,7 @@ def run(
         frame_2_path, frame_3_path, threshold=diff_threshold, min_area_px=min_area_px
     )
     log.debug(
-        f"[{alert_id}] motion_gate: diff(2,3) changed_pixels={count_a} "
-        f"bbox_a={bbox_a}"
+        f"[{alert_id}] motion_gate: diff(2,3) changed_pixels={count_a} bbox_a={bbox_a}"
     )
 
     # ---- diff(3,4) → bbox_b → crop_b ----
@@ -908,8 +910,7 @@ def run(
         frame_3_path, frame_4_path, threshold=diff_threshold, min_area_px=min_area_px
     )
     log.debug(
-        f"[{alert_id}] motion_gate: diff(3,4) changed_pixels={count_b} "
-        f"bbox_b={bbox_b}"
+        f"[{alert_id}] motion_gate: diff(3,4) changed_pixels={count_b} bbox_b={bbox_b}"
     )
 
     # ---- Phase 6B.175: TWO per-frame subject bboxes ----
@@ -939,15 +940,9 @@ def run(
         and frame_3_gray is not None
         and frame_4_gray is not None
     ):
-        mask_1to2 = pairwise_diff(
-            frame_1_gray, frame_2_gray, threshold=diff_threshold
-        )
-        mask_2to3 = pairwise_diff(
-            frame_2_gray, frame_3_gray, threshold=diff_threshold
-        )
-        mask_3to4 = pairwise_diff(
-            frame_3_gray, frame_4_gray, threshold=diff_threshold
-        )
+        mask_1to2 = pairwise_diff(frame_1_gray, frame_2_gray, threshold=diff_threshold)
+        mask_2to3 = pairwise_diff(frame_2_gray, frame_3_gray, threshold=diff_threshold)
+        mask_3to4 = pairwise_diff(frame_3_gray, frame_4_gray, threshold=diff_threshold)
         subject_bbox_a = subject_bbox_from_two_masks(mask_1to2, mask_2to3)
         subject_bbox_b = subject_bbox_from_two_masks(mask_2to3, mask_3to4)
         del frame_1_gray, frame_2_gray, frame_3_gray, frame_4_gray
@@ -1081,16 +1076,13 @@ def run(
     # §11.176 (2026-09-06): gate no longer writes crop files — the
     # pairwise_diff PNG just annotates the per-frame subject AND
     # bboxes (crop_bbox_a / crop_bbox_b) as a visualization aid.
-    pairwise_diff_path: str | None = None
-    if keep_disk and frame_3_pil is not None and frame_4_pil is not None:
-        pairwise_diff_path = _write_pairwise_diff_image(
-            frame_3_pil, frame_4_pil, crop_bbox_a, crop_bbox_b, output_dir, alert_id
+    pairwise_diff_path = _write_pairwise_diff_image(
+        frame_3_pil, frame_4_pil, crop_bbox_a, crop_bbox_b, output_dir, alert_id
+    )
+    if pairwise_diff_path:
+        log.debug(
+            f"[{alert_id}] motion_gate: wrote pairwise_diff ({pairwise_diff_path})"
         )
-        if pairwise_diff_path:
-            log.debug(
-                f"[{alert_id}] motion_gate: wrote pairwise_diff "
-                f"({pairwise_diff_path})"
-            )
 
     return GateVerdict(
         decision=decision,
