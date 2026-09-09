@@ -19,7 +19,7 @@ INPUTS:
 OUTPUTS:
   - GateVerdict dataclass (decision, class_label, confidence, crop paths,
     bboxes, raw verdicts, reason)
-  - pairwise diff image at `<output_dir>/pairwise_diff.jpg` (Phase 6B.144,
+  - pairwise diff image at `<output_dir>/pairwise_diff.png` (Phase 6B.144,
     §11.66) — read by vehicle_identifier.identify_from_crops so Qwen can
     see what pixels changed between frame_3 and frame_4.
 PUBLIC API:
@@ -69,7 +69,7 @@ Architecture (LOCKED §11.37, modified §11.66 + §11.93 Phase 6B.169):
     diff(frame_2, frame_3) → bbox_a → crop_a = frame_2.crop(bbox_a)
     diff(frame_3, frame_4) → bbox_b → crop_b = frame_3.crop(bbox_b)
     YOLOv8n ONNX on crop_a + crop_b (~25ms each) — gate decision only
-    [Phase 6B.144 §11.66] write `pairwise_diff.jpg` = abs(frame_3 − frame_4)
+    [Phase 6B.144 §11.66] write `pairwise_diff.png` = abs(frame_3 − frame_4)
       with bbox overlay, so Qwen sees what pixels moved.
     per-class + per-camera threshold gate
     return GateVerdict
@@ -148,9 +148,9 @@ log = logging.getLogger(__name__)
 # Env var: GATE_KEEP_DISK_ARTIFACTS
 # ---------------------------------------------------------------------------
 #
-# Phase 6B.115 (§11.46.6): when True, the gate writes frame_001..004.jpg
-# + frame_N_crop_*.jpg to disk (postmortem / debugging). When False
-# (default), the gate only writes composite.jpg (composite_telegram needs
+# Phase 6B.115 (§11.46.6): when True, the gate writes frame_001..004.png
+# + frame_N_crop_*.png to disk (postmortem / debugging). When False
+# (default), the gate only writes composite.png (composite_telegram needs
 # a path). All other consumers read from GateVerdict.frames (PIL.Image).
 #
 # We default to False because the in-memory path is the new authoritative
@@ -202,7 +202,7 @@ def _write_pairwise_diff_image(
     output_dir: str,
     alert_id: str,
 ) -> str | None:
-    """Write abs(frame_a − frame_b) as a JPEG with bbox overlays.
+    """Write abs(frame_a - frame_b) as a PNG with bbox overlays.
 
     Phase 6B.144 (§11.66): Qwen3-VL needs to see what pixels changed between
     consecutive frames so it can identify the MOVING subject rather than
@@ -216,11 +216,11 @@ def _write_pairwise_diff_image(
         frame_b: PIL.Image from the persistent RTSP ring buffer (frame_4).
         bbox_a: motion bbox for diff(frame_2, frame_3) — drawn in green.
         bbox_b: motion bbox for diff(frame_3, frame_4) — drawn in green.
-        output_dir: where to save the diff JPEG (typically paths.output_dir).
+        output_dir: where to save the diff PNG (typically paths.output_dir).
         alert_id: for the filename and log lines.
 
     Returns:
-        Path to the saved JPEG, or None on failure.
+        Path to the saved PNG, or None on failure.
     """
     from pathlib import Path
 
@@ -411,7 +411,7 @@ class GateVerdict:
         (for postmortem / debugging). Empty list when env var is off.
       crop_a_path: disk path to frame_2 crop (None when env var off)
       crop_b_path: disk path to frame_3 crop (None when env var off)
-      pairwise_diff_path: disk path to abs(frame_3 − frame_4) JPEG with
+      pairwise_diff_path: disk path to abs(frame_3 − frame_4) PNG with
         bbox overlays (Phase 6B.144 §11.66). Qwen sees this to
         disambiguate the moving subject from stationary vehicles that
         may be in the same frame. None when GATE_KEEP_DISK_ARTIFACTS=false
@@ -826,7 +826,7 @@ def run(
     into PIL.Image, stashes them in verdict.frames, and crops bbox regions
     into verdict.crop_a / verdict.crop_b. Downstream pipeline reads from
     the verdict — no filesystem check on the hot path. Disk writes
-    (frame_001..004.jpg + crop_*.jpg) are gated by GATE_KEEP_DISK_ARTIFACTS
+    (frame_001..004.png + crop_*.png) are gated by GATE_KEEP_DISK_ARTIFACTS
     for postmortem only.
     """
     t0 = time.perf_counter()

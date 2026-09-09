@@ -44,8 +44,12 @@ from vehicle_matcher import match_vehicle
 
 
 def _gsum(v: GateVerdict) -> dict:
-    return {"decision": v.decision, "class_label": v.class_label,
-            "confidence": v.confidence, "reason": v.reason}
+    return {
+        "decision": v.decision,
+        "class_label": v.class_label,
+        "confidence": v.confidence,
+        "reason": v.reason,
+    }
 
 
 def _crop_paths(crop_a, crop_b) -> tuple[str, str]:
@@ -59,6 +63,7 @@ def _crop_paths(crop_a, crop_b) -> tuple[str, str]:
     else:
         b_p = _tiny_png()
     return a_p, b_p
+
 
 def _tiny_png() -> str:
     p = "/tmp/_empty.png"
@@ -117,14 +122,17 @@ def run(alert: dict) -> dict:
 
     # Stage 4: run YOLO gate.
     gate_verdict = run_gate(
-        frame_paths=frames, camera_name=camera_id,
-        alert_id=alert.get("id", camera_id), output_dir="/tmp",
+        frame_paths=frames,
+        camera_name=camera_id,
+        alert_id=alert.get("id", camera_id),
+        output_dir="/tmp",
     )
 
     # Stage 5: if gate suppresses, drop.
     if gate_verdict.decision == "suppress":
         return {
-            "status": "dropped", "camera_id": camera_id,
+            "status": "dropped",
+            "camera_id": camera_id,
             "classification": classification,
             "reason": gate_verdict.reason,
             "gate": _gsum(gate_verdict),
@@ -138,11 +146,13 @@ def run(alert: dict) -> dict:
     vm1_result = verify_class(a_p, b_p)
 
     diff = gate_verdict.pairwise_diff_path or (
-        frames[-1] if frames else "/tmp/diff.jpg"
+        frames[-1] if frames else "/tmp/diff.png"
     )
     tg1 = build_alert_message(
-        verdict=gate_verdict, vm1_result=vm1_result,
-        frames=frames, diff_image=Path(diff),
+        verdict=gate_verdict,
+        vm1_result=vm1_result,
+        frames=frames,
+        diff_image=Path(diff),
         camera_label=camera_label,
     )
 
@@ -151,8 +161,9 @@ def run(alert: dict) -> dict:
     vm2_result = detail_class(mode, a_p, b_p)
 
     # Stage 9: build TG#2 via detail formatter.
-    tg2 = build_detail_message(mode, vm2_result, Path(a_p), Path(b_p),
-                               camera_label=camera_label)
+    tg2 = build_detail_message(
+        mode, vm2_result, Path(a_p), Path(b_p), camera_label=camera_label
+    )
 
     # Stage 10: vehicle match (vehicle only).
     match_result: dict = {"matched": False}
@@ -166,10 +177,15 @@ def run(alert: dict) -> dict:
         tg3 = build_match_message(match_result, vm2_result)
 
     return {
-        "status": "ok", "camera_id": camera_id,
-        "classification": classification, "frames": frames,
+        "status": "ok",
+        "camera_id": camera_id,
+        "classification": classification,
+        "frames": frames,
         "gate": _gsum(gate_verdict),
-        "vm1_result": vm1_result, "tg1": tg1,
-        "vm2_result": vm2_result, "tg2": tg2,
-        "match_result": match_result, "tg3": tg3,
+        "vm1_result": vm1_result,
+        "tg1": tg1,
+        "vm2_result": vm2_result,
+        "tg2": tg2,
+        "match_result": match_result,
+        "tg3": tg3,
     }
