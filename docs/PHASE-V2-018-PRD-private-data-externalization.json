@@ -122,13 +122,15 @@
       "passes": true,
       "attempts": 1,
       "last_error": null,
-      "commit_sha": "c98b838",
-      "task_id": "t_a1418102"
+      "commit_sha": "e14ff1b",
+      "task_id": "t_a1418102",
+      "last_verified_at": "2026-09-08T19:55",
+      "notes": "Original c98b838 missed 3 leaks: RECREATION.md:5 (Mr. V), V2-LOGIC-FLOW.md:313 (Mr. V), RECREATION.md chat-ID. Manual follow-up at e14ff1b fixes them. NOTE: README.md paths + config/ comment also fixed in same commit (were technically out of US-018d scope but in the same class \u2014 operator-facing prose)."
     },
     {
       "id": "US-018e",
       "title": "anonymize operator and helper handles in data/vehicles/known_vehicles.json",
-      "status": "todo",
+      "status": "in_progress",
       "depends_on": [
         "US-018d"
       ],
@@ -146,11 +148,14 @@
         "AC5: pytest 122/122 (or higher) green; tests/test_known_vehicles.py assertions updated to match the anonymized values; no test for disambiguation logic removed."
       ],
       "rationale": "The largest single-source leak in tracked data files. Operators routinely enroll their own vehicles and helpers' vehicles into this list, so the leak recurs every enrollment \u2014 that's exactly the regression class US-018i (PRIVACY.md + scanner) will guard against.",
-      "passes": false,
-      "attempts": 0,
+      "passes": true,
+      "attempts": 2,
       "last_error": null,
-      "commit_sha": null,
-      "task_id": null
+      "commit_sha": "e14ff1b",
+      "task_id": "t_c6f9e837",
+      "last_verified_at": "2026-09-08T19:55",
+      "reviewer_id": "jill-manual-recovery",
+      "notes": "Coder did the work (renamed owner/label/verify_note) but did not git commit; QA passed. Manual sanitization completed: renamed IDs v_carson_white/v_grant_*/v_rolf_* to descriptive names, fixed _load_candidates() to unwrap new wrapper format, fixed test docstring/variable name. Tests 126/126."
     },
     {
       "id": "US-018f",
