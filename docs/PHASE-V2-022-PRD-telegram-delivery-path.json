@@ -1,0 +1,99 @@
+{
+  "phase": "V2-022",
+  "title": "Telegram delivery path — close the gap that broke the system's entire purpose",
+  "background": "v2's daemon at listener/daemon.py:250 calls pipeline.run(alert_dict) and jsonifies the result back to the camera as HTTP 200. The pipeline correctly builds tg1/tg2/tg3 dicts (telegram_formatter/alert.py:68-71, detail.py:73-79, match_alert.py:57-60) with the right caption text and the canonical data/frames/<cam>/<alert_id>/ PNG paths. The dicts go back to Flask and the HTTP request ends. No code anywhere in v2 POSTs to https://api.telegram.org. Architecture diagram shows 'Bot.send_message / send_photo (planned)' but live code does NOT send. Logs/daemon.log shows OFS (.103) firing ~20 alerts this morning, all returning HTTP 200, none reaching the operator's home chat <TELEGRAM_CHAT_ID>. Operator 2026-09-09: 'Since sending me a telegram alert is the entire purpose of this entire software system, and apparently that wasn't a big enough problem to mention for you until just now, then yes I do want you to add that in as PRD stories.' This PRD adds the missing HTTP-send layer with no JPEG (use sendDocument for lossless PNG per US-019f/g/h decision; sendPhoto re-encodes server-side), with no fallback paths (per operator: 'I want the system to work and if it doesn't work then it should throw an error'), and with an explicit operator checklist item because the operator's ~/.env today has TELEGRAM_CHAT_ID but the canonical env var name everywhere in code/tests/PRDs/README/PRIVACY.md/telegram-creds.env.example is TELEGRAM_HOME_CHAT_ID. That mismatch is invisible until something tries to send.",
+  "goal": "After US-022 stories land and merge, a synthetic Reolink alert from any production camera (OFS .103, OFG .108, OFP .113) reaches the operator's Telegram home chat within 30s with TG#1 (full image + pairwise-diff + 4 frame positions), TG#2 (crop_a + crop_b + VM2 caption) for vehicle/person/animal, and TG#3 (match result text). Photos are lossless PNG via sendDocument (per ZERO-JPEG directive). No 4xx or 5xx in logs/daemon.log from api.telegram.org. No JPEG in any photo attachment (verifiable via file(1) on the downloaded document).",
+  "design_principles": [
+    "sendDocument is mandatory for photos — preserves lossless PNG, contradicts no operator-side recompression. sendPhoto is forbidden; Telegram server re-encodes to JPEG.",
+    "No fallback paths. If bot_token is empty, dispatcher raises ConfigError at module load. If chat_id is empty, dispatcher raises ConfigError when called. If HTTP POST to api.telegram.org returns 4xx/5xx, dispatcher raises DeliveryError. Daemon at /alert wraps dispatch in try/except that LOGS the exception but still returns HTTP 200 to the camera (so cameras don't keep retrying), but the dispatcher's raise means the gap is visible in logs.",
+    "Token and chat_id read from environment ONLY. Never literal. Never committed. Scanner at check_no_private_data.py already enforces the chat_id pattern; token is never logged.",
+    "No retry loops. One POST per message. Telegram returns the error code; we log it. Operator sees the gap, fixes the env var or the bot config, and the next alert succeeds.",
+    "TG#1/TG#2/TG#3 dispatch order: TG#1 first (the 'first seen' alert with the diff image), then TG#2 (the detail with crops), then TG#3 (match result). Match each to a separate sendMessage/sendDocument call so Telegram displays them as a sequence in the chat.",
+    "Empty photos list -> sendMessage with caption only (TG#3 always, TG#2 when no crops). One or more photos -> sendDocument (with first photo as the file, rest as attachments in a media group). For simplicity, this PRD uses sendMediaGroup for multi-photo and single-message sendMessage for text-only.",
+    "Dispatcher is sync (httpx.Client, not async) — daemon/Flask is sync, pipeline.run() is sync, no benefit to async and adds complexity. httpx is already in venv (0.28.1).",
+    "Env var name is TELEGRAM_HOME_CHAT_ID, not TELEGRAM_CHAT_ID. Operator's ~/.env currently has TELEGRAM_CHAT_ID=374999219 which is ignored by listener/daemon.py:266 (reads TELEGRAM_HOME_CHAT_ID). US-022d's smoke test fails loudly with the exact rename step in the error message."
+  ],
+  "scope_exclusions": [
+    "Migrating away from python-telegram-bot, switching to a different bot library, or building a polling endpoint for incoming commands. v2 is webhook-driven.",
+    "Adding user authentication or per-user chat routing. Single home chat.",
+    "Rate-limiting or queueing alerts. Telegram's 30 msg/sec global limit is well above expected alert rate (1 alert/min/camera max).",
+    "Storing alert history in a database. Pipeline result is JSON-returned to camera and that's the record.",
+    "Replacing pipeline.run() or the existing telegram_formatter/* modules. This PRD adds a new module that reads what pipeline.run() already builds.",
+    "Renaming TELEGRAM_HOME_CHAT_ID to TELEGRAM_CHAT_ID. The canonical name is TELEGRAM_HOME_CHAT_ID (matches docs/PRIVACY.md, docs/V2-LOGIC-FLOW.md, README.md, telegram-creds.env.example, all tests, all PRDs). Operator's ~/.env has the wrong name; the smoke test catches it with a fix-it command in the error message.",
+    "Adding a scanner for TELEGRAM_CHAT_ID vs TELEGRAM_HOME_CHAT_ID. PRD-V2-018 US-018h already covers the example-file rename; this PRD surfaces the operator-side env var mismatch via the smoke test, not a new scanner."
+  ],
+  "test_strategy": "Per-story `pytest tests/ -x --tb=short`. Stories a/b/c use httpx.MockTransport to simulate api.telegram.org responses (200 success, 400 bad token, 404 bad chat_id, 429 rate limit). Story d is operator-driven on live daemon (per PRD-V2-019 + PRD-V2-021 smoke-test pattern): synthetic webhook -> verify operator's chat receives 1-3 messages with lossless PNG attachments. Total tests added: ~6-8. Net test count: 132 + 6-8 = 138-140 (still well below the 200-test ceiling).",
+  "shipping_definition": "After US-022 stories land and merge, a synthetic Reolink alert from any production camera (OFS, OFG, OFP) reaches the operator's Telegram home chat within 30s with TG#1 + TG#2 (if vehicle/person/animal) + TG#3 (if matched), all photos lossless PNG via sendDocument. logs/daemon.log shows: 'tg-dispatch: TG#1 ok (200)', 'tg-dispatch: TG#2 ok (200)', 'tg-dispatch: TG#3 ok (200)'. If any step fails, dispatcher raises, daemon logs the exception, returns HTTP 200 to camera. Operator can grep 'tg-dispatch' in logs/daemon.log to verify all 3 sent. No JPEG in any photo attachment (verified by file(1) on downloaded documents).",
+  "stories": [
+    {
+      "id": "US-022a",
+      "title": "telegram_formatter/dispatcher.py — pure-function HTTP sender for tg1/tg2/tg3 dicts (httpx + sendMessage/sendDocument)",
+      "status": "todo",
+      "depends_on": [],
+      "card_body_fallback": "**Story.** Today telegram_formatter/{alert,detail,match_alert}.py build tg1/tg2/tg3 dicts and return them. Nothing in v2 POSTs them to api.telegram.org. This story adds the missing dispatcher: a pure function `dispatch(tg_messages: list[dict], *, bot_token: str, chat_id: str, base_url: str = 'https://api.telegram.org') -> list[httpx.Response]` that takes the dicts the pipeline already builds and sends each one. **Behavior.** Empty bot_token or chat_id -> raise ConfigError with the exact env var name. For each message: empty photos list -> POST /bot<TOKEN>/sendMessage with {chat_id, text=caption}. One or more photos -> POST /bot<TOKEN>/sendMediaGroup with {chat_id, media=[{type:'photo', media:'attach://<i>'} for i, p in enumerate(photos)] + {type:'input_media_document' for non-PNG if any]} and attach the PNGs as multipart/form-data. NOTE: sendDocument is the lossless-safe primitive; sendMediaGroup with input_media_photo re-encodes; sendMediaGroup with input_media_document preserves. This PRD uses input_media_document exclusively for PNG. Returns the list of httpx.Response objects. **Why standalone.** Self-contained HTTP wrapper, no daemon integration, fully unit-testable with httpx.MockTransport. **LOC:** ~80. **Tests:** test_dispatch_text_only_sends_sendMessage, test_dispatch_with_photos_uses_sendMediaGroup_with_document, test_dispatch_raises_on_empty_token, test_dispatch_raises_on_empty_chat_id, test_dispatch_raises_on_4xx, test_dispatch_raises_on_5xx. **Scanner:** check_no_private_data.py exits 0 (no literals).",
+      "scope_loc_estimate": 80,
+      "ac": [
+        "AC1: telegram_formatter/dispatcher.py exists with `def dispatch(messages: list[dict], *, bot_token: str, chat_id: str, base_url: str = 'https://api.telegram.org') -> list[httpx.Response]`.",
+        "AC2: pytest tests/test_dispatcher.py collects 6 tests, all pass.",
+        "AC3: `grep -nE 'TELEGRAM_BOT_TOKEN|TELEGRAM_HOME_CHAT_ID|374999219|AAHHQ6uIn' telegram_formatter/dispatcher.py` returns zero hits.",
+        "AC4: `grep -nE 'sendPhoto|sendMessage' telegram_formatter/dispatcher.py` returns one hit (sendMessage for text-only case). sendPhoto is forbidden.",
+        "AC5: `grep -nE 'sendMediaGroup' telegram_formatter/dispatcher.py` returns one hit (multi-photo path).",
+        "AC6: `grep -nE 'input_media_document|input_media_photo' telegram_formatter/dispatcher.py` returns one hit for input_media_document, zero for input_media_photo.",
+        "AC7: dispatcher.py imports httpx (already in venv 0.28.1, no new deps)."
+      ]
+    },
+    {
+      "id": "US-022b",
+      "title": "listener/daemon.py — call dispatcher after pipeline.run() returns; log every send; on failure return HTTP 200 to camera + log exception",
+      "status": "todo",
+      "depends_on": [
+        "US-022a"
+      ],
+      "card_body_fallback": "**Story.** Today daemon.py:250-251 calls pipeline.run() and jsonifies the result. The tg1/tg2/tg3 dicts go back to Flask and never reach Telegram. This story wires the dispatcher from US-022a into the /alert endpoint. **Behavior.** After `result = pipeline.run(alert_dict)` returns, build a list `tg_messages = [result['tg1'], result['tg2'], result['tg3']]` (skip empty dicts). Call `telegram_formatter.dispatcher.dispatch(tg_messages, bot_token=os.environ['TELEGRAM_BOT_TOKEN'], chat_id=os.environ['TELEGRAM_HOME_CHAT_ID'])`. Wrap in try/except dispatcher.ConfigError as `log.error('tg-dispatch: config error: %s', exc)` and dispatcher.DeliveryError as `log.error('tg-dispatch: delivery error: %s', exc)`. On success, log 'tg-dispatch: TG#N ok (HTTP {status_code})' per message. The endpoint still returns HTTP 200 to the camera — the operator sees the gap in logs, not as a camera-side retry storm. **Why standalone.** Single function integration, depends only on US-022a. **LOC:** ~30. **Tests:** test_daemon_logs_dispatch_success, test_daemon_logs_dispatch_config_error, test_daemon_returns_200_on_dispatch_failure (mocked pipeline + dispatcher).",
+      "scope_loc_estimate": 30,
+      "ac": [
+        "AC1: `grep -nE 'dispatcher\\.dispatch' listener/daemon.py` returns at least one hit inside the /alert handler.",
+        "AC2: `grep -nE 'TELEGRAM_BOT_TOKEN|TELEGRAM_HOME_CHAT_ID' listener/daemon.py` returns at least one hit each (reads from env).",
+        "AC3: pytest tests/test_daemon_dispatch.py collects 3 tests, all pass.",
+        "AC4: daemon.py never imports python-telegram-bot (forbidden; we use httpx directly).",
+        "AC5: daemon.py never imports the literal chat_id 374999219 or token prefix. All values from os.environ.",
+        "AC6: When dispatcher raises, /alert still returns HTTP 200 with the original pipeline result. Camera does not retry."
+      ]
+    },
+    {
+      "id": "US-022c",
+      "title": "env-var-name consistency check — confirm telegram-creds.env.example, tests/test_home_env.py, README.md, PRIVACY.md all reference TELEGRAM_HOME_CHAT_ID (operator's ~/.env currently has TELEGRAM_CHAT_ID which is silently ignored)",
+      "status": "todo",
+      "depends_on": [],
+      "card_body_fallback": "**Story.** Today the canonical env var name everywhere in v2 is `TELEGRAM_HOME_CHAT_ID` (telegram-creds.env.example line 5, tests/test_home_env.py:27, README.md line 71, docs/PRIVACY.md line 25, docs/V2-LOGIC-FLOW.md line 313, docs/PHASE-V2-016-PRD-diagnostic-visibility-and-boot-hardening.json line 35). But the operator's actual `~/.env` has `TELEGRAM_CHAT_ID=374999219` which daemon.py:266 reads as empty string. The dispatcher's ConfigError will surface this gap (US-022a), but operator-facing docs should make the name unambiguous. **Behavior.** Run `grep -nrE 'TELEGRAM_CHAT_ID' docs/ README.md telegram-creds.env.example tests/` and verify ZERO hits for `TELEGRAM_CHAT_ID=` (with = sign, the env var form). Hits for `<TELEGRAM_CHAT_ID>` (with angle brackets, the template form in PRD prose) are OK and stay. Add a one-line note to README.md under 'Configuration' explaining: 'The home chat ID env var is TELEGRAM_HOME_CHAT_ID, not TELEGRAM_CHAT_ID. The dispatcher will fail with ConfigError if the wrong var is set.' Verify by running `python3 -c 'from dotenv import dotenv_values; from pathlib import Path; print(dotenv_values(Path.home() / \".env\").get(\"TELEGRAM_HOME_CHAT_ID\", \"<MISSING>\"))'` and asserting it equals the operator's chat id (not '<MISSING>'). **Why standalone.** Documentation + a one-shot verification command. No code change in this story; the dispatcher error path (US-022a) catches the runtime gap. **LOC:** ~5.",
+      "scope_loc_estimate": 5,
+      "ac": [
+        "AC1: `grep -nrE '^TELEGRAM_CHAT_ID=|^\\s*TELEGRAM_CHAT_ID=' docs/ README.md telegram-creds.env.example tests/` returns zero hits (env var form, not template form).",
+        "AC2: `grep -nE 'TELEGRAM_HOME_CHAT_ID' README.md` returns at least one hit in the Configuration section.",
+        "AC3: README.md has a one-paragraph note explaining the name mismatch and pointing at the ConfigError fix-it message in US-022a.",
+        "AC4: Running `python3 -c 'from dotenv import dotenv_values; from pathlib import Path; print(bool(dotenv_values(Path.home() / \".env\").get(\"TELEGRAM_HOME_CHAT_ID\")))'` prints True on operator's machine."
+      ]
+    },
+    {
+      "id": "US-022d",
+      "title": "operator-driven smoke test — synthetic OFS alert reaches operator's Telegram with lossless PNG attachments, all 3 TGs logged in daemon.log",
+      "status": "todo",
+      "depends_on": [
+        "US-022a",
+        "US-022b",
+        "US-022c"
+      ],
+      "card_body_fallback": "**Story.** All previous stories land as code + tests but the operator's home chat is the only ground truth that matters. This story is operator-driven: POST a synthetic alert to /alert on the live daemon (port 8090, PID 56630), verify the operator receives TG#1 + TG#2 + TG#3 in their Telegram home chat, verify the photos are PNG (file(1) reports PNG image data), verify logs/daemon.log shows 3 success lines. **Behavior.** Driver script at scripts/smoke_telegram_delivery.py: 1) verify TELEGRAM_HOME_CHAT_ID is non-empty in os.environ (else print the rename command and abort). 2) POST synthetic alert to http://127.0.0.1:8090/alert with a real OFS camera id, a vehicle classification, 4 PNG frames pre-staged under data/frames/OFS/, the canonical pairwise_diff.png at data/frames/OFS/<alert_id>/. 3) Wait for HTTP 200 response (within 30s). 4) Print 'check Telegram home chat for 3 messages' and the daemon log tail. 5) Operator confirms manually by opening the chat and seeing TG#1 + TG#2 + TG#3 with lossless PNG attachments. 6) Operator runs `file <downloaded-attachment>` and confirms 'PNG image data, ...' (not JPEG). **Why standalone.** All previous stories are unit-tested; this is the integration smoke that proves the operator's chat actually receives the alert. Mirrors US-019d / US-021d smoke-test pattern. **LOC:** ~50.",
+      "scope_loc_estimate": 50,
+      "ac": [
+        "AC1: scripts/smoke_telegram_delivery.py exists and prints 'check Telegram home chat for 3 messages' on success.",
+        "AC2: Driver aborts with 'TELEGRAM_HOME_CHAT_ID is empty — rename TELEGRAM_CHAT_ID to TELEGRAM_HOME_CHAT_ID in ~/.env' if env var missing.",
+        "AC3: Driver POSTs to 127.0.0.1:8090/alert with synthetic OFS alert + 4 PNG frames + pairwise_diff.png, gets HTTP 200 within 30s.",
+        "AC4: After the synthetic alert, `grep -E 'tg-dispatch: TG#[123] ok' logs/daemon.log | tail -3` shows 3 success lines (one per TG).",
+        "AC5: Operator's home chat receives 3 messages. First has 'Camera: <label>', 'Detected: vehicle', 'Confidence: ...' caption with PNG attachments. Second has crop_a + crop_b PNGs. Third is text-only match result.",
+        "AC6: `file <downloaded-attachment>` on any of the received PNGs reports 'PNG image data' (not JPEG). Lossless preserved.",
+        "AC7: If any TG fails (dispatcher.ConfigError or .DeliveryError), driver prints 'FAIL' + the exception + the exact fix. Operator sees the gap in logs/daemon.log, not in a silent drop."
+      ]
+    }
+  ]
+}
