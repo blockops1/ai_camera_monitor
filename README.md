@@ -37,8 +37,7 @@ watchdogs (US-017d / US-017e):
 | `max_reconnect_attempts` cap | after `FARMSV_RTSP_MAX_RETRIES` (default 10) consecutive failures | cap-and-defer to watchdog |
 
 Plus the existing `CameraCaptureRegistry._reconnect_loop` for
-cross-reader registry-level recoveries. Ported from v1 refactor
-`/Users/jill/farm-surveillance-refactor/infra/persistent_rtsp.py`.
+cross-reader registry-level recoveries. Ported from v1 refactor `<V1_REPO_PATH>/infra/persistent_rtsp.py`.
 
 ## Diagnostics
 
@@ -88,7 +87,7 @@ Other env vars honored at runtime:
 ## Daemon management
 
 The v2 daemon runs under launchd as `com.farm.surveillance.v2`. Plist:
-`/Users/jill/Library/LaunchAgents/com.farm.surveillance.v2.plist`.
+`<HOME_DIR>/Library/LaunchAgents/com.farm.surveillance.v2.plist`.
 
 ```bash
 # view status
@@ -97,7 +96,7 @@ tail -f logs/daemon.log
 
 # bounce (requires explicit operator approval at the moment of bounce)
 kill <PID>
-launchctl load /Users/jill/Library/LaunchAgents/com.farm.surveillance.v2.plist
+launchctl load <HOME_DIR>/Library/LaunchAgents/com.farm.surveillance.v2.plist
 ```
 
 `KeepAlive: true` in the plist means launchd respawns automatically on

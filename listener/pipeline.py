@@ -75,14 +75,25 @@ def _tiny_jpeg() -> str:
 
 
 def _load_candidates() -> list[dict]:
-    """Load known-vehicle candidates from disk. Returns empty list on miss."""
+    """Load known-vehicle candidates from disk. Returns empty list on miss.
+
+    Supports two formats:
+    - Wrapper format: {"_anonymization_note": "...", "entries": [...]} (current US-018e)
+    - Legacy format: [...]  (pre-US-018e plain list)
+    """
     p = Path(VEHICLE_KNOWN_FILE)
     if not p.is_file():
         return []
     try:
-        return json.loads(p.read_text())
+        data = json.loads(p.read_text())
     except (json.JSONDecodeError, OSError):
         return []
+    # Unwrap if format is {entries: [...]}
+    if isinstance(data, dict) and "entries" in data:
+        return data["entries"]
+    if isinstance(data, list):
+        return data
+    return []
 
 
 def run(alert: dict) -> dict:
