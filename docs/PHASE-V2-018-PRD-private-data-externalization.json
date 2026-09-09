@@ -278,7 +278,7 @@
     {
       "id": "US-018j",
       "title": "final verification + add public GitHub remote + first push",
-      "status": "in_progress",
+      "status": "blocked",
       "depends_on": [
         "US-018a",
         "US-018b",
@@ -303,7 +303,7 @@
       "rationale": "The user-visible deliverable. Until this story lands, the repo is sanitized but not yet public.",
       "passes": false,
       "attempts": 0,
-      "last_error": null,
+      "last_error": "awaits operator input: GitHub remote URL + credentials",
       "commit_sha": null,
       "task_id": "t_053e79b4"
     }
