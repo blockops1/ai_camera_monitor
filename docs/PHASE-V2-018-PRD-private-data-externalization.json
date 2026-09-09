@@ -235,16 +235,15 @@
       ],
       "rationale": "Pre-existing misnaming risk that would silently break delivery for new operators following the public example file.",
       "passes": true,
-      "attempts": 1,
+      "attempts": 0,
       "last_error": null,
       "commit_sha": "27c83a8",
-      "task_id": "t_64f296df",
-      "last_verified_at": "2026-09-08T23:42"
+      "task_id": "t_64f296df"
     },
     {
       "id": "US-018i",
       "title": "docs/PRIVACY.md + scripts/check_no_private_data.py + pre-push hook to prevent regression",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [
         "US-018b",
         "US-018c",
@@ -270,16 +269,16 @@
         "AC5: pytest 122/122 (or higher) green; one new test under tests/test_check_no_private_data.py asserts both the exit-0 (clean tree) and exit-1 (injected leak) paths."
       ],
       "rationale": "Sanitization without a regression guard is a one-time fix. The scanner is the difference between 'safe today' and 'safe forever'.",
-      "passes": false,
+      "passes": true,
       "attempts": 0,
       "last_error": null,
-      "commit_sha": null,
+      "commit_sha": "f3c9890",
       "task_id": "t_aee8cf4a"
     },
     {
       "id": "US-018j",
       "title": "final verification + add public GitHub remote + first push",
-      "status": "todo",
+      "status": "in_progress",
       "depends_on": [
         "US-018a",
         "US-018b",
@@ -306,7 +305,7 @@
       "attempts": 0,
       "last_error": null,
       "commit_sha": null,
-      "task_id": null
+      "task_id": "t_053e79b4"
     }
   ],
   "verification_post_stories": {
