@@ -1,0 +1,103 @@
+{
+  "prd_id": "PHASE-V2-025",
+  "title": "gate = classifier (vehicle / person / animal / none)",
+  "author": "the operator",
+  "status": "active",
+  "phase": "v2-pipeline-rearchitecture",
+  "plan_section": "v2-gate-classifier",
+  "trigger": "operator directive 2026-09-09 ~12:55: 'I don't see a reason for a gate or a pipeline cool down at this point. You can't know yet if the motion is from a vehicle, animal, or person / your logic flow does not mention the Yolo gate identifier. That should be next. Instead it says there's a cascade one and a cascade two? That totally doesn't make sense to me / After the Yolo gate identifies it as a vehicle, a person, or a animal, that's when we check if the pipeline cool down is in effect and if it is, that's when we stop the processing of that Web hook event'. Follow-up directive 2026-09-09 ~12:57: 'For 25b. If yolo classification is not vehicle, person, or animal, that flow gets dropped directly after the gate / Yes, and it should be logged as dropped.' The motivation: today's gate uses an opaque 'decision' field (Literal['vehicle', 'person', 'suppress']) that conflates 'YOLO saw a person' with 'YOLO saw a bench' with 'YOLO saw nothing'. The operator wants a single classification field -- if it isn't one of vehicle / person / animal, the pipeline drops the webhook before any cooldown check or Telegram dispatch happens. Currently the gate explicitly suppresses animals ('Rule 3: ANY crop high-conf animal -> suppress (no animal pipeline)') which means the system silently ignores the most common case at the farm: dogs walking the perimeter.",
+  "background": "infra/gate.py today has DecisionType = Literal['vehicle', 'person', 'suppress']. _route_decision() at gate.py:644-715 returns (decision, class_label, confidence, reason). The 'suppress' outcome is overloaded: it triggers on (a) YOLO found nothing, (b) YOLO found an animal, (c) the timestamp / brightness rules said it was an artifact, (d) the AND intersection fell back to a raw-diff bbox. The operator wants to separate concern: the gate classifies; the pipeline routes. The 'animal -> suppress' rule at gate.py:692-694 needs to flip to 'animal -> return classification=animal'. The 'YOLO found nothing' case becomes classification=none. The 'timestamp/brightness artifact' case ALSO becomes classification=none (because YOLO did not actually classify anything). What DROPS the webhook is no longer the gate's suppress outcome -- the gate just reports; the pipeline drops on classification=none via PRD-V2-026.",
+  "shipping_definition": "All US-025 stories marked done; pytest 150/150 (or higher) green; tree clean; infra/gate.py GateVerdict.decision is gone, replaced with classification: Literal['vehicle', 'person', 'animal', 'none']; _route_decision returns classification as a top-level field, not buried inside a decision tuple; _class_to_bucket helper exists in infra/quick_classifier.py and maps any yolo class_id to one of four values (vehicle / person / animal / none); the animal-suppression rule at gate.py:692-694 returns ('animal', ...) instead of ('suppress', ...); TD test for gate routing covers person + animal + suppression cases; integration test for the drop-after-gate behavior lives in PRD-V2-026, not here; no live Telegram dispatch during any of these tests.",
+  "scope_exclusions": [
+    "Drop-after-gate pipeline change is NOT this PRD -- that is PRD-V2-026 US-026b. PRD-V2-025 only makes the gate emit classification; the listener's drop logic lives one PRD over.",
+    "Cooldown changes are NOT this PRD -- that is PRD-V2-026 entirely.",
+    "TG#1 / TG#2 / TG#3 changes are NOT this PRD -- that is PRD-V2-027.",
+    "Removing gate's legacy feature flags (GATE_KEEP_DISK_ARTIFACTS, MOTION_GATE_V2, NIGHT_SUPPRESS_ENABLED) is NOT this PRD -- V2-023 catalogued them; removal is a separate cleanup PRD.",
+    "Re-implementing YOLO inference is NOT this PRD -- infra/quick_classifier.py already does it. PRD-V2-025 only adds the bucket-mapping helper _class_to_bucket and consumes it.",
+    "Replacing DecisionType with a more abstract concept (a 'GateVerdict' protocol that everyone implements) is NOT this PRD -- keep the same GateVerdict dataclass, just rename fields.",
+    "Logging the dropped webhook is NOT this PRD -- that belongs in PRD-V2-026 US-026b where the drop happens."
+  ],
+  "design_principles": [
+    "Gate classifies; pipeline routes. The gate emits `classification` and the pipeline decides what to do with `none`. This is the discipline that breaks the decision-overloading bug.",
+    "Classification is closed: 4 values, exactly. `vehicle` / `person` / `animal` / `none`. No `unknown`, no `unsure`, no `low_conf` -- those collapse to `none` because the gate cannot reliably route on them.",
+    "`none` does NOT mean 'YOLO was wrong' -- it means 'YOLO did not identify anything we can route on'. The gate logs the actual top_class + top_confidence at DEBUG so the operator can see what was actually on camera.",
+    "Animal is a first-class outcome. The 'no animal pipeline' reason that has lived at gate.py:692-694 for months is deleted -- this PRD is the day that reason dies.",
+    "_class_to_bucket uses infra/quick_classifier.py's existing PERSON_CLASSES / VEHICLE_CLASSES / ANIMAL_CLASSES sets. A class is in 'vehicle' if it's a member of VEHICLE_CLASSES (set membership is the truth), 'person' if PERSON_CLASSES, 'animal' if ANIMAL_CLASSES. Anything else returns 'none'. No optional strategy, no minimum-size overlap check -- set membership only.",
+    "DecisionType literal is replaced wholesale. No backward-compat alias. If a caller (test, script) is reading `gate_verdict.decision == 'suppress'`, that caller needs updating -- PRD-V2-025 is the migration moment.",
+    "Threshold edge: if top_confidence is below confidence_threshold (which the gate already computes), classification = none -- even if top_class is in PERSON_CLASSES. This is the operator's phrase 'you can't know yet' applied: low conf == unknown bucket.",
+    "No new env vars. No new feature flags. The bucket mapping is hardcoded in Python via sets that the operator owns. If the operator wants to add 'bicycle' to VEHICLE_CLASSES, they edit the source code -- not flip an env knob."
+  ],
+  "stories": [
+    {
+      "id": "US-025a",
+      "title": "add _class_to_bucket helper in infra/quick_classifier.py",
+      "story_type": "feature-new",
+      "acceptance": [
+        "infra/quick_classifier.py exports _class_to_bucket(class_id: int) -> Literal['vehicle', 'person', 'animal', 'none'].",
+        "Implementation: if class_id in PERSON_CLASSES -> 'person'; elif class_id in VEHICLE_CLASSES -> 'vehicle'; elif class_id in ANIMAL_CLASSES -> 'animal'; else -> 'none'.",
+        "Function has a 4-line module-level docstring listing the mapping rule.",
+        "Test test_class_to_bucket.py exists with at least 6 cases: person (car -> 'none', but YOLO's 'person' class_id 0 -> 'person'), vehicle (YOLO car=2 -> 'vehicle'), animal (YOLO dog=16 -> 'animal'), unmapped (YOLO bench=14 -> 'none'), out-of-range (YOLO id=200 -> 'none').",
+        "Single commit: 'add _class_to_bucket helper (US-025a)'."
+      ],
+      "files_modified": ["infra/quick_classifier.py"],
+      "files_added": ["tests/test_class_to_bucket.py"],
+      "depends_on": []
+    },
+    {
+      "id": "US-025b",
+      "title": "flip DecisionType literal: add 'animal', keep 'none'",
+      "story_type": "refactor",
+      "acceptance": [
+        "infra/gate.py DecisionType literal changes from `Literal['vehicle', 'person', 'suppress']` to `Literal['vehicle', 'person', 'animal', 'none']`.",
+        "GateVerdict dataclass adds `classification: ClassificationType` (where ClassificationType = DecisionType) and `top_class: str` and `top_confidence: float` fields (top_class + top_confidence are the raw YOLO output for DEBUG logging).",
+        "GateVerdict.is_suppressed() method is REPLACED with GateVerdict.is_none() returning `self.classification == 'none'` -- the gate still needs a 'should I skip this' convenience check for the operator's mental model.",
+        "_route_decision() return signature is `(classification, top_class, top_confidence, reason)` -- no more `decision` field. The `decision` field on GateVerdict dataclass is GONE (not aliased, not deprecated -- deleted).",
+        "The animal-suppression rule at infra/gate.py:692-694 ('Rule 3: ANY crop high-conf animal -> suppress (no animal pipeline)') is DELETED. The replacement: any animal-crop outcome returns ('animal', 'dog', 0.85, 'animal_classified').",
+        "The 'timestamp / brightness artifact -> suppress' rule maps to ('none', <top_class>, <top_conf>, 'artifact').",
+        "The 'no YOLO detection -> suppress' rule maps to ('none', '', 0.0, 'no_detection').",
+        "tests/test_gate_routing.py updated: any test that asserted `decision == 'suppress'` now asserts `classification == 'none'`; any test that asserted decision == 'animal_suppressed' now asserts `classification == 'animal'`.",
+        "All test files in tests/ that reference gate_verdict.decision are updated. Grep verification: `decision` (the gate field) appears zero times in production code outside the literal type definition.",
+        "pytest tests/test_gate_routing.py -v 100% pass; pytest tests/ --ignore=tests/test_home_env.py still 150/150 (or higher) green.",
+        "Single commit: 'flip DecisionType to classification; add animal; remove 'suppress' overloading (US-025b)'."
+      ],
+      "files_modified": ["infra/gate.py"],
+      "files_modified_maybe": ["tests/test_gate_routing.py"],
+      "depends_on": ["US-025a"]
+    },
+    {
+      "id": "US-025c",
+      "title": "wired gate tests for the new classification field",
+      "story_type": "test",
+      "acceptance": [
+        "tests/test_gate_routing_classification.py exists with at least 5 cases: (a) YOLO sees a person at top_conf 0.85 -> classification == 'person', (b) YOLO sees a car at top_conf 0.91 -> classification == 'vehicle', (c) YOLO sees a dog at top_conf 0.78 -> classification == 'animal', (d) YOLO sees a bench at top_conf 0.92 -> classification == 'none', (e) YOLO finds nothing -> classification == 'none'.",
+        "Each test mocks the QuickClassifier dependency; no real YOLO or real llama-server calls.",
+        "pytest tests/test_gate_routing_classification.py -v 100% pass; full suite still green.",
+        "Single commit: 'tests for classification field (US-025c)'."
+      ],
+      "files_added": ["tests/test_gate_routing_classification.py"],
+      "depends_on": ["US-025b"]
+    },
+    {
+      "id": "US-025d",
+      "title": "log gate classification at INFO with top_class + top_confidence",
+      "story_type": "logging",
+      "acceptance": [
+        "infra/gate.py's existing log.info() at the end of run_gate() prints classification + top_class + top_confidence + reason, replacing the old `decision=... class=... conf=...` line.",
+        "Log line is single-line, parsable, structured: `motion_gate: classification=animal top_class=dog top_confidence=0.78 reason=animal_classified`.",
+        "If classification == 'none', the log line still appears -- it is the operator's primary signal that YOLO found nothing.",
+        "Existing tests that grep the log line get updated.",
+        "Single commit: 'log classification field instead of decision (US-025d)'."
+      ],
+      "files_modified": ["infra/gate.py"],
+      "files_modified_maybe": ["tests/test_pipeline.py", "tests/test_daemon_dispatch.py"],
+      "depends_on": ["US-025b"]
+    }
+  ],
+  "depends_on_story_index": {
+    "US-025a": [],
+    "US-025b": ["US-025a"],
+    "US-025c": ["US-025b"],
+    "US-025d": ["US-025b"]
+  },
+  "dispatch_order": ["US-025a", "US-025b", "US-025c", "US-025d"]
+}
