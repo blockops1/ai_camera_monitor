@@ -1,0 +1,142 @@
+{
+  "prd_id": "PHASE-V2-020",
+  "title": "remove dead production code that nothing imports (vehicle_position/ pkg + 4 orphan infra modules)",
+  "author": "the operator",
+  "status": "active",
+  "phase": "v2-pipeline-cleanup",
+  "plan_section": "v2-input-pipeline",
+  "trigger": "operator directive 2026-09-09: 'Add a PRD story to identify and remove unused unit tests.' Investigation revealed the actual surface is dead PRODUCTION code with zero production callers (the unit tests for those modules don't exist either). This PRD removes 403 statements of dead production code spread across two orphan modules and one orphan package, with a regression guard scanner.",
+  "background": "v2 has accumulated dead production modules through prior phase work that was never cleaned up after the gate-driven motion detection refactor replaced the old pipeline. A coverage audit on 2026-09-09 (132 tests, 42s runtime) found:\n\n- infra/cooldown.py (70 stmts, 0% coverage) — defines MotionCooldown, is_in_cooldown, is_in_bucket_cooldown, is_in_vision_block_cooldown. Zero production callers (grep for MotionCooldown / is_in_cooldown outside infra/ and tests/ returns zero hits). Actual cooldown logic was moved to infra/pipeline_cooldown.py, which IS used by listener/pipeline.py and tested at 100%.\n- infra/motion_types.py (28 stmts, 0% coverage) — defines MovingObject, MotionResult dataclasses. Referenced only inside its own docstring and by the (also-dead) vehicle_position/ package. The active production modules use their own local types.\n- infra/timezone.py (28 stmts, 0% coverage) — defines parse_iso() helper. Referenced only inside its own docstring and infra/vision_cache.py's docstring (which is also dead).\n- infra/vision_cache.py (111 stmts, 0% coverage) — defines a cached vision-result store. Zero production callers. The current vision_analyzer.py uses its own simple request/response pattern, no cache layer.\n- infra/classify_schema.py (11 stmts, 0% coverage) — defines ClassLabel enum + CLASSIFY_SCHEMA_JSON dict for an aborted §11.115 'shared classify schema' design. Zero production callers. The actual classification schema lives inside infra/vision_analyzer.py's hardcoded _vehicle_schema / _person_schema / _animal_schema dicts.\n- infra/gate_cooldown.py (69 stmts, 0% coverage) — defines is_in_gate_cooldown(), get_gate_cooldown_seconds(), clear_all_gate_cooldowns(). Referenced in docstrings only. The actual per-(camera, event_type) cooldown is implemented directly inside infra/gate.py (line 580 comment confirms the schema).\n- vehicle_position/__init__.py (2 stmts, 0% coverage) — package marker.\n- vehicle_position/crop_extractor.py (41 stmts, 0% coverage) — package-internal only; not imported outside the package.\n- vehicle_position/motion_detector.py (35 stmts, 0% coverage) — package-internal only; not imported outside the package.\n- vehicle_position/motion_detector_impl.py (88 stmts, 0% coverage) — package-internal only; not imported outside the package. This is the actual implementation of the gate-driven motion detector; it was abandoned in favor of the in-gate approach. infra/motion_types.py docstring explicitly says 'refactor's gate-driven detector (vehicle_position.motion_detector_impl)' but the gate lives in infra/gate.py directly.\n\nTotal: 9 files / 483 statements of dead production code with zero production callers. The unit tests do NOT exercise any of these (verified: zero test imports of cooldown, motion_types, timezone, vision_cache, classify_schema, gate_cooldown, or vehicle_position) — so removing them will not change the 132-test count. The operator's intent ('unused unit tests') is satisfied by removing dead code, since the dead code has no tests either.",
+  "shipping_definition": "All four US-020 stories marked done; pytest 132/132 (or higher) green; tree clean; the new scripts/check_no_orphan_modules.py scanner exits 0 on the cleaned tree; `make check-no-orphans` runs as part of the existing pre-push hook chain; no `infra/cooldown`, `infra/motion_types`, `infra/timezone`, `infra/vision_cache`, `infra/classify_schema`, `infra/gate_cooldown`, or `vehicle_position/*` paths remain in the repo (verified via filesystem ls); coverage on the remaining production tree is unchanged or improved.",
+  "scope_exclusions": [
+    "Removing production code that has 0% coverage but IS imported and called is NOT in this PRD — that's a separate audit. (Example: low-coverage branches in infra/quick_classifier.py are still exercised end-to-end.)\n",
+    "Adding new tests for the dead modules to bring them above 0% coverage is NOT in this PRD — they're being deleted, not tested.\n",
+    "Renaming / refactoring any survivor module is NOT in this PRD. The cleanup is purely delete.\n",
+    "Updating PLAN.md is NOT in this PRD — if the operator wants the planning artifact updated to reflect that §11.115 / §11.116 / Phase 6B.108 work was abandoned, that's a documentation story, not a code story.\n",
+    "Removing the 3 weak 'no-assertion' tests in tests/test_frame_capture.py (test_stop_while_not_running_is_safe, test_clear_is_idempotent) and tests/test_pipeline.py (test_record_hit_called_on_success) is NOT in this PRD — those tests are valid 'doesn't crash' / 'called' assertions, just expressed as exception-free function calls rather than explicit `assert` statements. They are not unused."
+  ],
+  "design_principles": [
+    "Dead code is a foot-gun: a future change can accidentally import a dead module, find it 'works' (because nothing else uses it), and silently start double-running logic. The cost of carrying dead code is paid in cognitive load and future bug surface, not bytes.\n",
+    "Delete, don't memorialize: per the operator's cleanup discipline (2026-09-08), no DEPRECATED banners in remaining code, no tests asserting that the removed code is gone, no migration notes. Just delete.\n",
+    "Audit the class, not the instance: the operator's rule (2026-09-05) is to scan the WHOLE SYSTEM for every instance of a category. The category here is 'production modules with zero callers outside their own subtree' — found 9 instances across two packages, all removed together.\n",
+    "Scanner enforcement: write a static analyzer that walks the production source tree and flags any module that (a) defines public symbols (functions, classes) and (b) is not imported anywhere outside its own subtree. This makes the invariant 'no orphan production modules' mechanically enforceable, same pattern as the existing check_no_private_data.py and check_no_image_resize.py (US-019d) scanners.\n",
+    "Scanner exclusion: the scanner explicitly excludes tests/, docs/, scripts/, models/, archive/, data/, .venv/, .git/. It only walks production source trees: infra/, listener/, vehicle_position/, telegram_formatter/, vehicle_matcher/."
+  ],
+  "stories": [
+    {
+      "id": "US-020a",
+      "title": "delete the 5 orphan infra/ modules (cooldown, motion_types, timezone, vision_cache, classify_schema, gate_cooldown)",
+      "status": "todo",
+      "depends_on": [],
+      "estimate_loc": 15,
+      "files": [
+        "infra/cooldown.py",
+        "infra/motion_types.py",
+        "infra/timezone.py",
+        "infra/vision_cache.py",
+        "infra/classify_schema.py",
+        "infra/gate_cooldown.py"
+      ],
+      "card_body_fallback": "**Story.** Six production modules with 0% test coverage and zero production callers. Delete them: rm each file. Verify with `git grep` that no remaining file in the production tree references any of their public symbols (MotionCooldown, is_in_cooldown, is_in_bucket_cooldown, is_in_vision_block_cooldown, MovingObject, MotionResult, parse_iso, ClassLabel, CLASSIFY_SCHEMA_JSON, CLASSIFY_SCHEMA_JSON_DICT, is_in_gate_cooldown, get_gate_cooldown_seconds, clear_all_gate_cooldowns). Verify that pytest still collects 132 tests and all pass. Verify that the active cooldown path (infra/pipeline_cooldown.py, used by listener/pipeline.py:38) is untouched. **Why no dependencies:** these are pure file deletions; the only check is no remaining file references them, and the audit on 2026-09-09 already established that. **Why estimate 15 LOC:** the changes are 6 `git rm` commands plus a verification grep; production code volume is 297 statements deleted.",
+      "ac": [
+        "AC1: `ls infra/cooldown.py infra/motion_types.py infra/timezone.py infra/vision_cache.py infra/classify_schema.py infra/gate_cooldown.py` returns 'No such file or directory' for each.\n",
+        "AC2: `git grep -nE 'MotionCooldown|is_in_cooldown|is_in_bucket_cooldown|is_in_vision_block_cooldown|MovingObject|MotionResult|parse_iso|ClassLabel|CLASSIFY_SCHEMA_JSON|is_in_gate_cooldown|get_gate_cooldown_seconds|clear_all_gate_cooldowns'` returns zero hits across the entire tracked tree.\n",
+        "AC3: pytest 132/132 (or higher) green; test count unchanged.\n",
+        "AC4: `infra/pipeline_cooldown.py` is intact and still imported by `listener/pipeline.py:38`.\n",
+        "AC5: one commit, message 'refactor(v2): US-020a — delete 6 orphan infra modules (cooldown/motion_types/timezone/vision_cache/classify_schema/gate_cooldown)'."
+      ],
+      "rationale": "Six files / 297 statements with zero production callers. The active cooldown logic lives in infra/pipeline_cooldown.py and is untouched. The active motion detector types live in infra/gate.py and are untouched. The active vision path lives in infra/vision_analyzer.py with inline schemas and is untouched.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
+    },
+    {
+      "id": "US-020b",
+      "title": "delete the orphan vehicle_position/ package (motion_detector, motion_detector_impl, crop_extractor, __init__)",
+      "status": "todo",
+      "depends_on": [
+        "US-020a"
+      ],
+      "estimate_loc": 15,
+      "files": [
+        "vehicle_position/__init__.py",
+        "vehicle_position/crop_extractor.py",
+        "vehicle_position/motion_detector.py",
+        "vehicle_position/motion_detector_impl.py"
+      ],
+      "card_body_fallback": "**Story.** The vehicle_position/ package is a 4-file, 166-statement package with zero production callers outside its own subtree (verified 2026-09-09: grep for `vehicle_position` in production source returns only docstring references inside infra/motion_types.py and infra/motion_types.py itself, both of which are deleted in US-020a). The motion detector implementation was abandoned in favor of the gate-driven approach that lives directly inside infra/gate.py. Delete the whole package: `git rm -r vehicle_position/`. Verify with `git grep` that no remaining file references any of its public symbols (PositionResult, build_motion_result_from_gate, MotionDetectorConfig, etc.). Verify pytest still passes at 132/132. **Why depends on US-020a:** infra/motion_types.py (also deleted) is the last file that docstring-references vehicle_position/; deleting it first means this deletion has zero stale references. **Why estimate 15 LOC:** one `git rm -r` plus verification.",
+      "ac": [
+        "AC1: `ls vehicle_position/` returns 'No such file or directory'.\n",
+        "AC2: `git grep -nE 'vehicle_position\\.'` returns zero hits across the tracked tree (or returns only matches inside archive/ directories, which are excluded from active surface per cleanup discipline).\n",
+        "AC3: pytest 132/132 (or higher) green; test count unchanged.\n",
+        "AC4: `infra/gate.py` is intact and still defines the motion detection logic that vehicle_position/ once housed.\n",
+        "AC5: one commit, message 'refactor(v2): US-020b — delete orphan vehicle_position/ package'."
+      ],
+      "rationale": "Whole package is dead. The motion detector code was migrated into infra/gate.py (gate-driven approach). The crop_extractor was an unused helper that lives only inside this package.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
+    },
+    {
+      "id": "US-020c",
+      "title": "add a no-orphan-modules scanner to enforce the invariant mechanically",
+      "status": "todo",
+      "depends_on": [
+        "US-020a",
+        "US-020b"
+      ],
+      "estimate_loc": 80,
+      "files": [
+        "scripts/check_no_orphan_modules.py",
+        "tests/test_check_no_orphan_modules.py",
+        "Makefile",
+        ".git/hooks/pre-push"
+      ],
+      "card_body_fallback": "**Story.** Install a regression guard so a future change can't reintroduce orphan production modules silently. (1) Write scripts/check_no_orphan_modules.py — a static analyzer that (a) walks the production source tree (infra/, listener/, telegram_formatter/, vehicle_matcher/, and any other top-level package — vehicle_position/ no longer exists after US-020b); (b) for each .py file, parses the AST and collects its public symbols (top-level functions and classes); (c) for each module, checks that AT LEAST ONE of its public symbols is referenced from a file outside its own subtree; (d) flags orphan modules with file:line output. Explicitly exclude tests/, docs/, scripts/, models/, archive/, data/, .venv/, .git/. (2) Write tests/test_check_no_orphan_modules.py that imports the scanner and asserts it produces zero matches on the current production tree after US-020a/US-020b. (3) Wire it into the Makefile alongside `make check-privacy` and `make check-no-resize` — call it `make check-no-orphans` and chain all three under a new `make check-all` target. (4) Update .git/hooks/pre-push to run `make check-all`. **Why depends on US-020a and US-020b:** the scanner must run AFTER both deletions so it passes against the cleaned tree. **Why estimate 80 LOC:** AST walk + symbol collection + cross-reference check + test + Makefile wiring.",
+      "ac": [
+        "AC1: scripts/check_no_orphan_modules.py exists; it runs cleanly; on the current tree (after US-020a/US-020b) it exits 0 with no output; on a synthetic tree containing a dummy orphan module, it exits non-zero and prints 'orphan module: <path> (<symbol_count> symbols, 0 cross-references)'.\n",
+        "AC2: tests/test_check_no_orphan_modules.py exists and passes; it imports the scanner and asserts zero matches on the cleaned tree.\n",
+        "AC3: `make check-no-orphans` runs the scanner and exits 0; `make check-all` runs all three scanners (privacy, resize, orphans) and exits 0.\n",
+        "AC4: pytest 132/132 (or higher) green.\n",
+        "AC5: one commit, message 'feat(v2): US-020c — no-orphan-modules scanner + Makefile + pre-push wiring'."
+      ],
+      "rationale": "Without a guard, orphan modules can accumulate again — that's exactly how we got here. The scanner makes 'no production module goes uncalled' mechanically enforceable, same pattern as the privacy and resize scanners.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
+    },
+    {
+      "id": "US-020d",
+      "title": "audit survivors — confirm 132 tests still pass and confirm zero low-hanging-fruit orphans remain",
+      "status": "todo",
+      "depends_on": [
+        "US-020a",
+        "US-020b"
+      ],
+      "estimate_loc": 30,
+      "files": [
+        "scripts/audit_orphans.py"
+      ],
+      "card_body_fallback": "**Story.** With the 9 known orphans deleted, run one more audit to confirm we didn't miss any. (1) Write scripts/audit_orphans.py — a one-shot script (not a permanent scanner) that runs the same orphan-detection logic as check_no_orphan_modules.py but with verbose output: lists every production module, its symbol count, and its cross-reference count. (2) Run it on the cleaned tree and assert zero orphans. (3) If any new orphans surface, add them as a follow-up PRD story (out of scope for this PRD). (4) Print a final coverage summary: pytest output + coverage report sorted by coverage%. (5) Document the final dead-code surface in docs/ARCHITECTURE-V2-CURRENT.html (or a new docs/DEAD-CODE-AUDIT-2026-09-09.md if the architecture doc is too high-level for this). **Why depends on US-020a and US-020b:** the audit must run after the deletions. **Why estimate 30 LOC:** audit script is small; the value is the verification, not the code.",
+      "ac": [
+        "AC1: scripts/audit_orphans.py exists; running it produces a verbose module-by-module report; on the cleaned tree it reports zero orphans.\n",
+        "AC2: pytest 132/132 (or higher) green; the audit's coverage summary matches what `python3 -m coverage report` produces.\n",
+        "AC3: docs/ARCHITECTURE-V2-CURRENT.html or docs/DEAD-CODE-AUDIT-2026-09-09.md reflects the cleanup: lists the 9 deleted modules, their line counts, and confirms zero remaining orphans.\n",
+        "AC4: if any new orphans are found, this story is NOT marked done until a follow-up is filed; otherwise AC1 passes.\n",
+        "AC5: one commit, message 'docs(v2): US-020d — post-cleanup orphan audit + coverage summary'."
+      ],
+      "rationale": "Audits close the loop. The operator's rule (2026-09-05) is to audit the class, not the instance — we found 9 orphans this round, but the scanner will catch any future ones. This story confirms we caught them all.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
+    }
+  ]
+}
