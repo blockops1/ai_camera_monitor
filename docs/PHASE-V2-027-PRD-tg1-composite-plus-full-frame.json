@@ -20,7 +20,7 @@
     "TG#1 sends exactly 2 photos: the composite (composite.png) and the full frame (frame_paths[3]). No 4-frame flood, no diff_image fallback.",
     "The dispatcher MIME type matches the file's actual bytes. Sniffing is cheap (read first 16 bytes), and the resulting MIME is what the bot sends. PNG's magic is `89 50 4E 47`; JPEG's is `FF D8 FF`; an unknown first-bytes-pattern logs a warning and uses 'application/octet-stream' (no fallback to image/png -- that was the bug).",
     "Telegram's sendMediaGroup (or sendPhoto) accepts native-resolution images; the operator wants full fidelity. No thumbnail generation, no width clamp -- the bot library decides.",
-    "The caption text lists frame positions: 'frames: t-3, t-2, t-1, t0 (positions: x,y,w,h for each)'. The positions are the subject bboxes from the gate (gate_verdict.crop_bbox_a, gate_verdict.crop_bbox_b). If bboxes are None, the caption says 'no subject bbox detected'.",
+    "The caption text lists frame positions: 'frames: t-3, t-2, t-1, t0 (positions: x,y,w,h for each)'. The positions are the motion-diff subject bboxes that the gate carries on its verdict (gate_verdict.crop_bbox_a, gate_verdict.crop_bbox_b). These bboxes were computed by infra/frame_diff.diff_pair_with_bbox() from the pairwise differential -- they are NOT YOLO output. If bboxes are None, the caption says 'no subject bbox detected'.",
     "TG#1 message structure: 2 photos in a single sendMediaGroup call, with caption text on the first photo. The caption is concise: <subject_classification> at <relative_time_now>, with summary of what was visible. The operator refines this language in a follow-up story.",
     "The dispatcher test uses a few synthetic files: PNG with PNG magic bytes asserts mime=image/png; JPEG with JFIF bytes asserts mime=image/jpeg; a file with garbage bytes logs warning + mime=application/octet-stream.",
     "No fallback when build_alert_message raises. The error propagates; the pipeline's stage 11 catches it and decides whether to call record_hit (per PRD-V2-026c, TG#1 failure -> NO record_hit)."
@@ -87,7 +87,7 @@
       "story_type": "verification",
       "acceptance": [
         "Operator confirms via ask: 'set up a synthetic webhook and tell me when TG#1 lands'.",
-        "Assistant: (1) reader frame is touched to bypass mtime cutoff, (2) synthetic Reolink-shaped webhook is sent to localhost:8090 with the camera_id matching a real channel that YOLO can see, (3) the daemon returns alert_id, (4) the pipeline runs to completion, (5) the TG#1 message lands in chat -5264050975 with 2 visible photos.",
+        "Assistant: (1) reader frame is touched to bypass mtime cutoff, (2) synthetic Reolink-shaped webhook is sent to localhost:8090 with the camera_id matching a real channel that motion-diff can detect motion in (so motion-diff produces bbox_a + bbox_b and the pipeline has crops to feed into VM1/VM2), (3) the daemon returns alert_id, (4) the pipeline runs to completion, (5) the TG#1 message lands in chat -5264050975 with 2 visible photos.",
         "Manual or screenshot verification: TG#1 message has composite.png + frame_004.jpg visible at native resolution, caption present, no 'image/png' error from Telegram's API.",
         "If TG#1 fails to send, the failure is logged but does NOT block this PRD -- that's a debugging session, not a PRD gate.",
         "Single commit OR no commit (this is verification, code may not change) -- captured in logs/daemon.log.",
