@@ -56,7 +56,10 @@ from datetime import UTC, datetime
 
 from flask import Flask, jsonify, request
 
-import infra.paths
+from infra import paths as infra_paths
+from listener import pipeline
+from telegram_formatter import dispatcher
+from telegram_formatter.dispatcher import ConfigError, DeliveryError
 
 # ---------------------------------------------------------------------------
 # Logging — wire once at import time so every logger in the v2 codebase
@@ -245,9 +248,38 @@ def alert():
     )
 
     # Run the alert through the full pipeline
-    from listener import pipeline
-
+    # (pipeline + dispatcher are imported at module top so tests can patch them)
     result = pipeline.run(alert_dict)
+
+    # US-022b: dispatch tg1/tg2/tg3 to Telegram.
+    # Daemon still returns HTTP 200 even if dispatch fails —
+    # operator sees the gap in logs/daemon.log, not as a
+    # camera-side retry storm.
+    tg_messages = [
+        result.get("tg1", {}),
+        result.get("tg2", {}),
+        result.get("tg3", {}),
+    ]
+    tg_messages = [m for m in tg_messages if m]
+    if tg_messages:
+        try:
+            responses = dispatcher.dispatch(
+                tg_messages,
+                bot_token=os.environ["TELEGRAM_BOT_TOKEN"],
+                chat_id=os.environ["TELEGRAM_HOME_CHAT_ID"],
+            )
+            for i, resp in enumerate(responses, start=1):
+                log.info(
+                    "tg-dispatch: TG#%d ok (HTTP %d)",
+                    i, resp.status_code,
+                )
+        except (ConfigError, DeliveryError) as exc:
+            log.error("tg-dispatch: %s: %s", type(exc).__name__, exc)
+        except Exception as exc:
+            # Catch-all so dispatcher hiccups don't surface as HTTP 5xx to the camera.
+            # The alert still reached the pipeline; the operator sees the gap in logs.
+            log.error("tg-dispatch: unexpected %s: %s", type(exc).__name__, exc)
+
     return jsonify(result), 200
 
 
@@ -267,7 +299,7 @@ def generate_plist() -> str:
     vision_url = os.environ.get("VISION_LLM_URL", "http://127.0.0.1:8080")
 
     # WorkingDirectory must be the v2 repo root so relative imports resolve.
-    workdir = infra.paths.PROJECT_ROOT
+    workdir = infra_paths.PROJECT_ROOT
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"

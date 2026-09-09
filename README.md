@@ -134,3 +134,11 @@ Each phase is a numbered PRD in `docs/PHASE-V2-*.json`. Current state:
 ## License
 
 Operator-private for now. License TBD before public squash release.
+
+
+## Telegram home chat env var name
+The canonical env var name is `TELEGRAM_HOME_CHAT_ID`, **not** `TELEGRAM_CHAT_ID`. If your `~/.env` has the wrong name, the dispatcher will raise `ConfigError` with the exact rename step on every alert. Verify with:
+```bash
+python3 -c 'from dotenv import dotenv_values; from pathlib import Path; print(bool(dotenv_values(Path.home() / ".env").get("TELEGRAM_HOME_CHAT_ID")))'
+```
+If this prints `False`, rename `TELEGRAM_CHAT_ID` to `TELEGRAM_HOME_CHAT_ID` in `~/.env`.

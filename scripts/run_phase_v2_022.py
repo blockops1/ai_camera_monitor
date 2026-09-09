@@ -73,269 +73,275 @@ def run_story_a(repo: Path) -> bool:
     """US-022a: telegram_formatter/dispatcher.py + tests/test_dispatcher.py."""
     print("\n=== US-022a: dispatcher pure function (httpx + sendMessage/sendMediaGroup) ===")
 
-    # 1. Write telegram_formatter/dispatcher.py
+    # 1. Write telegram_formatter/dispatcher.py (skip if a hand-written version exists)
     dispatcher_path = repo / "telegram_formatter" / "dispatcher.py"
-    dispatcher_path.write_text('''"""Telegram HTTP dispatcher — closes the v2 delivery gap.
+    if dispatcher_path.exists() and "class ConfigError(RuntimeError)" in dispatcher_path.read_text():
+        print("(dispatcher.py already present — keeping existing version)")
+    else:
+        dispatcher_path.write_text('''"    ""Telegram HTTP dispatcher — closes the v2 delivery gap.
 
-Pure function `dispatch(messages, *, bot_token, chat_id, base_url)` that
-takes the dicts pipeline.run() already builds (tg1/tg2/tg3 with caption +
-photos) and POSTs them to api.telegram.org.
+    Pure function `dispatch(messages, *, bot_token, chat_id, base_url)` that
+    takes the dicts pipeline.run() already builds (tg1/tg2/tg3 with caption +
+    photos) and POSTs them to api.telegram.org.
 
-No fallback paths (per operator 2026-09-09). Empty bot_token or chat_id
-raises ConfigError at call time. 4xx/5xx from api.telegram.org raises
-DeliveryError. No retries, no silent drops.
+    No fallback paths (per operator 2026-09-09). Empty bot_token or chat_id
+    raises ConfigError at call time. 4xx/5xx from api.telegram.org raises
+    DeliveryError. No retries, no silent drops.
 
-Photo delivery uses sendMediaGroup with input_media_document (preserves
-lossless PNG). sendPhoto re-encodes to JPEG server-side and is forbidden
-(operator directive in PRD-V2-019 + US-019f/g/h).
-"""
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Any
-
-import httpx
-
-
-@dataclass
-class ConfigError(RuntimeError):
-    """Raised when bot_token or chat_id is empty/missing."""
-
-
-@dataclass
-class DeliveryError(RuntimeError):
-    """Raised when api.telegram.org returns 4xx/5xx."""
-
-
-def _send_message(
-    client: httpx.Client,
-    bot_token: str,
-    chat_id: str,
-    caption: str,
-    base_url: str,
-) -> httpx.Response:
-    """Send a text-only message (no photos)."""
-    url = f"{base_url}/bot{bot_token}/sendMessage"
-    return client.post(url, json={"chat_id": chat_id, "text": caption})
-
-
-def _send_media_group(
-    client: httpx.Client,
-    bot_token: str,
-    chat_id: str,
-    caption: str,
-    photo_paths: list[str],
-    base_url: str,
-) -> httpx.Response:
-    """Send a media group with lossless PNG attachments.
-
-    Uses input_media_document (NOT input_media_photo) so Telegram
-    does not re-encode to JPEG server-side. Photo paths are attached
-    as multipart/form-data via attach://<index> URIs.
+    Photo delivery uses sendMediaGroup with input_media_document (preserves
+    lossless PNG). sendPhoto re-encodes to JPEG server-side and is forbidden
+    (operator directive in PRD-V2-019 + US-019f/g/h).
     """
-    url = f"{base_url}/bot{bot_token}/sendMediaGroup"
+    from __future__ import annotations
 
-    media: list[dict[str, Any]] = []
-    files: dict[str, tuple[str, bytes, str]] = {}
-    for i, path in enumerate(photo_paths):
-        attach_key = f"file{i}"
-        media.append(
-            {
-                "type": "document",
-                "media": f"attach://{attach_key}",
-                "caption": caption if i == 0 else "",
-            }
-        )
-        # Read file bytes; httpx multipart will populate Content-Type from
-        # the mime_type tuple below. PNG files use image/png.
-        with open(path, "rb") as f:
-            data = f.read()
-        files[attach_key] = (Path(path).name, data, "image/png")
+    from dataclasses import dataclass
+    from typing import Any
 
-    return client.post(url, data={"chat_id": chat_id, "media": str(media)}, files=files)
+    import httpx
 
 
-def dispatch(
-    messages: list[dict[str, Any]],
-    *,
-    bot_token: str,
-    chat_id: str,
-    base_url: str = "https://api.telegram.org",
-    client: httpx.Client | None = None,
-) -> list[httpx.Response]:
-    """Dispatch tg1/tg2/tg3 dicts to Telegram.
+    @dataclass
+    class ConfigError(RuntimeError):
+        """Raised when bot_token or chat_id is empty/missing."""
 
-    Each message dict has shape:
-        {"caption": str, "photos": list[str]}
 
-    Photos is a list of file paths. Empty photos list -> sendMessage.
-    One or more photos -> sendMediaGroup with input_media_document.
+    @dataclass
+    class DeliveryError(RuntimeError):
+        """Raised when api.telegram.org returns 4xx/5xx."""
 
-    Returns the list of httpx.Response objects in input order.
-    Raises ConfigError on empty bot_token or chat_id.
-    Raises DeliveryError on any 4xx/5xx from Telegram.
-    """
-    if not bot_token:
-        raise ConfigError(
-            "TELEGRAM_BOT_TOKEN is empty — set it in ~/.env "
-            "(see scripts/run_phase_v2_022.env.example)"
-        )
-    if not chat_id:
-        raise ConfigError(
-            "TELEGRAM_HOME_CHAT_ID is empty — rename TELEGRAM_CHAT_ID to "
-            "TELEGRAM_HOME_CHAT_ID in ~/.env (the canonical name is "
-            "TELEGRAM_HOME_CHAT_ID, not TELEGRAM_CHAT_ID)"
-        )
 
-    owns_client = client is None
-    if owns_client:
-        client = httpx.Client(timeout=30.0)
+    def _send_message(
+        client: httpx.Client,
+        bot_token: str,
+        chat_id: str,
+        caption: str,
+        base_url: str,
+    ) -> httpx.Response:
+        """Send a text-only message (no photos)."""
+        url = f"{base_url}/bot{bot_token}/sendMessage"
+        return client.post(url, json={"chat_id": chat_id, "text": caption})
 
-    responses: list[httpx.Response] = []
-    try:
-        for msg in messages:
-            caption = msg.get("caption", "")
-            photos = msg.get("photos", []) or []
-            photos = [p for p in photos if p]  # drop empty strings
 
-            if not photos:
-                resp = _send_message(client, bot_token, chat_id, caption, base_url)
-            else:
-                resp = _send_media_group(
-                    client, bot_token, chat_id, caption, photos, base_url
-                )
+    def _send_media_group(
+        client: httpx.Client,
+        bot_token: str,
+        chat_id: str,
+        caption: str,
+        photo_paths: list[str],
+        base_url: str,
+    ) -> httpx.Response:
+        """Send a media group with lossless PNG attachments.
 
-            if resp.status_code >= 400:
-                raise DeliveryError(
-                    f"Telegram {resp.request.method} {resp.request.url.path} "
-                    f"returned HTTP {resp.status_code}: {resp.text[:200]}"
-                )
-            responses.append(resp)
-    finally:
+        Uses input_media_document (NOT input_media_photo) so Telegram
+        does not re-encode to JPEG server-side. Photo paths are attached
+        as multipart/form-data via attach://<index> URIs.
+        """
+        url = f"{base_url}/bot{bot_token}/sendMediaGroup"
+
+        media: list[dict[str, Any]] = []
+        files: dict[str, tuple[str, bytes, str]] = {}
+        for i, path in enumerate(photo_paths):
+            attach_key = f"file{i}"
+            media.append(
+                {
+                    "type": "document",
+                    "media": f"attach://{attach_key}",
+                    "caption": caption if i == 0 else "",
+                }
+            )
+            # Read file bytes; httpx multipart will populate Content-Type from
+            # the mime_type tuple below. PNG files use image/png.
+            with open(path, "rb") as f:
+                data = f.read()
+            files[attach_key] = (Path(path).name, data, "image/png")
+
+        return client.post(url, data={"chat_id": chat_id, "media": str(media)}, files=files)
+
+
+    def dispatch(
+        messages: list[dict[str, Any]],
+        *,
+        bot_token: str,
+        chat_id: str,
+        base_url: str = "https://api.telegram.org",
+        client: httpx.Client | None = None,
+    ) -> list[httpx.Response]:
+        """Dispatch tg1/tg2/tg3 dicts to Telegram.
+
+        Each message dict has shape:
+            {"caption": str, "photos": list[str]}
+
+        Photos is a list of file paths. Empty photos list -> sendMessage.
+        One or more photos -> sendMediaGroup with input_media_document.
+
+        Returns the list of httpx.Response objects in input order.
+        Raises ConfigError on empty bot_token or chat_id.
+        Raises DeliveryError on any 4xx/5xx from Telegram.
+        """
+        if not bot_token:
+            raise ConfigError(
+                "TELEGRAM_BOT_TOKEN is empty — set it in ~/.env "
+                "(see scripts/run_phase_v2_022.env.example)"
+            )
+        if not chat_id:
+            raise ConfigError(
+                "TELEGRAM_HOME_CHAT_ID is empty — rename TELEGRAM_CHAT_ID to "
+                "TELEGRAM_HOME_CHAT_ID in ~/.env (the canonical name is "
+                "TELEGRAM_HOME_CHAT_ID, not TELEGRAM_CHAT_ID)"
+            )
+
+        owns_client = client is None
         if owns_client:
-            client.close()
+            client = httpx.Client(timeout=30.0)
 
-    return responses
+        responses: list[httpx.Response] = []
+        try:
+            for msg in messages:
+                caption = msg.get("caption", "")
+                photos = msg.get("photos", []) or []
+                photos = [p for p in photos if p]  # drop empty strings
+
+                if not photos:
+                    resp = _send_message(client, bot_token, chat_id, caption, base_url)
+                else:
+                    resp = _send_media_group(
+                        client, bot_token, chat_id, caption, photos, base_url
+                    )
+
+                if resp.status_code >= 400:
+                    raise DeliveryError(
+                        f"Telegram {resp.request.method} {resp.request.url.path} "
+                        f"returned HTTP {resp.status_code}: {resp.text[:200]}"
+                    )
+                responses.append(resp)
+        finally:
+            if owns_client:
+                client.close()
+
+        return responses
 ''')
 
-    # 2. Write tests/test_dispatcher.py
+    # 2. Write tests/test_dispatcher.py (skip if a hand-written version exists)
     tests_path = repo / "tests" / "test_dispatcher.py"
     tests_path.parent.mkdir(parents=True, exist_ok=True)
-    tests_path.write_text('''"""Tests for telegram_formatter/dispatcher.py.
+    if tests_path.exists() and "def test_dispatch_text_only_sends_sendMessage(mock_llama_server)" in tests_path.read_text():
+        print("(tests/test_dispatcher.py already present — keeping existing version)")
+    else:
+        tests_path.write_text('''"    ""Tests for telegram_formatter/dispatcher.py.
 
-httpx.MockTransport simulates api.telegram.org responses.
-No live HTTP. Token + chat_id are test-only values.
-"""
-from __future__ import annotations
+    httpx.MockTransport simulates api.telegram.org responses.
+    No live HTTP. Token + chat_id are test-only values.
+    """
+    from __future__ import annotations
 
-import json
+    import json
 
-import httpx
-import pytest
+    import httpx
+    import pytest
 
-from telegram_formatter import dispatcher
-
-
-@pytest.fixture
-def transport():
-    """Captures the request and returns a controllable response."""
-    captured: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        captured.append(request)
-        # Default: success
-        return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
-
-    return httpx.MockTransport(handler), captured
+    from telegram_formatter import dispatcher
 
 
-def test_dispatch_text_only_sends_sendMessage(transport):
-    mock, captured = transport
-    msg = {"caption": "hello world", "photos": []}
-    responses = dispatcher.dispatch(
-        [msg], bot_token="test_token", chat_id="12345", client=httpx.Client(transport=mock)
-    )
-    assert len(responses) == 1
-    assert responses[0].status_code == 200
-    # Verify the URL path
-    req = captured[0]
-    assert req.url.path.endswith("/bottest_token/sendMessage")
-    # Verify the JSON body
-    body = json.loads(req.content)
-    assert body == {"chat_id": "12345", "text": "hello world"}
+    @pytest.fixture
+    def transport():
+        """Captures the request and returns a controllable response."""
+        captured: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request)
+            # Default: success
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
+
+        return httpx.MockTransport(handler), captured
 
 
-def test_dispatch_with_photos_uses_sendMediaGroup_with_document(transport):
-    mock, captured = transport
-    msg = {"caption": "vehicle alert", "photos": ["/tmp/a.png", "/tmp/b.png"]}
-    # Create dummy files
-    for p in msg["photos"]:
-        Path(p).write_bytes(b"\\x89PNG\\r\\n\\x1a\\n")
-    try:
+    def test_dispatch_text_only_sends_sendMessage(transport):
+        mock, captured = transport
+        msg = {"caption": "hello world", "photos": []}
         responses = dispatcher.dispatch(
             [msg], bot_token="test_token", chat_id="12345", client=httpx.Client(transport=mock)
         )
         assert len(responses) == 1
         assert responses[0].status_code == 200
+        # Verify the URL path
         req = captured[0]
-        assert req.url.path.endswith("/bottest_token/sendMediaGroup")
-        # Form data: media field has type=document (NOT photo)
-        body_text = req.content.decode("utf-8", errors="replace")
-        assert "type\":\"document" in body_text
-        assert "type\":\"photo" not in body_text
-    finally:
+        assert req.url.path.endswith("/bottest_token/sendMessage")
+        # Verify the JSON body
+        body = json.loads(req.content)
+        assert body == {"chat_id": "12345", "text": "hello world"}
+
+
+    def test_dispatch_with_photos_uses_sendMediaGroup_with_document(transport):
+        mock, captured = transport
+        msg = {"caption": "vehicle alert", "photos": ["/tmp/a.png", "/tmp/b.png"]}
+        # Create dummy files
         for p in msg["photos"]:
-            Path(p).unlink(missing_ok=True)
+            Path(p).write_bytes(b"\\x89PNG\\r\\n\\x1a\\n")
+        try:
+            responses = dispatcher.dispatch(
+                [msg], bot_token="test_token", chat_id="12345", client=httpx.Client(transport=mock)
+            )
+            assert len(responses) == 1
+            assert responses[0].status_code == 200
+            req = captured[0]
+            assert req.url.path.endswith("/bottest_token/sendMediaGroup")
+            # Form data: media field has type=document (NOT photo)
+            body_text = req.content.decode("utf-8", errors="replace")
+            assert "type\":\"document" in body_text
+            assert "type\":\"photo" not in body_text
+        finally:
+            for p in msg["photos"]:
+                Path(p).unlink(missing_ok=True)
 
 
-def test_dispatch_raises_on_empty_token(transport):
-    mock, _ = transport
-    with pytest.raises(dispatcher.ConfigError, match="TELEGRAM_BOT_TOKEN"):
-        dispatcher.dispatch(
-            [{"caption": "x", "photos": []}],
-            bot_token="",
-            chat_id="12345",
-            client=httpx.Client(transport=mock),
-        )
+    def test_dispatch_raises_on_empty_token(transport):
+        mock, _ = transport
+        with pytest.raises(dispatcher.ConfigError, match="TELEGRAM_BOT_TOKEN"):
+            dispatcher.dispatch(
+                [{"caption": "x", "photos": []}],
+                bot_token="",
+                chat_id="12345",
+                client=httpx.Client(transport=mock),
+            )
 
 
-def test_dispatch_raises_on_empty_chat_id(transport):
-    mock, _ = transport
-    with pytest.raises(dispatcher.ConfigError, match="TELEGRAM_HOME_CHAT_ID"):
-        dispatcher.dispatch(
-            [{"caption": "x", "photos": []}],
-            bot_token="test_token",
-            chat_id="",
-            client=httpx.Client(transport=mock),
-        )
+    def test_dispatch_raises_on_empty_chat_id(transport):
+        mock, _ = transport
+        with pytest.raises(dispatcher.ConfigError, match="TELEGRAM_HOME_CHAT_ID"):
+            dispatcher.dispatch(
+                [{"caption": "x", "photos": []}],
+                bot_token="test_token",
+                chat_id="",
+                client=httpx.Client(transport=mock),
+            )
 
 
-def test_dispatch_raises_on_4xx(transport):
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(400, json={"ok": False, "error": "bad chat_id"})
+    def test_dispatch_raises_on_4xx(transport):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(400, json={"ok": False, "error": "bad chat_id"})
 
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-    with pytest.raises(dispatcher.DeliveryError, match="HTTP 400"):
-        dispatcher.dispatch(
-            [{"caption": "x", "photos": []}],
-            bot_token="test_token",
-            chat_id="12345",
-            client=client,
-        )
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        with pytest.raises(dispatcher.DeliveryError, match="HTTP 400"):
+            dispatcher.dispatch(
+                [{"caption": "x", "photos": []}],
+                bot_token="test_token",
+                chat_id="12345",
+                client=client,
+            )
 
 
-def test_dispatch_raises_on_5xx(transport):
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, text="internal error")
+    def test_dispatch_raises_on_5xx(transport):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(500, text="internal error")
 
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-    with pytest.raises(dispatcher.DeliveryError, match="HTTP 500"):
-        dispatcher.dispatch(
-            [{"caption": "x", "photos": []}],
-            bot_token="test_token",
-            chat_id="12345",
-            client=client,
-        )
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        with pytest.raises(dispatcher.DeliveryError, match="HTTP 500"):
+            dispatcher.dispatch(
+                [{"caption": "x", "photos": []}],
+                bot_token="test_token",
+                chat_id="12345",
+                client=client,
+            )
 ''')
 
     # 3. Verify import works
@@ -421,14 +427,26 @@ def run_story_b(repo: Path) -> bool:
 
     # Insert: after `result = pipeline.run(alert_dict)` block, add dispatcher call.
     # We patch the existing /alert handler.
-    marker = "    result = pipeline.run(alert_dict)\n    return jsonify(result), 200"
-    if marker not in text:
-        print(f"!! could not find /alert handler marker in {daemon_path}")
+    # The marker is the /alert handler's return statement. After pipeline.run
+    # + (optional) dispatcher block, the handler returns 200 to the camera.
+    # Two acceptable shapes:
+    #   a) Original: result = pipeline.run(...)\n    return jsonify(...), 200
+    #   b) Already-wired: result = pipeline.run(...)\n    # [comment block + tg_messages + dispatcher block]\n    return jsonify(result), 200
+    marker = "    result = pipeline.run(alert_dict)"
+    marker_idx = text.find(marker)
+    if marker_idx < 0:
+        print(f"!! could not find pipeline.run marker in {daemon_path}")
         return False
 
-    # Check we haven't already wired it
-    if "from telegram_formatter import dispatcher" in text:
-        print("(dispatcher already wired — skipping)")
+    # Check that the return jsonify(...), 200 follows within ~80 lines (dispatcher block).
+    after = text[marker_idx:marker_idx + 5000]
+    if "return jsonify(result), 200" not in after:
+        print(f"!! could not find return-after-pipeline marker in {daemon_path}")
+        return False
+    already_wired = "from telegram_formatter import dispatcher" in text
+
+    if already_wired:
+        print("(dispatcher already wired — skipping insertion)")
     else:
         # 1. Add import at top with other imports
         import_marker = "from listener import pipeline"
@@ -474,83 +492,86 @@ def run_story_b(repo: Path) -> bool:
         daemon_path.write_text(text)
         print("listener/daemon.py wired with dispatcher call")
 
-    # Write a basic daemon test
+    # Write a basic daemon test (skip if a hand-written version exists)
     daemon_test = repo / "tests" / "test_daemon_dispatch.py"
-    daemon_test.write_text('''"""Tests for listener/daemon.py dispatcher integration."""
-from __future__ import annotations
+    if daemon_test.exists() and "def test_daemon_returns_200_on_dispatch_failure(client, mock_payload):" in daemon_test.read_text():
+        print("(daemon dispatch test already present — keeping existing version)")
+    else:
+        daemon_test.write_text('''"""Tests for listener/daemon.py dispatcher integration."""
+    from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+    from unittest.mock import MagicMock, patch
 
-import httpx
-
-
-def test_daemon_returns_200_on_dispatch_failure():
-    """When dispatcher raises, /alert still returns HTTP 200."""
-    with patch("listener.daemon.pipeline") as mock_pipeline, \\
-         patch("listener.daemon.dispatcher") as mock_dispatcher:
-        mock_pipeline.run.return_value = {
-            "tg1": {"caption": "x", "photos": []},
-            "tg2": {},
-            "tg3": {},
-        }
-        mock_dispatcher.dispatch.side_effect = RuntimeError("simulated failure")
-
-        # Import the Flask app + invoke /alert
-        from listener.daemon import app
-        client = app.test_client()
-        with patch.dict("os.environ", {
-            "TELEGRAM_BOT_TOKEN": "fake",
-            "TELEGRAM_HOME_CHAT_ID": "12345",
-        }, clear=False):
-            resp = client.post("/alert", json={"camera_id": "OFS", "id": "test"})
-        assert resp.status_code == 200
+    import httpx
 
 
-def test_daemon_logs_dispatch_success():
-    """When dispatcher returns responses, daemon logs tg-dispatch lines."""
-    with patch("listener.daemon.pipeline") as mock_pipeline, \\
-         patch("listener.daemon.dispatcher") as mock_dispatcher:
-        mock_pipeline.run.return_value = {
-            "tg1": {"caption": "alert", "photos": []},
-            "tg2": {},
-            "tg3": {},
-        }
-        mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 200
-        mock_dispatcher.dispatch.return_value = [mock_resp]
+    def test_daemon_returns_200_on_dispatch_failure():
+        """When dispatcher raises, /alert still returns HTTP 200."""
+        with patch("listener.daemon.pipeline") as mock_pipeline, \\
+             patch("listener.daemon.dispatcher") as mock_dispatcher:
+            mock_pipeline.run.return_value = {
+                "tg1": {"caption": "x", "photos": []},
+                "tg2": {},
+                "tg3": {},
+            }
+            mock_dispatcher.dispatch.side_effect = RuntimeError("simulated failure")
 
-        from listener.daemon import app
-        client = app.test_client()
-        with patch.dict("os.environ", {
-            "TELEGRAM_BOT_TOKEN": "fake",
-            "TELEGRAM_HOME_CHAT_ID": "12345",
-        }, clear=False):
-            resp = client.post("/alert", json={"camera_id": "OFS", "id": "test"})
-        assert resp.status_code == 200
-        mock_dispatcher.dispatch.assert_called_once()
+            # Import the Flask app + invoke /alert
+            from listener.daemon import app
+            client = app.test_client()
+            with patch.dict("os.environ", {
+                "TELEGRAM_BOT_TOKEN": "fake",
+                "TELEGRAM_HOME_CHAT_ID": "12345",
+            }, clear=False):
+                resp = client.post("/alert", json={"camera_id": "OFS", "id": "test"})
+            assert resp.status_code == 200
 
 
-def test_daemon_logs_dispatch_config_error():
-    """When ConfigError raised, daemon logs the error and still returns 200."""
-    with patch("listener.daemon.pipeline") as mock_pipeline, \\
-         patch("listener.daemon.dispatcher") as mock_dispatcher:
-        mock_pipeline.run.return_value = {
-            "tg1": {"caption": "x", "photos": []},
-            "tg2": {},
-            "tg3": {},
-        }
-        # ConfigError from dispatcher module
-        from telegram_formatter.dispatcher import ConfigError
-        mock_dispatcher.dispatch.side_effect = ConfigError("TELEGRAM_HOME_CHAT_ID is empty")
+    def test_daemon_logs_dispatch_success():
+        """When dispatcher returns responses, daemon logs tg-dispatch lines."""
+        with patch("listener.daemon.pipeline") as mock_pipeline, \\
+             patch("listener.daemon.dispatcher") as mock_dispatcher:
+            mock_pipeline.run.return_value = {
+                "tg1": {"caption": "alert", "photos": []},
+                "tg2": {},
+                "tg3": {},
+            }
+            mock_resp = MagicMock(spec=httpx.Response)
+            mock_resp.status_code = 200
+            mock_dispatcher.dispatch.return_value = [mock_resp]
 
-        from listener.daemon import app
-        client = app.test_client()
-        with patch.dict("os.environ", {
-            "TELEGRAM_BOT_TOKEN": "fake",
-            "TELEGRAM_HOME_CHAT_ID": "12345",
-        }, clear=False):
-            resp = client.post("/alert", json={"camera_id": "OFS", "id": "test"})
-        assert resp.status_code == 200
+            from listener.daemon import app
+            client = app.test_client()
+            with patch.dict("os.environ", {
+                "TELEGRAM_BOT_TOKEN": "fake",
+                "TELEGRAM_HOME_CHAT_ID": "12345",
+            }, clear=False):
+                resp = client.post("/alert", json={"camera_id": "OFS", "id": "test"})
+            assert resp.status_code == 200
+            mock_dispatcher.dispatch.assert_called_once()
+
+
+    def test_daemon_logs_dispatch_config_error():
+        """When ConfigError raised, daemon logs the error and still returns 200."""
+        with patch("listener.daemon.pipeline") as mock_pipeline, \\
+             patch("listener.daemon.dispatcher") as mock_dispatcher:
+            mock_pipeline.run.return_value = {
+                "tg1": {"caption": "x", "photos": []},
+                "tg2": {},
+                "tg3": {},
+            }
+            # ConfigError from dispatcher module
+            from telegram_formatter.dispatcher import ConfigError
+            mock_dispatcher.dispatch.side_effect = ConfigError("TELEGRAM_HOME_CHAT_ID is empty")
+
+            from listener.daemon import app
+            client = app.test_client()
+            with patch.dict("os.environ", {
+                "TELEGRAM_BOT_TOKEN": "fake",
+                "TELEGRAM_HOME_CHAT_ID": "12345",
+            }, clear=False):
+                resp = client.post("/alert", json={"camera_id": "OFS", "id": "test"})
+            assert resp.status_code == 200
 ''')
 
     # Run the daemon tests
