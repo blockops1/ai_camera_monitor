@@ -579,7 +579,7 @@ def crop_frame_to_bbox(frame_path: str, bbox: tuple[int, int, int, int]) -> str 
 
     Returns the new file path, or None if loading/cropping fails.
 
-    Naming: `<stem>_crop<x>_<y>_<w>x<h>.jpg` next to the source frame.
+    Naming: `<stem>_crop<x>_<y>_<w>x<h>.png` next to the source frame.
     Saves to disk because YOLO loads from file paths.
     """
     src = Path(frame_path)
