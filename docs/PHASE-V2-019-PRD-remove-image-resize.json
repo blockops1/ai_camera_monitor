@@ -12,7 +12,7 @@
     "Retraining YOLOv8n with custom classes is NOT in this PRD — we keep the stock COCO-trained model. Dynamic export changes only the input-shape handling, not the weights.",
     "Switching to a larger YOLO variant (yolov8s/m/l/x) is NOT in this PRD. Model file size stays around 13 MB.",
     "Re-tuning motion_gate confidence thresholds against the dynamic model is NOT in this PRD. The same post-NMS thresholds should work; if accuracy regresses on real alerts, that's a follow-up.",
-    "Removing the in-memory JPEG q95 crop save in listener/pipeline.py is NOT in this PRD — that uses default quality and is not a resize op.",
+    "Removing the in-memory JPEG crop save in listener/pipeline.py:54,58 is NOT in this PRD — those saves use PIL's default JPEG quality (75, hardcoded in PIL) and are not resize operations. Changing those is a separate question about vision-LLM payload size, not about image fidelity.",
     "Per-camera input-size selection (e.g., 1280 for OFG/OFP, 1920 for FRONT) is NOT in this PRD — we feed the native crop at whatever resolution it arrives. Camera-specific sizing is a future optimization."
   ],
   "design_principles": [
