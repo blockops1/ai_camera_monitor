@@ -60,16 +60,32 @@ _VISION_MODEL = "qwen3-vl-8b"
 def _response_format(schema: dict, name: str) -> dict:
     """Wrap a JSON Schema dict in the llama-server strict-mode envelope.
 
-    llama-server (Qwen3-VL backend) accepts response_format of shape:
-        {"type": "json_schema", "strict": True, "schema": <dict>}
-    Per the refactor (infra/vision_analyzer.py:classify_vehicle_crop).
-    Using `strict: True` makes the server enforce key names + required
-    fields + enums. Without it, the model can emit arbitrary keys.
+    llama-server (Qwen3-VL backend) enforces strict-mode schema when the
+    response_format is shaped:
+        {
+          "type": "json_schema",
+          "json_schema": {
+            "name": "<schema-name>",
+            "strict": True,
+            "schema": <dict>
+          }
+        }
+    Verified 2026-09-09 with `qwen3-vl-8b` on localhost:8080: the nested
+    shape makes the model emit ONLY the schema-declared keys. The flat
+    shape (`type/strict/schema` at top level) is accepted with 200 but
+    the model emits bare text ("unsure", etc.) with no enforcement —
+    silent failure mode.
+
+    `strict: True` makes the server enforce key names + required fields
+    + enums server-side. Without it, the model emits arbitrary keys.
     """
     return {
         "type": "json_schema",
-        "strict": True,
-        "schema": schema,
+        "json_schema": {
+            "name": name,
+            "strict": True,
+            "schema": schema,
+        },
     }
 
 
