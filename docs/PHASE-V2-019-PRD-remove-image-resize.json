@@ -1,0 +1,159 @@
+{
+  "prd_id": "PHASE-V2-019",
+  "title": "remove image resizing from v2 — switch YOLO to dynamic input + delete dead thumbnail code",
+  "author": "the operator",
+  "status": "active",
+  "phase": "v2-pipeline-cleanup",
+  "plan_section": "v2-input-pipeline",
+  "trigger": "operator directive 2026-09-09: 'Research the statement that you just made the yolo require a 640x640 image.' followed by 'draft a PRD story or multiple stories that removes the messing around with resizing, uses a Yolo that can accept the native crop as we send it to it, and works into the existing system. Also add a Prd story to remove the supposedly dead code for image resizing that you mentioned in the other part of the system.'",
+  "background": "The v2 quick-classifier pipeline currently letterboxes every crop to 640×640 before feeding it to the YOLOv8n ONNX model, then un-pads the bounding boxes back to native coordinates. This letterbox+invert dance exists because the ONNX model was exported with static 640×640 input dims — verified directly via onnxruntime in session 2026-09-09: model input is locked to '[1, 3, 640, 640]'. Ultralytics YOLOv8 supports a `dynamic=True` export flag that replaces these dims with symbolic axes so the same ONNX file accepts any (h, w) at inference time. Additionally, infra/frame_capture.py:_save_one() contains an opt-in img.thumbnail() call (line 332) that resizes frames at save-time when max_size is passed. The single production caller — listener/daemon.py:get_recent_frames() — does NOT pass max_size, so this branch is dead code today. Both paths must go: dynamic-YOLO eliminates the letterbox step from the hot path entirely; thumbnail deletion removes a foot-gun where a future caller passing max_size would silently downscale frames before Telegram delivery.",
+  "shipping_definition": "All five US-019 stories marked done; pytest 132/132 (or higher) green; tree clean; grep -rE 'resize\\(|letterbox|thumbnail\\(' over the production source tree returns only the new dynamic-axes handling in quick_classifier (and zero hits in frame_capture.py); the new models/yolov8n_dynamic.onnx is committed and verified to accept native-resolution input via onnxruntime; the daemon is running on the new model and one live alert has round-tripped through the new pipeline successfully.",
+  "scope_exclusions": [
+    "Retraining YOLOv8n with custom classes is NOT in this PRD — we keep the stock COCO-trained model. Dynamic export changes only the input-shape handling, not the weights.",
+    "Switching to a larger YOLO variant (yolov8s/m/l/x) is NOT in this PRD. Model file size stays around 13 MB.",
+    "Re-tuning motion_gate confidence thresholds against the dynamic model is NOT in this PRD. The same post-NMS thresholds should work; if accuracy regresses on real alerts, that's a follow-up.",
+    "Removing the in-memory JPEG q95 crop save in listener/pipeline.py is NOT in this PRD — that uses default quality and is not a resize op.",
+    "Per-camera input-size selection (e.g., 1280 for OFG/OFP, 1920 for FRONT) is NOT in this PRD — we feed the native crop at whatever resolution it arrives. Camera-specific sizing is a future optimization."
+  ],
+  "design_principles": [
+    "Dynamic axes, dynamic output: when input shape changes, output shape changes too (8400 anchors at 640², 25200 at 1280², etc.). All output-shape math must be derived from the output tensor's actual shape, never hard-coded.",
+    "No silent downscales: the goal is zero image resizing on the production hot path. Anything that LOOKS like a resize (letterbox, thumbnail, cv2.resize, PIL.Image.resize) must either be deleted or replaced with the new dynamic-input YOLO call.",
+    "Native crop in, native bbox out: the YOLO call now consumes the crop at its native resolution and returns bounding boxes already in native coordinates. No un-padding step.",
+    "Keep the original ONNX file as a fallback: rename models/yolov8n.onnx to models/yolov8n_static_640.onnx (kept for A/B comparison) instead of deleting. The new dynamic model becomes models/yolov8n.onnx so the existing MODEL_PATH config default still works.",
+    "Operator-visible test: at least one test must feed a non-square crop (e.g., 1920×1080 or 1280×720) to the loaded model and assert the inference path completes without reshaping error. This is the regression guard against re-introducing a static assumption.",
+    "Scanner scope: the no-resize regression scanner only walks production source files (infra/, listener/, vehicle_position/, telegram_formatter/). It excludes tests/, models/, scripts/, docs/, archive/, data/, .venv/, .git/. The PRD files themselves naturally mention the words being removed (letterbox, thumbnail, resize) in prose describing the cleanup — that's expected and the scanner must not flag them."
+  ],
+  "stories": [
+    {
+      "id": "US-019a",
+      "title": "export a dynamic-input YOLOv8n ONNX model and verify it accepts variable input shapes",
+      "status": "todo",
+      "depends_on": [],
+      "estimate_loc": 60,
+      "files": [
+        "models/yolov8n.onnx",
+        "models/yolov8n_static_640.onnx",
+        "scripts/export_yolo_dynamic.py"
+      ],
+      "card_body_fallback": "**Story.** Replace models/yolov8n.onnx (static 640×640) with a dynamic-axes export that accepts any (h, w). Steps: (1) write scripts/export_yolo_dynamic.py — a small standalone script that runs `from ultralytics import YOLO; YOLO('yolov8n.pt').export(format='onnx', dynamic=True, imgsz=640, simplify=True)` if a source .pt exists, else falls back to a one-time `pip install ultralytics` + download. (2) Rename the current models/yolov8n.onnx to models/yolov8n_static_640.onnx (kept as A/B fallback). (3) Copy the new dynamic export to models/yolov8n.onnx so the existing MODEL_PATH default keeps pointing at the canonical name. (4) Add a verification block at the end of export_yolo_dynamic.py that loads the new model with onnxruntime and runs inference on three dummy tensors — (1,3,640,640), (1,3,1280,720), (1,3,1920,1080) — and asserts each succeeds and produces an output whose last dim matches the documented anchor count for that input size (8400, 18900, 25200). **Why first story:** every later story assumes a dynamic model is in place. **Why estimate 60 LOC:** export script + verification block + onnxruntime sanity-check is roughly that size; the model file itself is committed as a binary.",
+      "ac": [
+        "AC1: scripts/export_yolo_dynamic.py exists, runs cleanly, and produces a dynamic ONNX at the canonical path.",
+        "AC2: models/yolov8n.onnx and models/yolov8n_static_640.onnx both exist; sha256 of the dynamic file differs from the static fallback.",
+        "AC3: a new pytest tests/test_yolo_dynamic_export.py loads models/yolov8n.onnx via onnxruntime and asserts three inference calls — at 640×640, 1280×720, and 1920×1080 — all succeed with output anchor counts 8400, 18900, 25200 respectively.",
+        "AC4: pytest 132/132 (or higher) green after the change.",
+        "AC5: one commit, message 'feat(v2): US-019a — export dynamic-axes YOLOv8n ONNX + sanity-check test'."
+      ],
+      "rationale": "Without a dynamic model, every later cleanup story is moot. The export script is reproducible — re-running it regenerates the model file, which matters for the public-GitHub release where we want anyone to rebuild the artifact.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
+    },
+    {
+      "id": "US-019b",
+      "title": "rewrite quick_classifier to consume native crops via dynamic YOLO and drop letterbox",
+      "status": "todo",
+      "depends_on": [
+        "US-019a"
+      ],
+      "estimate_loc": 120,
+      "files": [
+        "infra/quick_classifier.py",
+        "tests/test_quick_classifier.py"
+      ],
+      "card_body_fallback": "**Story.** infra/quick_classifier.py:_letterbox() is the resize step on the hot path — it pads and resizes the input crop to 640×640, and _postprocess() un-pads the boxes. With a dynamic model both steps become unnecessary. Rewrites: (1) drop _letterbox() entirely (or replace with a no-op pass-through if it's referenced elsewhere). (2) In the inference call, feed the native-resolution PIL Image directly (after the standard PIL→numpy→float32→NCHW conversion that already exists). (3) _postprocess() must read the output's last dim (anchors) at runtime to slice detections, instead of hard-coding index `..., :8400]`. The output tensor shape with dynamic input is (1, 84, anchors) — anchors = (h/8 * w/8) + (h/16 * w/16) + (h/32 * w/32) at stride 8/16/32, or simply `output.shape[-1]` since YOLOv8 already flattens it. (4) xyxy boxes are now in native pixel coords already — no un-padding math. (5) Keep the same public API (classify(image_pil) -> list[Detection]) so pipeline.py callers don't change. **Why depends on US-019a:** model must exist first. **Why estimate 120 LOC:** letterbox removal + postprocess reshape + bbox coord handling + new tests for native-input cases.",
+      "ac": [
+        "AC1: grep -nE 'letterbox|thumbnail|resize' infra/quick_classifier.py returns zero hits (the file no longer resizes anything).",
+        "AC2: classify() on a 1920×1080 PIL image runs end-to-end and returns detections whose xyxy coords lie within the original (1920, 1080) bounds.",
+        "AC3: a new pytest tests/test_quick_classifier.py::test_native_resolution_input feeds a 1280×720 synthetic image containing a clearly-locatable shape and asserts (a) inference succeeds without reshape error, (b) at least one detection is returned, (c) all returned bboxes are within the original 1280×720 image bounds.",
+        "AC4: pytest 132/132 (or higher) green after the change.",
+        "AC5: one commit, message 'feat(v2): US-019b — drop letterbox; classify() takes native crops'."
+      ],
+      "rationale": "This is the actual fix. Once classify() doesn't resize, every downstream consumer (vehicle classifier pipeline, telegram_formatter, etc.) gets native-resolution crops for free.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
+    },
+    {
+      "id": "US-019c",
+      "title": "delete the dead img.thumbnail() code path in infra/frame_capture.py:_save_one",
+      "status": "todo",
+      "depends_on": [],
+      "estimate_loc": 30,
+      "files": [
+        "infra/frame_capture.py",
+        "tests/test_frame_capture.py"
+      ],
+      "card_body_fallback": "**Story.** infra/frame_capture.py:_save_one() (lines 321-334) accepts a max_size parameter and calls img.thumbnail(max_size, Image.Resampling.LANCZOS) when set. The single production caller — listener/daemon.py:get_recent_frames() — does NOT pass max_size, so this branch is dead code today. Tests in tests/test_frame_capture.py may exercise the max_size path; if so, those tests get deleted alongside the production code (the operator's 'no memorializing removed code' rule). Rewrites: (1) remove the max_size parameter from _save_one's signature entirely. (2) remove the if-block that calls img.thumbnail. (3) remove any corresponding tests that pass max_size — these now have no production path. (4) the function's body becomes just `out_path = ...; img.save(out_path, quality=85); out_paths.append(out_path)`. **Why standalone (no US-019a dep):** the thumbnail path is independent of YOLO. Doing it as a separate story keeps the diff small and reviewable. **Why estimate 30 LOC:** deletion is mechanical; the only real work is grepping for tests that exercise the removed parameter.",
+      "ac": [
+        "AC1: grep -nE 'thumbnail|max_size' infra/frame_capture.py returns zero hits.",
+        "AC2: grep -rnE 'thumbnail|max_size' --include='*.py' tests/ returns zero hits (the test-side surface is also gone).",
+        "AC3: pytest 132/132 (or higher) green after the change — existing frame_capture tests still pass; any tests that referenced max_size are deleted, not skipped.",
+        "AC4: one commit, message 'refactor(v2): US-019c — drop dead img.thumbnail() code path in frame_capture'."
+      ],
+      "rationale": "Dead code is a foot-gun. A future caller passing max_size would silently downscale frames before Telegram delivery. Removing it makes the production resize surface equal to zero.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
+    },
+    {
+      "id": "US-019d",
+      "title": "add a regression test that asserts no production code resizes images",
+      "status": "todo",
+      "depends_on": [
+        "US-019b",
+        "US-019c"
+      ],
+      "estimate_loc": 40,
+      "files": [
+        "tests/test_no_image_resize.py",
+        "scripts/check_no_image_resize.py"
+      ],
+      "card_body_fallback": "**Story.** Now that US-019b and US-019c have cleared the resize surface, install a regression guard so a future change can't reintroduce cv2.resize / PIL.Image.resize / .thumbnail / letterbox silently. (1) Write scripts/check_no_image_resize.py — a static scanner that walks ONLY the production source tree (infra/, listener/, vehicle_position/, telegram_formatter/) and flags any match against the regex `\\.(resize|thumbnail)\\(|cv2\\.resize|letterbox|Image\\.Resampling\\.LANCZOS`. Explicitly exclude tests/, models/, scripts/, docs/, archive/, data/, .venv/, .git/. (2) Write tests/test_no_image_resize.py that imports the scanner and asserts it produces zero matches on the current production tree. (3) Wire the scanner into the existing Makefile target alongside `make check-privacy` — either as a separate `make check-no-resize` target or fold into the existing `make check-privacy` chain. (4) Update .git/hooks/pre-push to run both scanners before push. **Why depends on US-019b and US-019c:** the test must run AFTER both stories so it passes against the cleaned tree. **Why estimate 40 LOC:** scanner + test + Makefile wiring is roughly that size.",
+      "ac": [
+        "AC1: scripts/check_no_image_resize.py runs cleanly, exits 0 on the current tree, exits non-zero (with file:line output) on a synthetic offending file.",
+        "AC2: tests/test_no_image_resize.py exists and passes — it asserts the scanner produces zero matches on the v2 production tree as it stands after US-019b/US-019c.",
+        "AC3: `make check-privacy` (or a new `make check-no-resize` target, whichever the implementation picks) runs the resize scanner and exits 0.",
+        "AC4: pytest 132/132 (or higher) green after the change.",
+        "AC5: one commit, message 'feat(v2): US-019d — no-image-resize scanner + Makefile + pre-push wiring'."
+      ],
+      "rationale": "Without a guard, the resize surface can grow back. The scanner makes the invariant 'v2 never resizes images' mechanically enforceable — same pattern as the existing check_no_private_data.py guard.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
+    },
+    {
+      "id": "US-019e",
+      "title": "live-fire one alert through the new pipeline and verify Telegram receives native-resolution crops",
+      "status": "todo",
+      "depends_on": [
+        "US-019b"
+      ],
+      "estimate_loc": 20,
+      "files": [
+        "scripts/smoke_alert_native.py"
+      ],
+      "card_body_fallback": "**Story.** With the dynamic model + native-classify path in place, prove the end-to-end pipeline still works on real camera input. (1) Write scripts/smoke_alert_native.py — a small standalone harness that POSTs a synthetic Reolink-style alert JSON to http://127.0.0.1:8090/alert for a working camera (e.g., one of OFS/OFG/OFP), waits for the daemon to process it, and inspects the resulting crop files on disk (under data/frames/<cam>/<alert_id>/). (2) The script asserts (a) the daemon returns HTTP 200, (b) at least one crop file was written, (c) the crop file's pixel dimensions match what the camera would have sent at native resolution (1920×1080 typical for these cameras), NOT 640×640 (which would indicate letterboxing is still happening). (3) The script also sends the alert to Telegram (via the existing bot) and captures the photo URL — this is the operator-visible check. **Why depends on US-019b:** the dynamic path must exist before we can prove native-resolution crops come out. **Why estimate 20 LOC:** harness is small; the actual proof is reading the file dimensions. **Operator-driven step:** the script is run by the operator during their 'test today' phase; this story isn't done until the operator confirms the Telegram alert shows native-resolution vehicle crops.",
+      "ac": [
+        "AC1: scripts/smoke_alert_native.py exists and runs cleanly against the live daemon.",
+        "AC2: a successful run produces: HTTP 200 response, at least one crop file written, that crop file's dimensions match the camera's native resolution (NOT 640×640).",
+        "AC3: the operator confirms via Telegram that the received alert shows a native-resolution vehicle crop (visually, not 640×640-sized).",
+        "AC4: pytest 132/132 (or higher) green; the daemon is still running; logs/daemon.log shows the smoke alert processed in <500ms.",
+        "AC5: one commit, message 'feat(v2): US-019e — smoke test for native-resolution alert pipeline'."
+      ],
+      "rationale": "Unit tests prove the code works; this story proves the system works. The operator's explicit directive was 'make sure the system is actually working' before public-GitHub push — this is the verification step.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
+    }
+  ]
+}
