@@ -29,11 +29,17 @@ dev = [
 isort.split-on-trailing-comma = false
 isort.combine-as-imports = true
 
+[tool.ruff]
+# Exclude JSON from ruff format — it's not Python (ruff adds trailing commas).
+exclude = ["data/vehicles/*.json"]
+
 [tool.ruff.lint.per-file-ignores]
 # Module docstrings may use words that look like keywords elsewhere (gate, classify).
 "infra/*.py" = []
+# Data files (JSON, etc.) are not Python — ignore ruff lint rules on them.
+"*.json" = ["ALL"]
 
 [tool.pyright]
 include = ["infra", "listener", "telegram_formatter", "vehicle_matcher", "tests"]
-exclude = ["**/__pycache__", ".venv", ".desloppify", ".qa"]
+exclude = ["**/__pycache__", ".venv", ".desloppify", ".qa", "data"]
 reportMissingImports = "warning"
