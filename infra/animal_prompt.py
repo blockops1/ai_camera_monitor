@@ -18,14 +18,15 @@ override license so the model can say "coyote" when YOLO said "dog."
 
 Schema (response_format layer):
   {
-    "species":        string|null,    # free-form per Rule 3
-    "size_class":     enum["small", "medium", "large", "unsure"],
-    "behavior":       string|null,
-    "domesticated":   enum["yes", "no", "unsure"],
-    "collar_visible": enum["yes", "no", "unsure"],
-    "distinctive":    string[],       # 1-5 re-ID markers
-    "description":    string,
-    "confidence":     enum["definite", "likely", "unsure"]
+    "class_confirmed":      enum["vehicle", "person", "animal", "unsure"],
+    "species":              string|null,    # free-form per Rule 3
+    "size_class":           enum["small", "medium", "large", "unsure"],
+    "behavior":             string|null,
+    "domesticated":         enum["yes", "no", "unsure"],
+    "collar_visible":       enum["yes", "no", "unsure"],
+    "distinctive_features": string[],       # 1-5 re-ID markers
+    "description":          string,
+    "confidence":           enum["definite", "likely", "unsure"]
   }
 """
 from __future__ import annotations
@@ -33,6 +34,11 @@ from __future__ import annotations
 SCHEMA_JSON: dict = {
     "type": "object",
     "properties": {
+        "class_confirmed": {
+            "type": "string",
+            "enum": ["vehicle", "person", "animal", "unsure"],
+            "description": "Confirm the class (should match VM1).",
+        },
         "species": {
             "type": ["string", "null"],
             "description": "Most specific name: coyote, Eastern coyote, red fox, gray fox, fisher, raccoon, white-tailed deer, wild turkey, domestic dog (breed if recognizable), domestic cat (breed if recognizable), opossum, bobcat, ... Use null only if truly unidentifiable.",
@@ -56,7 +62,7 @@ SCHEMA_JSON: dict = {
             "enum": ["yes", "no", "unsure"],
             "description": "Is a collar visible (a domesticated marker)?",
         },
-        "distinctive": {
+        "distinctive_features": {
             "type": "array",
             "items": {"type": "string"},
             "minItems": 0,
@@ -73,7 +79,7 @@ SCHEMA_JSON: dict = {
             "description": "Overall call certainty.",
         },
     },
-    "required": ["size_class", "domesticated", "collar_visible", "distinctive", "description", "confidence"],
+    "required": ["class_confirmed", "size_class", "domesticated", "collar_visible", "distinctive_features", "description", "confidence"],
     "additionalProperties": False,
 }
 
@@ -93,7 +99,7 @@ white-tailed deer, wild turkey, domestic dog (with breed if you can
 read it), domestic cat (with breed if you can read it), opossum,
 bobcat.
 
-For distinctive, list 1-5 features that distinguish THIS individual
+For distinctive_features, list 1-5 features that distinguish THIS individual
 from other members of the same species. Examples: left ear notched,
 white-tipped tail, scar on right shoulder, limp in left rear leg,
 blue collar, asymmetric gait, mange patch on left flank. Generic
@@ -104,7 +110,18 @@ Confidence:
   - likely   — best call but caveats (lighting, partial occlusion)
   - unsure   — guessing between plausible alternatives
 
-Respond ONLY with JSON matching the schema. No prose, no markdown.
+Respond ONLY with JSON. The JSON object MUST have exactly these keys:
+  - "class_confirmed"      — one of: vehicle, person, animal, unsure
+  - "species"              — string|null
+  - "size_class"           — one of: small, medium, large, unsure
+  - "behavior"             — string|null
+  - "domesticated"         — one of: yes, no, unsure
+  - "collar_visible"       — one of: yes, no, unsure
+  - "distinctive_features" — array of 0-5 strings
+  - "description"          — string
+  - "confidence"           — one of: definite, likely, unsure
+
+No prose, no markdown, no keys outside the list above.
 """
 
 # Canonical mode name for the response_format dispatch layer (Rule 8a).

@@ -6,8 +6,7 @@ THREAD SAFETY: thread-safe (pure function, no shared state)
 INPUTS:
     - mode: str (required) -- one of 'vehicle', 'person', 'animal'
     - vm2_result: dict (required) -- VM2 detail output with
-      'class_confirmed', optional 'license_plate',
-      'distinctive_features', 'threat_indicators'
+      'class_confirmed', optional 'license_plate', 'distinctive_features'
     - crop_a, crop_b: Path | None (required) -- image paths
 
 OUTPUTS:
@@ -20,7 +19,8 @@ PUBLIC API:
 
 DOES NOT DO:
     - Send the Telegram message (pipeline.py handles transport)
-    - Derive a threat-level field (passes threat_indicators from VM2 as-is)
+    - Derive a threat-level field (operator-locked: no threat fields
+      anywhere; see vision-prompt-design skill Rule 6)
     - Do any filesystem I/O (paths are passed in)
 
 CALLED BY:
@@ -51,7 +51,7 @@ def build_detail_message(
             f"mode must be one of {_MODES}, got {mode!r}"
         )
 
-    cls = vm2_result.get("class_confirmed", vm2_result.get("class", "unknown"))
+    cls = vm2_result.get("class_confirmed") or vm2_result.get("class", "unknown")
     lines = [
         f"Camera: {camera_label}",
         f"Mode: {mode}",
@@ -65,10 +65,6 @@ def build_detail_message(
     feats = vm2_result.get("distinctive_features")
     if feats:
         lines.append(f"Distinctive features: {', '.join(feats)}")
-
-    threats = vm2_result.get("threat_indicators")
-    if threats:
-        lines.append(f"Threat indicators: {', '.join(threats)}")
 
     return {
         "caption": "\n".join(lines),
