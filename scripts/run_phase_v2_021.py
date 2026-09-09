@@ -2,16 +2,18 @@
 """Driver for PRD-V2-021: canonicalize transient image paths.
 
 Migrates /tmp writes in production code to canonical
-<PROJECT_ROOT>/data/frames/<camera_id>/<alert_id>/ paths.
+<PROJECT_ROOT>/data/frames/<camera_id>/<alert_id>/ paths, plus
+hourly cleanup of artifacts older than 24h.
 
-Four stories, ~110 LOC, no daemon restarts required (operators can
+Five stories, ~190 LOC, no daemon restarts required (operators can
 restart manually after smoke test US-021d).
 
 Stories:
   US-021a — pipeline.py _crop_paths + sentinel -> data/frames paths (30 LOC)
   US-021b — gate pairwise_diff -> canonical data path (25 LOC, depends on a)
   US-021c — no-tmp-writes scanner + Makefile + pre-push (25 LOC, depends on a,b)
-  US-021d — operator-driven smoke test (30 LOC, depends on a,b,c)
+  US-021e — hourly cleanup of alert artifacts older than 24h (80 LOC, depends on a,b,c)
+  US-021d — operator-driven smoke test (30 LOC, depends on a,b,c,e)
 
 Required env vars (no defaults):
   DRIVER_REPO_PATH         absolute path to farm-surveillance-v2/ repo
@@ -190,6 +192,50 @@ def run_story_c() -> bool:
     return True
 
 
+def run_story_e() -> bool:
+    """US-021e: hourly cleanup of alert artifacts older than 24h.
+
+    Walks operator through:
+      1. Write scripts/cleanup_alert_artifacts.py + tests/test_cleanup_alert_artifacts.py
+      2. Write scripts/cleanup_alert_artifacts.env.example
+      3. Update .gitignore to ignore 'launchd/com.farm.surveillance.*.plist'
+      4. Write the launchd plist at ~/Library/LaunchAgents/com.farm.surveillance.v2.cleanup.plist
+      5. Run pytest
+      6. Manual: launchctl load the plist
+      7. Verify 'launchctl list | grep farm.surveillance.v2.cleanup' shows the label
+      8. Verify logs/cleanup.log receives a no-op confirmation line within 60s
+      9. Commit
+    """
+    print("\n=== US-021e: hourly cleanup of alert artifacts older than 24h ===")
+    print("Steps:")
+    print("  1. Write scripts/cleanup_alert_artifacts.py (~50 LOC, with --max-age-hours, --dry-run, --data-root flags)")
+    print("  2. Write tests/test_cleanup_alert_artifacts.py (tmp_path, backdated mtimes, 1h/23h/25h/48h assertions)")
+    print("  3. Write scripts/cleanup_alert_artifacts.env.example (documents future env vars, currently CLI flags only)")
+    print("  4. Update .gitignore: add 'launchd/com.farm.surveillance.*.plist' (operator-specific config)")
+    print("  5. Write the launchd plist at ~/Library/LaunchAgents/com.farm.surveillance.v2.cleanup.plist:")
+    print("       Label: com.farm.surveillance.v2.cleanup")
+    print("       ProgramArguments: .venv/bin/python3.11 scripts/cleanup_alert_artifacts.py")
+    print("       WorkingDirectory: /Users/jill/farm-surveillance-v2")
+    print("       StartInterval: 3600 (hourly)")
+    print("       StandardOutPath/StandardErrorPath: logs/cleanup.log")
+    print("       NOT KeepAlive (one-shot, not a daemon)")
+    print("       RunAtLoad: false")
+    print("  6. pytest tests/ -x --tb=short")
+    print("  7. Manual: launchctl load ~/Library/LaunchAgents/com.farm.surveillance.v2.cleanup.plist")
+    print("  8. Verify: launchctl list | grep farm.surveillance.v2.cleanup shows the label + PID")
+    print("  9. Verify: tail logs/cleanup.log shows 'cleanup_alert_artifacts: deleted 0 artifacts' within 60s")
+    print("  10. git add scripts/cleanup_alert_artifacts.py tests/test_cleanup_alert_artifacts.py scripts/cleanup_alert_artifacts.env.example .gitignore")
+    print("  11. git commit -m 'feat(v2): US-021e - hourly cleanup of alert artifacts older than 24 hours'")
+    print()
+    print("Note: the plist at ~/Library/LaunchAgents/ is NOT committed to git. .gitignore entry covers it.")
+    print()
+    if not confirm("Did the operator complete US-021e? [y/N] "):
+        return False
+    sha = current_sha()
+    mark_story("US-021e", passes=True, commit_sha=sha)
+    return True
+
+
 def run_story_d() -> bool:
     """US-021d: operator-driven smoke test on live daemon."""
     print("\n=== US-021d: live alert smoke test on canonical paths ===")
@@ -223,6 +269,7 @@ STORY_RUNNERS = {
     "US-021a": run_story_a,
     "US-021b": run_story_b,
     "US-021c": run_story_c,
+    "US-021e": run_story_e,
     "US-021d": run_story_d,
 }
 
@@ -265,7 +312,7 @@ def main() -> int:
     if failed:
         print(f"ABORTED at {failed[0]}; fix and re-run.")
         return 1
-    print("PRD-V2-021 complete: 4/4 stories passes=True")
+    print("PRD-V2-021 complete: 5/5 stories passes=True")
     return 0
 
 
