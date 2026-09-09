@@ -17,12 +17,13 @@ from vehicle_matcher.match import match_vehicle
 # AC: file exists and is valid JSON with 12 entries
 # ---------------------------------------------------------------------------
 
+
 def test_file_exists_and_has_12_entries():
     """AC: known_vehicles.json has 12 entries."""
     p = Path(VEHICLE_KNOWN_FILE)
     assert p.exists(), f"VEHICLE_KNOWN_FILE {p} does not exist"
     entries = json.loads(p.read_text())
-    assert len(entries) == 12
+    assert len(entries["entries"]) == 12
 
 
 def test_candidates_loads_12():
@@ -38,16 +39,44 @@ def test_path_is_v2_not_refactor():
 
 
 # ---------------------------------------------------------------------------
+# AC: anonymization (PHASE-V2-018 / US-018e)
+# ---------------------------------------------------------------------------
+
+
+def test_owner_fields_are_anonymized():
+    """AC3: Every owner field is 'operator' — no personal first names."""
+    p = Path(VEHICLE_KNOWN_FILE)
+    data = json.loads(p.read_text())
+    for entry in data["entries"]:
+        assert entry["owner"] == "operator", (
+            f"Entry {entry['id']} has owner='{entry['owner']}', expected 'operator'"
+        )
+
+
+def test_anonymization_note_exists():
+    """AC4: Top-level _anonymization_note documents the convention."""
+    p = Path(VEHICLE_KNOWN_FILE)
+    data = json.loads(p.read_text())
+    assert "_anonymization_note" in data, (
+        "known_vehicles.json is missing _anonymization_note header"
+    )
+    note = data["_anonymization_note"]
+    assert "[helper-A]" in note, "Anonymization note must document [helper-A]"
+    assert "[helper-B]" in note, "Anonymization note must document [helper-B]"
+
+
+# ---------------------------------------------------------------------------
 # Synthetic match tests: query known vehicles via Jaccard
 # ---------------------------------------------------------------------------
 
-def test_match_carson_white():
-    """Carson's white pickup — Jaccard match on distinctive_features.
 
-    v_carson_white has 2 features; querying with both gives Jaccard=1.0.
+def test_match_white_silverado_helper_a():
+    """Operator-owned white Silverado pickup — Jaccard match on distinctive_features.
+
+    v_white_silverado_helper_a has 2 features; querying with both gives Jaccard=1.0.
     """
     candidates = _load_candidates()
-    carson = next(c for c in candidates if c["id"] == "v_carson_white")
+    entry = next(c for c in candidates if c["id"] == "v_white_silverado_helper_a")
     result = match_vehicle(
         {
             "license_plate": None,
@@ -59,16 +88,16 @@ def test_match_carson_white():
         candidates,
     )
     assert result["matched"] is True
-    assert result["id"] == carson["id"]
+    assert result["id"] == entry["id"]
 
 
 def test_match_tesla():
     """Tesla Model Y — Jaccard match on distinctive_features.
 
-    v_rolf_darkblue_tesla_y has 4 features; querying with all gives Jaccard=1.0.
+    v_darkblue_tesla_y_operator has 4 features; querying with all gives Jaccard=1.0.
     """
     candidates = _load_candidates()
-    tesla = next(c for c in candidates if c["id"] == "v_rolf_darkblue_tesla_y")
+    tesla = next(c for c in candidates if c["id"] == "v_darkblue_tesla_y_operator")
     result = match_vehicle(
         {
             "license_plate": None,

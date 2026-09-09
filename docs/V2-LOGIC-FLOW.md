@@ -310,7 +310,7 @@ match_vehicle(vm2_result: dict, candidates: list[dict]) -> dict
 | Reolink cameras    | `<CAM_1_IP>,<CAM_2_IP>,<CAM_6_IP>,<CAM_4_IP>,<CAM_3_IP>,<CAM_7_IP>`    | POST /alert (X-Forwarded-For OK) |
 | vision llama-server| `127.0.0.1:8080/v1/chat/completions`  | Qwen3-VL, PID 76829, -np 4     |
 | Telegram bot       | env: `TELEGRAM_BOT_TOKEN`             | python-telegram-bot v21+      |
-| Home chat          | `<TELEGRAM_CHAT_ID>` (`TELEGRAM_HOME_CHAT_ID`) | Mr. V's home channel          |
+| Home chat          | `<TELEGRAM_CHAT_ID>` (`TELEGRAM_HOME_CHAT_ID`) | operator's home channel   |
 | launchd            | `<HOME_DIR>/Library/LaunchAgents/com.farm.surveillance.v2.plist` | KeepAlive=true, RunAtLoad=true |
 
 ---

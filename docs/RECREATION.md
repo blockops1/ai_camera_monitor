@@ -2,7 +2,7 @@
 
 **Project:** farm-surveillance-v2
 **Purpose:** End-to-end webhook pipeline: Reolink motion → YOLO gate → VM1 (classify) → TG#1 → VM2 (detail) → TG#2 → vehicle match → TG#3
-**Author:** Mr. V (Rolf Versluis) | Operator: Jill (Hermes agent)
+**Author:** the operator | Operator assistant: Hermes agent
 **Status:** active (PRD: PHASE-V2-CORE-PRD-pipeline-buildout)
 **Last updated:** 2026-09-06
 
@@ -132,7 +132,7 @@ Three profiles, all using local `qwen-local` model on port 8093 (35B-A3B MTP lla
 
 1. **Create card:** `hermes kanban create <title> --body @body.md --assignee <profile> --initial-status blocked` — body ≤2500 chars, ACs as grep/python invocations.
 2. **Operator unblocks:** `hermes kanban unblock <id> --reason "<why>"` — converts `blocked/needs_input` → `ready`.
-3. **Subscribe:** `hermes kanban notify-subscribe <id> --platform telegram --chat-id 374999219 --chat-type dm --delivery-mode notify+wake` — Telegram pings on every transition.
+3. **Subscribe:** `hermes kanban notify-subscribe <id> --platform telegram --chat-id <HOME_CHAT_ID> --chat-type dm --delivery-mode notify+wake` — Telegram pings on every transition.
 4. **Dispatcher picks up:** cron tick ≤60s spawns `hermes -p <profile> work kanban task <id>`.
 5. **Worker executes:** reads body, implements, runs ACs, calls `hermes kanban request-review <id> --reviewer <next> --summary "..."`.
 6. **Reviewer approves:** calls `hermes kanban complete <id> --result "..." --summary "..."`.
@@ -161,7 +161,7 @@ hermes kanban reassign <task_id> reviewer --reclaim --reason "manual force-route
 ### Subscribe to all cards on a board
 ```bash
 for tid in $(hermes kanban list --json | jq -r '.[].id'); do
-  hermes kanban notify-subscribe "$tid" --platform telegram --chat-id 374999219 --chat-type dm --delivery-mode notify+wake
+  hermes kanban notify-subscribe "$tid" --platform telegram --chat-id <HOME_CHAT_ID> --chat-type dm --delivery-mode notify+wake
 done
 ```
 
@@ -173,7 +173,7 @@ hermes config set kanban.max_in_progress_per_profile 1 --force
 
 ### Verify pytest is installed in hermes-agent venv
 ```bash
-/Users/jill/.hermes/hermes-agent/venv/bin/pip install pytest
+<HOME_DIR>/.hermes/hermes-agent/venv/bin/pip install pytest
 ```
 
 ---
@@ -181,7 +181,7 @@ hermes config set kanban.max_in_progress_per_profile 1 --force
 ## 8. Listener status (as of 2026-09-06)
 
 **🔴 MAINTENANCE MODE.** Plist disabled:
-`/Users/jill/Library/LaunchAgents/ai.farm.surveillance-listener-refactor.plist.disabled-20260906-1117stripdown`
+|`<HOME_DIR>/Library/LaunchAgents/ai.farm.surveillance-listener-refactor.plist.disabled-20260906-1117stripdown`|
 
 Re-enable only after v2 ships and is verified end-to-end.
 
