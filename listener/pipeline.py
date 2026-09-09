@@ -49,28 +49,28 @@ def _gsum(v: GateVerdict) -> dict:
 
 
 def _crop_paths(crop_a, crop_b) -> tuple[str, str]:
-    a_p, b_p = "/tmp/_ga.jpg", "/tmp/_gb.jpg"
+    a_p, b_p = "/tmp/_ga.png", "/tmp/_gb.png"
     if crop_a is not None:
-        crop_a.save(a_p, format="JPEG")
+        crop_a.save(a_p, format="PNG", optimize=True)
     else:
-        a_p = _tiny_jpeg()
+        a_p = _tiny_png()
     if crop_b is not None:
-        crop_b.save(b_p, format="JPEG")
+        crop_b.save(b_p, format="PNG", optimize=True)
     else:
-        b_p = _tiny_jpeg()
+        b_p = _tiny_png()
     return a_p, b_p
 
-def _tiny_jpeg() -> str:
-    p = "/tmp/_empty.jpg"
-    _J = (
-        b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01"
-        b"\x00\x00\x01\x00\x01\x00\x00\xff\xc0\x00"
-        b"\x09\x01\x01\x01\x01\x01\x11\x00\xff\xdb"
-        b"\x00\x43\x00" + b"\x01" * 64 + b"\xff\xda"
-        b"\x00\x08\x01\x01\x00\x00\x3f\x00\x00\x7f"
-        b"\xff\xff\xd9"
+def _tiny_png() -> str:
+    p = "/tmp/_empty.png"
+    _P = (
+        b"\x89PNG\r\n\x1a\n"
+        b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+        b"\x00\x00\x00\rIDATx\x9cc\xfc\xff\xff?\x00\x05\xfe\x02"
+        b"\xfeA\xb6\x95"
+        b"\x00\x00\x00\x00IEND\xaeB`\x82"
     )
-    Path(p).write_bytes(_J)
+    Path(p).write_bytes(_P)
     return p
 
 
