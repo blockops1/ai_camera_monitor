@@ -9,7 +9,7 @@ INPUTS:
     - ffmpeg_flags: dict | None (optional)
 
 OUTPUTS:
-    - list[str]: JPEG file paths from get_recent_frames
+    - list[str]: PNG file paths from get_recent_frames
 PUBLIC API:
     start() — Open RTSP and start decode loop (idempotent).
     stop(timeout=5.0) — Stop decode loop and close socket (idempotent).
@@ -300,7 +300,7 @@ class PersistentRTSPReader:
     # -- internal helpers --
 
     def _clean_old(self, output_dir: str) -> None:
-        for old in Path(output_dir).glob("frame_*.jpg"):
+        for old in Path(output_dir).glob("frame_*.png"):
             try:
                 old.unlink()
             except OSError:
@@ -326,11 +326,11 @@ class PersistentRTSPReader:
         n: int,
         out_paths: list[str],
     ) -> None:
-        out_path = os.path.join(output_dir, f"frame_{n:03d}.jpg")
+        out_path = os.path.join(output_dir, f"frame_{n:03d}.png")
         if max_size is not None:
             img = img.copy()
             img.thumbnail(max_size, Image.Resampling.LANCZOS)
-        img.save(out_path, quality=85)
+        img.save(out_path, format="PNG", optimize=True)
         out_paths.append(out_path)
 
     def _scheduled_reconnect_watchdog(self) -> None:

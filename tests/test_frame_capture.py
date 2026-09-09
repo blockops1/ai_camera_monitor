@@ -237,7 +237,7 @@ class TestStartStop:
             for fp in frames:
                 assert os.path.isfile(fp)
             reader.stop(timeout=2.0)
-            for old in __import__("pathlib").Path(output_dir).glob("frame_*.jpg"):
+            for old in __import__("pathlib").Path(output_dir).glob("frame_*.png"):
                 old.unlink()
 
 
@@ -312,9 +312,9 @@ class TestGetRecentFrames:
         frames = reader.get_recent_frames(6, "/tmp/test_frames_empty")
         assert frames == []
 
-    def test_writes_jpeg_files(self, mock_av_stream, mock_av_frame):
-        """get_recent_frames() writes JPEGs and returns paths."""
-        output_dir = "/tmp/test_jpeg_write"
+    def test_writes_png_files(self, mock_av_stream, mock_av_frame):
+        """get_recent_frames() writes PNGs and returns paths."""
+        output_dir = "/tmp/test_png_write"
 
         container = MagicMock()
         container.streams.video = [mock_av_stream]
@@ -335,9 +335,9 @@ class TestGetRecentFrames:
             assert len(frames) == 3
             for fp in frames:
                 assert os.path.isfile(fp)
-                assert fp.endswith(".jpg")
+                assert fp.endswith(".png")
             reader.stop(timeout=2.0)
-            for old in __import__("pathlib").Path(output_dir).glob("frame_*.jpg"):
+            for old in __import__("pathlib").Path(output_dir).glob("frame_*.png"):
                 old.unlink()
 
     def test_frame_order_oldest_first(self, mock_av_stream, mock_av_frame):
@@ -361,9 +361,9 @@ class TestGetRecentFrames:
             time.sleep(0.15)
             frames = reader.get_recent_frames(10, output_dir)
             for i, fp in enumerate(frames, start=1):
-                assert fp == os.path.join(output_dir, f"frame_{i:03d}.jpg")
+                assert fp == os.path.join(output_dir, f"frame_{i:03d}.png")
             reader.stop(timeout=2.0)
-            for old in __import__("pathlib").Path(output_dir).glob("frame_*.jpg"):
+            for old in __import__("pathlib").Path(output_dir).glob("frame_*.png"):
                 old.unlink()
 
     def test_ring_bounded_to_maxlen(self, mock_av_stream, mock_av_frame):
@@ -416,8 +416,8 @@ class TestModuleGetRecentFrames:
 
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         for i in range(8):
-            img_path = os.path.join(output_dir, f"frame_{i + 1:03d}.jpg")
-            Image.new("RGB", (640, 480), color="red").save(img_path, quality=85)
+            img_path = os.path.join(output_dir, f"frame_{i + 1:03d}.png")
+            Image.new("RGB", (640, 480), color="red").save(img_path, format="PNG", optimize=True)
 
         # Mock the reader to return all 8 frames
         mock_reader = MagicMock()
@@ -426,7 +426,7 @@ class TestModuleGetRecentFrames:
         def mock_get_recent(n, *args, **kwargs):
             # Return at most n frames
             all_frames = [
-                os.path.join(output_dir, f"frame_{i + 1:03d}.jpg") for i in range(8)
+                os.path.join(output_dir, f"frame_{i + 1:03d}.png") for i in range(8)
             ]
             return all_frames[:n]
 
@@ -448,12 +448,12 @@ class TestModuleGetRecentFrames:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         # Create frames directly in the output dir
         for i in range(2):
-            img_path = os.path.join(output_dir, f"frame_{i + 1:03d}.jpg")
-            Image.new("RGB", (640, 480), color="red").save(img_path, quality=85)
+            img_path = os.path.join(output_dir, f"frame_{i + 1:03d}.png")
+            Image.new("RGB", (640, 480), color="red").save(img_path, format="PNG", optimize=True)
 
         # Make frame_001 old (>6s)
         old_time = time.time() - 10
-        os.utime(os.path.join(output_dir, "frame_001.jpg"), (old_time, old_time))
+        os.utime(os.path.join(output_dir, "frame_001.png"), (old_time, old_time))
 
         # Mock the reader path — the module-level func calls _get_healthy_reader
         # which checks CameraCaptureRegistry. We mock it to return a reader
@@ -461,15 +461,15 @@ class TestModuleGetRecentFrames:
         mock_reader = MagicMock()
         mock_reader.is_healthy.return_value = True
         mock_reader.get_recent_frames.return_value = [
-            os.path.join(output_dir, "frame_001.jpg"),
-            os.path.join(output_dir, "frame_002.jpg"),
+            os.path.join(output_dir, "frame_001.png"),
+            os.path.join(output_dir, "frame_002.png"),
         ]
 
         with patch("infra.frame_capture._get_healthy_reader", return_value=mock_reader):
             result = get_recent_frames("test_cam", n=2, offset_seconds=6)
             # frame_001 is >6s old, so only frame_002 should pass
             assert len(result) == 1
-            assert os.path.basename(result[0]) == "frame_002.jpg"
+            assert os.path.basename(result[0]) == "frame_002.png"
 
     def test_multi_camera_isolation(self, mock_av_stream, mock_av_frame, tmp_path):
         """Two cameras' frames go to different directories."""
@@ -501,8 +501,8 @@ class TestModuleGetRecentFrames:
             time.sleep(0.15)
             reader_b.get_recent_frames(1, output_dir_b)
 
-            assert len(list((tmp_path / "frames_a").glob("frame_*.jpg"))) == 1
-            assert len(list((tmp_path / "frames_b").glob("frame_*.jpg"))) == 1
+            assert len(list((tmp_path / "frames_a").glob("frame_*.png"))) == 1
+            assert len(list((tmp_path / "frames_b").glob("frame_*.png"))) == 1
             reader_a.stop(timeout=2.0)
             reader_b.stop(timeout=2.0)
             CameraCaptureRegistry.clear()
@@ -533,21 +533,21 @@ class TestModuleGetFramesByOffset:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         # Pre-create frames in the output dir
         for i in range(3):
-            img_path = os.path.join(output_dir, f"frame_{i + 1:03d}.jpg")
-            Image.new("RGB", (640, 480), color="red").save(img_path, quality=85)
+            img_path = os.path.join(output_dir, f"frame_{i + 1:03d}.png")
+            Image.new("RGB", (640, 480), color="red").save(img_path, format="PNG", optimize=True)
 
         mock_reader = MagicMock()
         mock_reader.is_healthy.return_value = True
         mock_reader.get_frames_by_offset.return_value = [
-            os.path.join(output_dir, "frame_001.jpg"),
-            os.path.join(output_dir, "frame_003.jpg"),
+            os.path.join(output_dir, "frame_001.png"),
+            os.path.join(output_dir, "frame_003.png"),
         ]
 
         with patch("infra.frame_capture._get_healthy_reader", return_value=mock_reader):
             result = get_frames_by_offset("test_cam", [0, 2])
             assert len(result) == 2
-            assert os.path.basename(result[0]) == "frame_001.jpg"
-            assert os.path.basename(result[1]) == "frame_003.jpg"
+            assert os.path.basename(result[0]) == "frame_001.png"
+            assert os.path.basename(result[1]) == "frame_003.png"
 
     def test_skips_out_of_bounds_indices(self, mock_av_stream, mock_av_frame, tmp_path):
         """get_frames_by_offset skips indices beyond ring length."""
@@ -559,14 +559,14 @@ class TestModuleGetFramesByOffset:
         mock_reader = MagicMock()
         mock_reader.is_healthy.return_value = True
         mock_reader.get_frames_by_offset.return_value = [
-            os.path.join(output_dir, "frame_001.jpg"),
+            os.path.join(output_dir, "frame_001.png"),
         ]
 
         with patch("infra.frame_capture._get_healthy_reader", return_value=mock_reader):
             result = get_frames_by_offset("test_cam", [0, 99, -5])
             # 99 is out of bounds, -5 is out of bounds; only 0 is valid
             assert len(result) == 1
-            assert os.path.basename(result[0]) == "frame_001.jpg"
+            assert os.path.basename(result[0]) == "frame_001.png"
 
     def test_multi_camera_offset_isolation(
         self, mock_av_stream, mock_av_frame, tmp_path
@@ -600,8 +600,8 @@ class TestModuleGetFramesByOffset:
             time.sleep(0.15)
             reader_b.get_frames_by_offset([0, 3], output_dir_b)
 
-            assert len(list((tmp_path / "frames_a").glob("frame_*.jpg"))) == 2
-            assert len(list((tmp_path / "frames_b").glob("frame_*.jpg"))) == 2
+            assert len(list((tmp_path / "frames_a").glob("frame_*.png"))) == 2
+            assert len(list((tmp_path / "frames_b").glob("frame_*.png"))) == 2
             reader_a.stop(timeout=2.0)
             reader_b.stop(timeout=2.0)
             CameraCaptureRegistry.clear()
