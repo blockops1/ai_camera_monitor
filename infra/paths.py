@@ -221,7 +221,7 @@ LLM_CREDS_FILE = os.path.join(PROJECT_ROOT, "llm-creds.env")  # Phase 6B.146
 # so CAMERAS_ENV_FILE wins when present; if it's missing, the
 # legacy parser takes over (back-compat).
 #
-# §13.4 revised 2026-09-08 per Mr. V directive: JSON config keys
+# §13.4 revised 2026-09-08 per operator directive: JSON config keys
 # (motion_gate_thresholds.json, etc.) use camera PREFIXES (FRONT,
 # BACK, OUTSIDE_FRONT_GARAGE, ...) directly — pipeline passes
 # camera_id through unchanged. infra.cameras.code_for() indirection

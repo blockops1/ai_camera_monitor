@@ -528,7 +528,7 @@ def is_gate_enabled(camera_name: str, event_type: str) -> bool:
     capture, no YOLO, no verdict) and the alert routes directly to the
     vehicle/person pipeline downstream.
 
-    Phase 6B.167 §13.4 (revised 2026-09-08 per Mr. V directive): JSON keys
+    Phase 6B.167 §13.4 (revised 2026-09-08 per operator directive): JSON keys
     are camera PREFIXES (FRONT, BACK, ...), not CAM{N} codes. Pipeline
     passes camera_id directly; no translation layer required.
     """
@@ -555,7 +555,7 @@ def load_thresholds(camera_name: str) -> dict[str, float]:
 
     Returns dict mapping COCO class name → confidence threshold (0.0-1.0).
 
-    Phase 6B.167 §13.4 (revised 2026-09-08 per Mr. V directive): JSON keys
+    Phase 6B.167 §13.4 (revised 2026-09-08 per operator directive): JSON keys
     are camera PREFIXES (FRONT, BACK, OUTSIDE_FRONT_GARAGE, ...), not
     CAM{N} codes. The pipeline passes camera_id directly as camera_name;
     no translation layer required. infra.cameras.code_for dropped.

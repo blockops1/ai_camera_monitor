@@ -1,7 +1,7 @@
 """
 vm1_prompt.py — Vision Model 1: classify subject from 2 crops alone.
 
-Operator-locked contract (Rolf 2026-09-06):
+Operator-locked contract (the operator 2026-09-06):
   "No I don't want any hint given to vision model one of what it is in
   any image. It needs to figure out from the two crops alone what the
   object is."

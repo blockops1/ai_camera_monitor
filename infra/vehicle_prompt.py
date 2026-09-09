@@ -5,7 +5,7 @@ Stage 6 (VM2) of the linear pipeline. Triggered when VM1 (or the YOLO
 gate, defensively) classifies the moving subject as `vehicle`. Output
 is consumed by the pure vehicle matcher (vehicle_matcher.match).
 
-Operator-locked contract (Rolf 2026-09-06):
+Operator-locked contract (the operator 2026-09-06):
   "the threat-level" is NOT requested. TG#2 contains 2 crops + VM2
   output; no threat classification. This prompt follows that —
   vehicle identification + description only, no threat assessment.

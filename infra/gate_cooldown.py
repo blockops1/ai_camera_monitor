@@ -159,7 +159,7 @@ def get_gate_cooldown_seconds(camera_name: str, event_type: str) -> int:
     Returns the window in seconds. 0 means "no cooldown; do not suppress".
     Does NOT touch the in-memory map.
 
-    Phase 6B.167 §13.4 (revised 2026-09-08 per Mr. V directive): JSON keys
+    Phase 6B.167 §13.4 (revised 2026-09-08 per operator directive): JSON keys
     are camera PREFIXES (FRONT, BACK, ...), not CAM{N} codes. Pipeline
     passes camera_id directly; no translation layer required.
     infra.cameras.code_for dropped.

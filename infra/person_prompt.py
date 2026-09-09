@@ -6,7 +6,7 @@ gate) classifies the moving subject as `person`. Output consumed by
 the person matcher (vehicle_matcher.match on a person subject) and the
 Telegram formatter.
 
-Operator-locked contract (Rolf 2026-09-06):
+Operator-locked contract (the operator 2026-09-06):
   "the threat-level" is NOT requested. TG#2 contains 2 crops + VM2
   output; no threat classification. This prompt follows that —
   person identification + description only, no threat assessment.
