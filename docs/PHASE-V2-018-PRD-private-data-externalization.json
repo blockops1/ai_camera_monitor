@@ -183,16 +183,15 @@
       ],
       "rationale": "Code comments are public by default once on GitHub. Even header docstrings should not name the operator.",
       "passes": true,
-      "attempts": 1,
+      "attempts": 0,
       "last_error": null,
       "commit_sha": "20690d9",
-      "task_id": "t_7011badd",
-      "last_verified_at": "2026-09-08T22:44"
+      "task_id": "t_7011badd"
     },
     {
       "id": "US-018g",
       "title": "replace chat identifier digits in PRD/markdown/HTML prose with <HOME_CHAT_ID> placeholder",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [
         "US-018f"
       ],
@@ -213,16 +212,17 @@
         "AC4: pytest not affected (docs only)."
       ],
       "rationale": "Chat identifier is a long-lived secret that cannot rotate trivially (the operator's phone must re-subscribe). Even one literal leak in a committed file means the identifier is permanently in git history; sanitization is irreversible only by force-pushing or rotating the chat.",
-      "passes": false,
-      "attempts": 0,
+      "passes": true,
+      "attempts": 1,
       "last_error": null,
-      "commit_sha": null,
-      "task_id": "t_d2396f4e"
+      "commit_sha": "46dec63",
+      "task_id": "t_d2396f4e",
+      "last_verified_at": "2026-09-08T23:35"
     },
     {
       "id": "US-018h",
       "title": "rename TELEGRAM_CHAT_ID placeholder in telegram-creds.env.example to match the runtime env var name",
-      "status": "todo",
+      "status": "in_progress",
       "depends_on": [],
       "estimate_loc": 10,
       "files": [
@@ -239,7 +239,7 @@
       "attempts": 0,
       "last_error": null,
       "commit_sha": null,
-      "task_id": null
+      "task_id": "t_64f296df"
     },
     {
       "id": "US-018i",
