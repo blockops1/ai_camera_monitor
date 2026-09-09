@@ -119,6 +119,8 @@ def run(alert: dict) -> dict:
 
     # Stage 3: load 4 frames.
     frames = list(alert.get("frames", []))
+    if not frames:
+        raise RuntimeError(f"no frames captured from camera {camera_id}, refusing to process alert {alert.get('id')}")
 
     # Stage 4: run YOLO gate.
     gate_verdict = run_gate(
@@ -145,9 +147,9 @@ def run(alert: dict) -> dict:
     a_p, b_p = _crop_paths(gate_verdict.crop_a, gate_verdict.crop_b)
     vm1_result = verify_class(a_p, b_p)
 
-    diff = gate_verdict.pairwise_diff_path or (
-        frames[-1] if frames else "/tmp/diff.png"
-    )
+    if gate_verdict.pairwise_diff_path is None:
+        raise RuntimeError(f"gate produced no pairwise_diff for alert {alert.get('id')}")
+    diff = gate_verdict.pairwise_diff_path
     tg1 = build_alert_message(
         verdict=gate_verdict,
         vm1_result=vm1_result,
