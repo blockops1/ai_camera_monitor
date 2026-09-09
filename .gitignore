@@ -32,3 +32,4 @@ logs/*.log
 # archives / copy-targets
 /public/
 /scratch/
+.kanban-bodies/
