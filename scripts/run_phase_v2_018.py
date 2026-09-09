@@ -51,7 +51,7 @@ TELEGRAM_CHAT_ID = _os.environ['OPERATOR_TELEGRAM_CHAT_ID']
 CODER_PROFILE = _os.environ.get('DRIVER_CODER_PROFILE', 'coder')
 MAX_STORY_ATTEMPTS = 2
 POLL_INTERVAL_SEC = 60
-MAX_STORY_DURATION_SEC = 75 * 60  # 75 minutes per story (coder + QA + reviewer; big docs stories need ~30 min QA)
+MAX_STORY_DURATION_SEC = 120 * 60  # 120 minutes per story (coder + QA + reviewer; US-018e took 110min total coder/QA/reviewer; reviewer can hang)
 
 
 # ----------------------------------------------------------------------------
@@ -365,6 +365,23 @@ def run_story(story: dict, prd: dict, state: dict) -> str:
         save_prd(prd)
         return 'retry'
 
+    # Verify: scanner (PII leak detection — operator handles, IPs, chat id, etc.)
+    # NOTE: best-effort warning only. Scanner covers many PII patterns but may flag
+    # out-of-scope leaks for stories that don't address them. We log and continue;
+    # the final US-018j story enforces scanner-clean as the canonical gate.
+    scanner = REPO / 'scripts' / 'check_no_private_data.py'
+    if scanner.is_file():
+        rc, scan_out, _ = sh(['.venv/bin/python3.11', str(scanner)], timeout=60)
+        if rc == 1:
+            # scanner found leaks (exit 1 = leaks, exit 0 = clean) — log + continue
+            log(f'  SCANNER WARN after {sid} (leaks found, will be addressed by in-scope stories)')
+            log(f'  SCANNER OUTPUT: {scan_out[:1500]}')
+            notify(f'SCANNER WARN after {sid}: {scan_out[:1000]}')
+        elif rc not in (0, 1):
+            log(f'  SCANNER ERROR rc={rc} out={scan_out[:500]} — continuing')
+        else:
+            log(f'  scanner clean on {sid}')
+
     # Verify: daemon still alive
     alive, msg = check_daemon_alive()
     if not alive:
@@ -424,6 +441,11 @@ def main():
 
         # If a start was specified and we've passed it, reset start so subsequent picks are by deps
         args.start = None
+
+        # Skip stories already passed (e.g., operator manual recovery landed a commit)
+        if story.get('passes') and story.get('status') == 'done':
+            log(f'  {story["id"]} already passes=True commit={story.get("commit_sha")} — skipping')
+            continue
 
         result = run_story(story, prd, state)
         if result == 'blocked':

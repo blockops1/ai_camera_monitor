@@ -130,7 +130,7 @@
     {
       "id": "US-018e",
       "title": "anonymize operator and helper handles in data/vehicles/known_vehicles.json",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [
         "US-018d"
       ],
