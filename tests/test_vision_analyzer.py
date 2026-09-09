@@ -9,7 +9,9 @@ Tests the following behaviors:
   5. ALL call sites send response_format with type=json_schema + strict=True
      + the canonical SCHEMA_JSON dict from the prompt module.
   6. ALL call sites use the canonical model name "qwen3-vl-8b".
-  7. Each VM2 mode's response_format references its own SCHEMA_JSON.
+  7. VM2 prompt schemas declare the keys downstream code reads.
+  8. Schema-prompt contract: VM1 declares class+confidence; VM2 modes declare
+     class_confirmed + detail keys; NO schema has threat-level fields.
 """
 
 from unittest.mock import MagicMock, patch
@@ -177,6 +179,7 @@ class TestLlamaServerPayload:
         assert rf["type"] == "json_schema"
         assert rf["strict"] is True
         assert rf["schema"] is PERSON_SCHEMA
+        assert payload["model"] == "qwen3-vl-8b"
 
     def test_detail_class_animal_payload_uses_strict_json_schema(self, sample_frames):
         """detail_class(animal) sends the animal schema."""
@@ -196,16 +199,7 @@ class TestLlamaServerPayload:
         assert rf["type"] == "json_schema"
         assert rf["strict"] is True
         assert rf["schema"] is ANIMAL_SCHEMA
-
-    def test_all_modes_use_same_model(self):
-        """All VM2 modes reference the same model name."""
-        for entry in DISPATCH.values():
-            # Dispatch table stores (response_format, prompt_fn) tuples;
-            # response_format dict is the constraint layer.
-            rf = entry[0]
-            assert rf["type"] == "json_schema"
-            assert rf["strict"] is True
-            assert "schema" in rf
+        assert payload["model"] == "qwen3-vl-8b"
 
 
 class TestSchemaContract:
