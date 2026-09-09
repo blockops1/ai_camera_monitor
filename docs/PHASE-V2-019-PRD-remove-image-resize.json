@@ -6,14 +6,15 @@
   "phase": "v2-pipeline-cleanup",
   "plan_section": "v2-input-pipeline",
   "trigger": "operator directive 2026-09-09: 'Research the statement that you just made the yolo require a 640x640 image.' followed by 'draft a PRD story or multiple stories that removes the messing around with resizing, uses a Yolo that can accept the native crop as we send it to it, and works into the existing system. Also add a Prd story to remove the supposedly dead code for image resizing that you mentioned in the other part of the system.'",
-  "background": "The v2 quick-classifier pipeline currently letterboxes every crop to 640×640 before feeding it to the YOLOv8n ONNX model, then un-pads the bounding boxes back to native coordinates. This letterbox+invert dance exists because the ONNX model was exported with static 640×640 input dims — verified directly via onnxruntime in session 2026-09-09: model input is locked to '[1, 3, 640, 640]'. Ultralytics YOLOv8 supports a `dynamic=True` export flag that replaces these dims with symbolic axes so the same ONNX file accepts any (h, w) at inference time. Additionally, infra/frame_capture.py:_save_one() contains an opt-in img.thumbnail() call (line 332) that resizes frames at save-time when max_size is passed. The single production caller — listener/daemon.py:get_recent_frames() — does NOT pass max_size, so this branch is dead code today. Both paths must go: dynamic-YOLO eliminates the letterbox step from the hot path entirely; thumbnail deletion removes a foot-gun where a future caller passing max_size would silently downscale frames before Telegram delivery.",
-  "shipping_definition": "All five US-019 stories marked done; pytest 132/132 (or higher) green; tree clean; grep -rE 'resize\\(|letterbox|thumbnail\\(' over the production source tree returns only the new dynamic-axes handling in quick_classifier (and zero hits in frame_capture.py); the new models/yolov8n_dynamic.onnx is committed and verified to accept native-resolution input via onnxruntime; the daemon is running on the new model and one live alert has round-tripped through the new pipeline successfully.",
+  "background": "The v2 quick-classifier pipeline currently letterboxes every crop to 640×640 before feeding it to the YOLOv8n ONNX model, then un-pads the bounding boxes back to native coordinates. This letterbox+invert dance exists because the ONNX model was exported with static 640×640 input dims — verified directly via onnxruntime in session 2026-09-09: model input is locked to '[1, 3, 640, 640]'. Ultralytics YOLOv8 supports a `dynamic=True` export flag that replaces these dims with symbolic axes so the same ONNX file accepts any (h, w) at inference time. Additionally, infra/frame_capture.py:_save_one() contains an opt-in img.thumbnail() call (line 332) that resizes frames at save-time when max_size is passed. The single production caller — listener/daemon.py:get_recent_frames() — does NOT pass max_size, so this branch is dead code today. Both paths must go: dynamic-YOLO eliminates the letterbox step from the hot path entirely; thumbnail deletion removes a foot-gun where a future caller passing max_size would silently downscale frames before Telegram delivery.\n\nSeparately, the operator issued a direct directive on 2026-09-09 that v2 must contain zero JPEG anywhere in the application code. The reasoning: JPEG lossy compression degrades identifying features (license plates, faces, vehicle distinguishing details) through its quantization artifacts. The directive is independent of Telegram — Telegram is irrelevant to the constraint; the data layer must be lossless regardless of where the image eventually ends up. v2 currently writes JPEG in exactly two production paths: (1) infra/frame_capture.py:_save_one() saves each in-memory ring buffer frame as JPEG q85 (line 333), and (2) listener/pipeline.py:_crop_paths() saves vision-payload crops as JPEG q75 (PIL default, lines 54 and 58), with a _tiny_jpeg() hardcoded JPEG sentinel fallback (line 63-74) and a stale `.jpg` literal at line 141. Two more save points — infra/frame_diff.py:crop_frame_to_bbox() (line 601) and infra/gate.py:save_pairwise_diff() (line 263) — already write lossless PNG per §11.88 (2026-09-01), but their docstrings still claim `.jpg`. The vision-payload MIME type is determined by file extension at infra/vision_analyzer.py:71 (`mime = 'image/png' if ext == '.png' else 'image/jpeg'`), so renaming the saved files from .jpg to .png automatically switches the wire format to image/png.",
+  "shipping_definition": "All US-019 stories marked done; pytest 132/132 (or higher) green; tree clean; grep -rE 'resize\\(|letterbox|thumbnail\\(' over the production source tree returns only the new dynamic-axes handling in quick_classifier (and zero hits in frame_capture.py); grep -rE 'format=\"JPEG\"|\\.jpg\\b|\\.jpeg\\b' over the production source tree returns zero hits (no JPEG anywhere in v2 application code); the new models/yolov8n_dynamic.onnx is committed and verified to accept native-resolution input via onnxruntime; the daemon is running on the new model and one live alert has round-tripped through the new pipeline successfully with PNG crops end-to-end.",
   "scope_exclusions": [
     "Retraining YOLOv8n with custom classes is NOT in this PRD — we keep the stock COCO-trained model. Dynamic export changes only the input-shape handling, not the weights.",
     "Switching to a larger YOLO variant (yolov8s/m/l/x) is NOT in this PRD. Model file size stays around 13 MB.",
     "Re-tuning motion_gate confidence thresholds against the dynamic model is NOT in this PRD. The same post-NMS thresholds should work; if accuracy regresses on real alerts, that's a follow-up.",
-    "Removing the in-memory JPEG crop save in listener/pipeline.py:54,58 is NOT in this PRD — those saves use PIL's default JPEG quality (75, hardcoded in PIL) and are not resize operations. Changing those is a separate question about vision-LLM payload size, not about image fidelity.",
-    "Per-camera input-size selection (e.g., 1280 for OFG/OFP, 1920 for FRONT) is NOT in this PRD — we feed the native crop at whatever resolution it arrives. Camera-specific sizing is a future optimization."
+    "Per-camera input-size selection (e.g., 1280 for OFG/OFP, 1920 for FRONT) is NOT in this PRD — we feed the native crop at whatever resolution it arrives. Camera-specific sizing is a future optimization.",
+    "Building/repairing the Telegram delivery path (the missing code that POSTs tg1/tg2/tg3 to api.telegram.org) is NOT in this PRD — that's a separate question about the architecture diagram's planned-but-not-built send_photo path. This PRD only removes JPEG from the data layer; how (or whether) images reach Telegram is orthogonal.",
+    "Re-encoding PNG to JPEG on the Telegram server side is NOT in v2's control. Telegram's sendPhoto API always server-side-recompresses to JPEG at 0.87 compression (~q87). If lossless end-to-end delivery to chat is required, the future Telegram delivery code must use sendDocument instead of sendPhoto — but that's outside this PRD's scope."
   ],
   "design_principles": [
     "Dynamic axes, dynamic output: when input shape changes, output shape changes too (8400 anchors at 640², 25200 at 1280², etc.). All output-shape math must be derived from the output tensor's actual shape, never hard-coded.",
@@ -21,9 +22,120 @@
     "Native crop in, native bbox out: the YOLO call now consumes the crop at its native resolution and returns bounding boxes already in native coordinates. No un-padding step.",
     "Keep the original ONNX file as a fallback: rename models/yolov8n.onnx to models/yolov8n_static_640.onnx (kept for A/B comparison) instead of deleting. The new dynamic model becomes models/yolov8n.onnx so the existing MODEL_PATH config default still works.",
     "Operator-visible test: at least one test must feed a non-square crop (e.g., 1920×1080 or 1280×720) to the loaded model and assert the inference path completes without reshaping error. This is the regression guard against re-introducing a static assumption.",
-    "Scanner scope: the no-resize regression scanner only walks production source files (infra/, listener/, vehicle_position/, telegram_formatter/). It excludes tests/, models/, scripts/, docs/, archive/, data/, .venv/, .git/. The PRD files themselves naturally mention the words being removed (letterbox, thumbnail, resize) in prose describing the cleanup — that's expected and the scanner must not flag them."
+    "Scanner scope: the no-resize regression scanner only walks production source files (infra/, listener/, vehicle_position/, telegram_formatter/). It excludes tests/, models/, scripts/, docs/, archive/, data/, .venv/, .git/. The PRD files themselves naturally mention the words being removed (letterbox, thumbnail, resize) in prose describing the cleanup — that's expected and the scanner must not flag them.",
+    "Zero JPEG, period: no JPEG in any production save path. Identification fidelity is the operator's invariant (license plates, faces, distinguishing details degrade under JPEG quantization artifacts). PNG is the canonical v2 wire format for any image written to disk by application code. WebP is acceptable where llama.cpp + telegram_formatter can consume it without re-encoding; BMP is acceptable for the tiny sentinel fallback. JPG/JPEG are forbidden regardless of quality setting, output destination, or downstream consumer — Telegram delivery is irrelevant to the constraint.",
+    "Existing lossless PNG paths stay as-is: infra/frame_diff.py:crop_frame_to_bbox() (line 601, writes `.png`) and infra/gate.py:save_pairwise_diff() (line 263, writes `pairwise_diff.png`) are already lossless per §11.88 (2026-09-01). Only their stale `.jpg` docstrings get corrected (US-019h).",
+    "MIME type follows file extension: infra/vision_analyzer.py:71 (`mime = 'image/png' if ext == '.png' else 'image/jpeg'`) handles the llama-server wire format automatically once the saved file is renamed `.png`. No change to vision_analyzer.py is required for the JPEG kill — the extension rename is enough.",
+    "Sentinel fallback becomes a tiny PNG blob: listener/pipeline.py:_tiny_jpeg() (lines 63-74) currently writes a hardcoded 1×1 JPEG sentinel. It must become _tiny_png() — a hardcoded 1×1 RGBA PNG sentinel. PIL can build this at module import time via `Image.new('RGBA', (1, 1), (0, 0, 0, 0)).save('/tmp/_empty.png', format='PNG')`, but since we don't want to write to disk at import, use the static PNG byte literal from PIL's docs (`b'\\x89PNG\\r\\n\\x1a\\n...'`)."
   ],
   "stories": [
+    {
+      "id": "US-019f",
+      "title": "kill JPEG in infra/frame_capture.py ring buffer — switch ring frames to PNG lossless",
+      "status": "todo",
+      "depends_on": [],
+      "estimate_loc": 10,
+      "files": [
+        "infra/frame_capture.py",
+        "tests/test_frame_capture.py"
+      ],
+      "card_body_fallback": "**Story.** infra/frame_capture.py:_save_one() (line 329) writes ring buffer frames as `frame_NNN.jpg` and at line 333 calls `img.save(out_path, quality=85)`. The JPEG format is identification-degrading: each ring frame gets quantized, and downstream consumers (gate, pipeline, future telegram) read back lossy pixel data. Switch to PNG lossless. Rewrites: (1) line 329 — rename `frame_NNN.jpg` to `frame_NNN.png`. (2) line 333 — change `img.save(out_path, quality=85)` to `img.save(out_path, format='PNG', optimize=True)`. (3) line 303 in `_clean_old()` — change the glob from `frame_*.jpg` to `frame_*.png` so the existing ring-buffer cleanup behavior stays correct. (4) Update tests/test_frame_capture.py so any test that asserts on file extension `.jpg` now asserts `.png`. **Why first story (no deps):** ring buffer is independent of YOLO and independent of pipeline.py's vision-payload crops. Doing it first means every later test sees PNG frames, not JPEG. **Why estimate 10 LOC:** file extension swap + save-call change + glob change + test updates is mechanical. **Disk cost note:** ring buffer goes from ~250 KB/frame JPEG q85 to ~1.5 MB/frame PNG; on 6 cameras × 180 frames that's ~270 MB → ~1.6 GB. Acceptable on a 64 GB Mac mini.",
+      "ac": [
+        "AC1: grep -nE 'frame_.*\\.jpg|quality=85|format=\"JPEG\"' infra/frame_capture.py returns zero hits.",
+        "AC2: grep -nE 'frame_.*\\.png|format=\"PNG\"' infra/frame_capture.py returns at least 3 hits (the new save path, the new glob in _clean_old, and the file extension).",
+        "AC3: pytest 132/132 (or higher) green after the change; tests/test_frame_capture.py passes with the renamed extension.",
+        "AC4: when the daemon runs and saves a ring frame, the file on disk is named frame_NNN.png and `file frame_NNN.png` reports PNG image data.",
+        "AC5: one commit, message 'refactor(v2): US-019f — kill JPEG in frame_capture ring buffer, switch to PNG'."
+      ],
+      "rationale": "The ring buffer is the source of all downstream frames. If it writes lossy JPEG, every consumer (gate, pipeline, telegram) sees lossy data even after the JPEG kill in pipeline.py. This story is the floor.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
+    },
+    {
+      "id": "US-019g",
+      "title": "kill JPEG in listener/pipeline.py vision payload — switch crops to PNG lossless + tiny PNG sentinel",
+      "status": "todo",
+      "depends_on": [],
+      "estimate_loc": 15,
+      "files": [
+        "listener/pipeline.py",
+        "tests/test_pipeline.py"
+      ],
+      "card_body_fallback": "**Story.** listener/pipeline.py:_crop_paths() (lines 51-60) saves vision-payload crops as `/tmp/_ga.jpg` and `/tmp/_gb.jpg` via `crop.save(p, format='JPEG')` (lines 54 and 58). These crops are PIL.Image objects produced by infra/gate.py:crop_a / crop_b at full native resolution — saving them as JPEG q75 (PIL default) destroys identification detail exactly where it matters most (this is the crop about to be sent to Qwen3-VL for verification, then to Telegram). Switch to PNG lossless. (1) Line 52 — rename `/tmp/_ga.jpg` and `/tmp/_gb.jpg` to `/tmp/_ga.png` and `/tmp/_gb.png`. (2) Lines 54 and 58 — change `format='JPEG'` to `format='PNG', optimize=True`. (3) Replace the `_tiny_jpeg()` function (lines 63-74) with `_tiny_png()` returning a 1×1 PNG byte blob. Use PIL's documented PNG file-header bytes: `b'\\x89PNG\\r\\n\\x1a\\n\\x00\\x00\\x00\\rIHDR\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x01\\x08\\x06\\x00\\x00\\x00\\x1f\\x15\\xc4\\x89\\x00\\x00\\x00\\rIDATx\\x9cc\\xfc\\xff\\xff?\\x00\\x05\\xfe\\x02\\xfeA\\xb6\\x95\\x00\\x00\\x00\\x00IEND\\xaeB`\\`\\x82'`. Update the sentinel write path (line 64) to `/tmp/_empty.png`. (4) Verify infra/vision_analyzer.py:71 auto-switches MIME to `image/png` once the extension is `.png` (already correct, no change needed). **Why no deps on US-019f:** pipeline.py crops come from gate.py, not frame_capture; they're already in-memory PIL objects. **Why estimate 15 LOC:** rename + save-call change + sentinel byte literal + test updates.",
+      "ac": [
+        "AC1: grep -nE 'format=\"JPEG\"|_tiny_jpeg|/tmp/_ga\\.jpg|/tmp/_gb\\.jpg|/tmp/_empty\\.jpg' listener/pipeline.py returns zero hits.",
+        "AC2: grep -nE 'format=\"PNG\"|_tiny_png|/tmp/_ga\\.png|/tmp/_gb\\.png|/tmp/_empty\\.png' listener/pipeline.py returns at least 4 hits.",
+        "AC3: pytest 132/132 (or higher) green after the change; tests/test_pipeline.py passes with the new PNG sentinel.",
+        "AC4: when the daemon runs and a crop is saved, `file /tmp/_ga.png` reports PNG image data and `mimetype /tmp/_ga.png` reports `image/png`.",
+        "AC5: one commit, message 'refactor(v2): US-019g — kill JPEG in pipeline.py vision payload, switch to PNG + tiny PNG sentinel'."
+      ],
+      "rationale": "These crops are the inputs to Qwen3-VL identification. JPEG q75 here directly degrades what the vision LLM can see about license plates, faces, distinguishing features. PNG lossless is the floor.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
+    },
+    {
+      "id": "US-019h",
+      "title": "fix remaining stale JPEG literals — pipeline.py fallback path + frame_diff.py stale docstring + gate.py stale docstring",
+      "status": "todo",
+      "depends_on": [],
+      "estimate_loc": 5,
+      "files": [
+        "listener/pipeline.py",
+        "infra/frame_diff.py",
+        "infra/gate.py"
+      ],
+      "card_body_fallback": "**Story.** Three leftover JPEG references in production code: (1) listener/pipeline.py:141 contains a literal `/tmp/diff.jpg` as a fallback when `gate_verdict.pairwise_diff_path` is None and `frames` is empty. In practice `frames` is always non-empty (it's the in-memory ring buffer from get_recent_frames), so this path is unreachable today, but the literal still must reflect PNG consistency. Rename `/tmp/diff.jpg` → `/tmp/diff.png`. (2) infra/frame_diff.py:582 docstring says `Naming: `<stem>_crop<x>_<y>_<w>x<h>.jpg` next to the source frame.` — the actual code at line 601 writes `<stem>_crop<x>_<y>_<w>x<h>.png` (lossless, per §11.88 2026-09-01). Fix the docstring to match the actual behavior. (3) infra/gate.py:262 has a comment `§11.88 (2026-09-01) — PNG lossless, NOT JPEG q90.` which is correct, but the function-level docstring at the top of save_pairwise_diff() still references the old JPEG behavior. Search and fix. **Why no deps:** these are pure stale-reference fixes, no behavior change. **Why estimate 5 LOC:** docstring + literal renames.",
+      "ac": [
+        "AC1: grep -nE 'diff\\.jpg|/tmp/diff\\.jpg' listener/pipeline.py returns zero hits.",
+        "AC2: grep -nE '\\.jpg' infra/frame_diff.py returns zero hits (the stale docstring is gone).",
+        "AC3: grep -nE 'format=\"JPEG\"|\\.jpg' infra/gate.py returns zero hits (any stale reference is fixed).",
+        "AC4: pytest 132/132 (or higher) green after the change.",
+        "AC5: one commit, message 'chore(v2): US-019h — fix stale .jpg docstrings and literals'."
+      ],
+      "rationale": "Stale references to JPEG in code that actually writes PNG are a documentation lie that confuses future readers (and confuses scanners). Fix them so the codebase matches reality.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
+    },
+    {
+      "id": "US-019i",
+      "title": "add no-jpeg regression scanner + Makefile + pre-push hook",
+      "status": "todo",
+      "depends_on": [
+        "US-019f",
+        "US-019g",
+        "US-019h"
+      ],
+      "estimate_loc": 30,
+      "files": [
+        "scripts/check_no_jpeg.py",
+        "tests/test_check_no_jpeg.py",
+        "Makefile",
+        ".git/hooks/pre-push"
+      ],
+      "card_body_fallback": "**Story.** With US-019f/g/h done, v2 should contain zero JPEG references in production source. Install a regression guard so future changes can't reintroduce `format='JPEG'`, `.jpg` extensions, or `_tiny_jpeg()` style hardcoded blobs. (1) Write scripts/check_no_jpeg.py — a static scanner that walks ONLY the production source tree (infra/, listener/, vehicle_position/, telegram_formatter/) and flags any match against the regex `format=['\"]JPEG['\"]|\\.jpg['\"]|\\.jpeg['\"]|image/jpeg|content-type.*jpeg`. Explicitly exclude tests/, models/, scripts/, docs/, archive/, data/, .venv/, .git/, and the docs/PHASE-V2-019-PRD-remove-image-resize.json file itself (which naturally mentions JPEG in scope_exclusion prose). (2) Write tests/test_check_no_jpeg.py that imports the scanner and asserts it produces zero matches on the current production tree. (3) Wire into the Makefile — add `make check-no-jpeg` target and chain it into `make check-privacy` (or add a new `make check-all` that runs all three scanners in sequence: privacy, no-resize, no-jpeg). (4) Update .git/hooks/pre-push to run the new scanner. **Why depends on f, g, h:** the test must run AFTER all three stories so it passes against the JPEG-free tree. **Why estimate 30 LOC:** same pattern as the existing check_no_private_data.py guard, ~30 LOC for scanner + test + Makefile + hook.",
+      "ac": [
+        "AC1: scripts/check_no_jpeg.py exists, runs cleanly, exits 0 on the current production tree, exits non-zero (with file:line output) on a synthetic offending file.",
+        "AC2: tests/test_check_no_jpeg.py exists and passes — it asserts the scanner produces zero matches on the v2 production tree as it stands after US-019f/g/h.",
+        "AC3: `make check-no-jpeg` (or the equivalent chained target) runs the JPEG scanner and exits 0.",
+        "AC4: pytest 132/132 (or higher) green after the change.",
+        "AC5: one commit, message 'feat(v2): US-019i — no-jpeg scanner + Makefile + pre-push wiring'."
+      ],
+      "rationale": "Without a guard, the JPEG surface can grow back the same way it grew the first time (a one-line `format='JPEG'` quietly added in a future PR). The scanner makes the operator's 'zero JPEG' invariant mechanically enforceable.",
+      "passes": false,
+      "attempts": 0,
+      "last_error": null,
+      "commit_sha": null,
+      "task_id": null
+    },
     {
       "id": "US-019a",
       "title": "export a dynamic-input YOLOv8n ONNX model and verify it accepts variable input shapes",
