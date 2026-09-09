@@ -12,15 +12,16 @@ Operator-locked contract (the operator 2026-09-06):
 
 Schema (response_format layer):
   {
-    "make":            string|null,
-    "model":           string|null,
-    "color":           string|null,
-    "type":            string|null,   # sedan, pickup, SUV, ...
-    "plate_visible":   enum["yes", "no", "unsure"],
-    "plate_text":      string|null,
-    "distinctive":     string[],      # 1-5 re-ID markers
-    "description":     string,
-    "confidence":      enum["definite", "likely", "unsure"]
+    "class_confirmed":     enum["vehicle", "person", "animal", "unsure"],
+    "make":                string|null,
+    "model":               string|null,
+    "color":               string|null,
+    "type":                string|null,   # sedan, pickup, SUV, ...
+    "plate_visible":       enum["yes", "no", "unsure"],
+    "license_plate":       string|null,
+    "distinctive_features": string[],     # 1-5 re-ID markers
+    "description":         string,
+    "confidence":          enum["definite", "likely", "unsure"]
   }
 """
 from __future__ import annotations
@@ -28,6 +29,11 @@ from __future__ import annotations
 SCHEMA_JSON: dict = {
     "type": "object",
     "properties": {
+        "class_confirmed": {
+            "type": "string",
+            "enum": ["vehicle", "person", "animal", "unsure"],
+            "description": "Confirm the class (should match VM1). If you disagree with VM1, set the correct class here.",
+        },
         "make": {
             "type": ["string", "null"],
             "description": "Make: Ford, Toyota, Chevy, ... Use the most specific you can read.",
@@ -49,11 +55,11 @@ SCHEMA_JSON: dict = {
             "enum": ["yes", "no", "unsure"],
             "description": "Is a license plate visible in either crop?",
         },
-        "plate_text": {
+        "license_plate": {
             "type": ["string", "null"],
             "description": "License plate text if readable. null if not visible or unreadable. Don't guess.",
         },
-        "distinctive": {
+        "distinctive_features": {
             "type": "array",
             "items": {"type": "string"},
             "minItems": 0,
@@ -70,7 +76,7 @@ SCHEMA_JSON: dict = {
             "description": "Overall call certainty.",
         },
     },
-    "required": ["plate_visible", "distinctive", "description", "confidence"],
+    "required": ["class_confirmed", "plate_visible", "distinctive_features", "description", "confidence"],
     "additionalProperties": False,
 }
 
@@ -82,7 +88,7 @@ angles or moments.
 Identify the vehicle. Use the most specific terms you can read; null
 when you cannot read something rather than guessing.
 
-For distinctive, list 1-5 features that distinguish THIS vehicle from
+For distinctive_features, list 1-5 features that distinguish THIS vehicle from
 similar vehicles. Examples: front bumper dent, magnetic sign on driver
 door, roof rack, auxiliary lights, rust on rear quarter, mud flap
 decal, aftermarket wheels, window decal. Generic descriptors like
@@ -91,7 +97,7 @@ vehicles.
 
 For plate_visible, return 'yes' only if you can read plate characters
 clearly. 'unsure' if a plate is present but blurry. 'no' if no plate
-is visible. Don't guess at plate_text when you cannot read it — null
+is visible. Don't guess at license_plate when you cannot read it — null
 beats a wrong guess.
 
 Confidence:
@@ -99,7 +105,19 @@ Confidence:
   - likely   — best call but caveats (lighting, partial occlusion)
   - unsure   — guessing between plausible alternatives
 
-Respond ONLY with JSON matching the schema. No prose, no markdown.
+Respond ONLY with JSON. The JSON object MUST have exactly these keys:
+  - "class_confirmed"     — one of: vehicle, person, animal, unsure
+  - "make"                — string|null
+  - "model"               — string|null
+  - "color"               — string|null
+  - "type"                — string|null (sedan, pickup, SUV, ...)
+  - "plate_visible"       — one of: yes, no, unsure
+  - "license_plate"       — string|null
+  - "distinctive_features" — array of 0-5 strings
+  - "description"         — string
+  - "confidence"          — one of: definite, likely, unsure
+
+No prose, no markdown, no keys outside the list above.
 """
 
 # Canonical mode name for the response_format dispatch layer (Rule 8a).

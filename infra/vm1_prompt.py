@@ -63,7 +63,14 @@ Set confidence:
   - likely   — best call but with caveats (lighting, partial occlusion)
   - unsure   — guessing between plausible alternatives
 
-Respond ONLY with JSON matching the schema. No prose, no markdown.
+Respond ONLY with JSON. The JSON object MUST have exactly these two keys:
+  - "class"      — one of: vehicle, person, animal, unsure
+  - "confidence" — one of: definite, likely, unsure
+
+Example valid output:
+{"class": "vehicle", "confidence": "likely"}
+
+No prose, no markdown, no keys outside "class" and "confidence".
 """
 
 # Canonical mode name for the response_format dispatch layer (Rule 8a).
