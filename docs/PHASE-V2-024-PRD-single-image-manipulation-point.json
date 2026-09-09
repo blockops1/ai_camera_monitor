@@ -1,0 +1,123 @@
+{
+  "prd_id": "PHASE-V2-024",
+  "title": "single image-manipulation point + pairwise differential composite port",
+  "author": "the operator",
+  "status": "active",
+  "phase": "v2-pipeline-rearchitecture",
+  "plan_section": "v2-image-pipeline",
+  "trigger": "operator directive 2026-09-09 ~12:50: 'crops should only be created at one time. After the Web hook comes in and after the four images are created from the RTSP stream crop a and crop B are created. That's also the time that the pairwise differential composite should be created. That's the only time for that web hook that any image manipulation should be done.' Preceded by the operator flag that the current TG#1 has 5 photos (best_frame + diff_image + 4 frame paths) instead of a single composite, and that the refactor version 1 has a working render_motion_composite() that v2 needs to port. The motivation is that scattered image manipulation makes it impossible to trace what a webhook produced -- the operator's previous fix attempts (changing dispatcher MIME, rewriting dispatcher.py) all failed because they were patching symptoms of the deeper issue: no single producer.",
+  "background": "v2 today has three image-write sites in one webhook: (1) infra/gate.py saves pairwise_diff.jpg when GATE_KEEP_DISK_ARTIFACTS=true (legacy); (2) listener/pipeline.py:51-74 _crop_paths saves crop_a.jpg and crop_b.jpg to /tmp; (3) telegram_formatter/alert.py attaches the diff_image + 4 frame paths to TG#1. The result is 5+ files produced per webhook, scattered across /tmp and the gate's optional disk-output, with no single function that documents 'this is what the webhook makes'. The refactor version 1 has the right design: a single render_motion_composite() function in infra/motion_visualization.py that takes (frames, bbox_a, bbox_b, output_dir) and writes composite.png. v2 needs the same single point. The §11.176 audit comment at infra/gate.py:1048-1052 already promised this consolidation ('canonical crop emitter is listener._frame_diff_fn') but the function was never built. PRD-V2-024 builds it.",
+  "shipping_definition": "All US-024 stories marked done; pytest 150/150 (or higher) green; tree clean; listener/pipeline.py imports prepare_alert_artifacts and calls it exactly once per webhook; the new infra/motion_visualization.py module has unit tests for each layer (median, pairwise diff, morphology, red paint, green bbox); _crop_paths helper is deleted from pipeline.py; /tmp/diff.jpg reference is gone; a single TG#1 attachment list is built from the artifacts returned by prepare_alert_artifacts(); git log shows one commit per story; no Telegram message sent during tests; readiness verified by `python -c 'from infra.motion_visualization import render_motion_composite; ...'` smoke and `pytest tests/test_motion_visualization.py -v` 100% pass.",
+  "scope_exclusions": [
+    "Re-implementing motion-diff + bbox is NOT this PRD -- the gate already does this in memory and returns PIL crops via infra/gate.py:1044-1045. PRD-V2-024 only consumes the gate's PIL crops; it does not reimplement YOLO or diff math.",
+    "Re-touching `_frame_diff_fn` references in gate.py:1049 / gate.py:1110 is NOT this PRD -- those are stale comments that get updated as a cleanup story US-024f, but no logic change.",
+    "Gate's pairwise_diff.jpg disk write (gate.py:197-279 _write_pairwise_diff_image) is NOT killed by this PRD -- it is removed only when GATE_KEEP_DISK_ARTIFACTS goes away in a future cleanup PRD. PRD-V2-024 leaves the gate's optional disk output alone.",
+    "Re-routing the gate's `keep_disk_artifacts()` toggle to `True` by default is NOT this PRD -- that is V2-021 territory.",
+    "The freeze + scanner wiring (PRD-V2-023 make check-no-fallbacks) does NOT consume these changes yet -- US-024 ships them as production code without the regression guard.",
+    "Vision prompt changes (VM1/VM2) are NOT this PRD -- only image artifacts.",
+    "Camera-controller changes are NOT this PRD."
+  ],
+  "design_principles": [
+    "Single producer rule: the function prepare_alert_artifacts(gate_verdict, frame_paths, output_dir) is the ONLY function in the webhook that writes an image file to disk. Everything that needs a disk-path image calls this once and gets back a typed dict.",
+    "Reuse the refactor's render_motion_composite logic -- port infra/motion_visualization.py from /Users/jill/farm-surveillance-refactor/ verbatim, including the median background computation, the cumulative pairwise-diff union, the morphology filter, and the red-overlay paint, and the green-bbox outlines. Function signature must match the refactor's: render_motion_composite(frames, bbox_a, bbox_b, output_dir) -> str(path).",
+    "Native resolution throughout -- no resize. Render the composite at 2304x1296 (the camera's native sensor size) like the refactor does. Don't lossily thumbnail. The reason TelegramsendPhoto can accept up to 10 MB at native; the refactor's PNG composite came in under 2 MB at native.",
+    "Save the two crops as JPEG q95 (single inference-quality encode, the same quality YOLO was trained on) at native resolution. Don't save small thumbnails -- the refactor saves crops at native too. The `/tmp/_tiny_jpeg` from the operator's earlier crop bug is gone.",
+    "Result type is a Pydantic model or frozen dataclass -- not a loose dict. Callers access .crop_a_path, .crop_b_path, .composite_path as typed fields. Exception: prepare_alert_artifacts's optional fields (composite_path may be None if bbox missing) are typed Optional with the path a known str when present.",
+    "No fallback. If a crop can not be extracted (e.g., bbox_a is empty because motion diff found nothing), the corresponding field is None -- the caller explicitly handles that case. There is NO 'use frame center as fallback crop' or 'crop nothing and use full frame' code path. None propagates up; pipeline drops on None.",
+    "Drop the pipeline-level `_crop_paths` helper entirely. Any caller that needs the crops calls prepare_alert_artifacts and reads from the returned dict.",
+    "Telegram dispatch functions (alert.py, detail.py) do NOT know what an alert artifact is -- they receive a list of (path, caption) tuples from the pipeline. Today alert.py attaches the 5-photo list directly; tomorrow the pipeline passes it `[composite_path, full_frame_path]` from the artifacts dict. The Telegram layer is dumb-on-purpose -- it just sends what it's given. (TG#1 photo list swap itself is PRD-V2-027.)",
+    "Each cropped/composited image is assigned its own deterministic filename inside the data/frames/<alert_id>/ directory -- no /tmp/diff.jpg ever. Filenames are crop_a.jpg, crop_b.jpg, composite.png. The alert_id is the existing webhook UUID (already passed through from listener/daemon.py).",
+    "Test pyramid: US-024 includes both unit tests for motion_visualization layers (median, diff, morphology, paint) and integration tests for prepare_alert_artifacts that mock the gate's PIL crops. No live Telegram calls in any test."
+  ],
+  "stories": [
+    {
+      "id": "US-024a",
+      "title": "port infra/motion_visualization.py from refactor",
+      "story_type": "feature-port",
+      "acceptance": [
+        "infra/motion_visualization.py exists in v2 with the same module docstring as refactor (Layer 1: median background, Layer 2: cumulative pairwise diff union, Layer 3: morphology + min_blob_area filter, Layer 4: red paint, Layer 5: green bbox outlines, Layer 6: PNG save).",
+        "render_motion_composite(frames, bbox_a, bbox_b, output_dir) -> str is importable from infra.motion_visualization.",
+        "The function accepts PIL.Image frames (not file paths) so the gate's PIL output can flow in.",
+        "Output is composite.png inside output_dir at native camera resolution.",
+        "No third-party imports beyond PIL + numpy (already in requirements.txt).",
+        "The function is well-documented with input/output types and a one-line example in the module docstring.",
+        "tests/test_motion_visualization.py exists with at least 4 tests: test_render_with_two_frames, test_render_with_no_diff_returns_median, test_render_bbox_outline_visible, test_render_layer_mask_order. All pass.",
+        "No commit, no merge -- the file lands in one commit with signature: 'port infra/motion_visualization.py from refactor (US-024a)'."
+      ],
+      "files_added": ["infra/motion_visualization.py", "tests/test_motion_visualization.py"],
+      "depends_on": []
+    },
+    {
+      "id": "US-024b",
+      "title": "add artifacts model + prepare_alert_artifacts orchestrator",
+      "story_type": "feature-new",
+      "acceptance": [
+        "infra/alert_artifacts.py exists with @dataclass(frozen=True) class AlertArtifacts(crop_a_path: Optional[str], crop_b_path: Optional[str], composite_path: Optional[str], full_frame_path: str).",
+        "prepare_alert_artifacts(gate_verdict, frame_paths, output_dir) -> AlertArtifacts is importable from infra.alert_artifacts.",
+        "It calls render_motion_composite(frames, bbox_a, bbox_b, output_dir) once -- not twice -- and stores the result path.",
+        "It saves crop_a and crop_b as JPEG q95 at native resolution when the gate produced a PIL crop (gate_verdict.crop_a is a PIL.Image); if either PIL crop is None the corresponding path is None.",
+        "full_frame_path is the path to frame_paths[3] (the best-frame slot) -- the field is required and never None.",
+        "The function logs once per webhook with structured fields (alert_id, camera_id, output_dir, crop_a=None?, composite_path='...') at INFO -- no spam lines.",
+        "tests/test_alert_artifacts.py exists with at least 3 tests: test_prepare_writes_three_files, test_prepare_returns_None_for_missing_bbox, test_prepare_with_no_motion_returns_no_crops. All pass.",
+        "Single commit: 'add AlertArtifacts model + prepare_alert_artifacts (US-024b)'."
+      ],
+      "files_added": ["infra/alert_artifacts.py", "tests/test_alert_artifacts.py"],
+      "depends_on": ["US-024a"]
+    },
+    {
+      "id": "US-024c",
+      "title": "wire prepare_alert_artifacts into listener/pipeline.py",
+      "story_type": "refactor",
+      "acceptance": [
+        "listener/pipeline.py imports prepare_alert_artifacts from infra.alert_artifacts and calls it exactly ONCE per webhook, immediately after the gate runs.",
+        "The result (AlertArtifacts) is stored on the alert dict as alert['artifacts'].",
+        "All downstream stages that need a crop path read it from alert['artifacts'].crop_a_path / crop_b_path -- not from /tmp paths, not from gate.crop_a_path, not from any other source.",
+        "The old _crop_paths helper is deleted entirely (no replacement -- prepare_alert_artifacts absorbed the responsibility).",
+        "The /tmp/_ga.jpg, /tmp/_gb.jpg, /tmp/_tiny_jpeg helper is gone from pipeline.py.",
+        "The /tmp/diff.jpg reference at listener/pipeline.py:140-141 is gone (the new code does not reference /tmp/diff.jpg anywhere in the listener or its callers).",
+        "pytest tests/test_pipeline.py still 8/8 (or more) pass.",
+        "pytest tests/ --ignore=tests/test_home_env.py still 150/150 (or more) pass.",
+        "Single commit: 'wire prepare_alert_artifacts into pipeline; delete _crop_paths + /tmp/diff.jpg (US-024c)'."
+      ],
+      "files_modified": ["listener/pipeline.py"],
+      "files_deleted": [],
+      "depends_on": ["US-024b"]
+    },
+    {
+      "id": "US-024d",
+      "title": "regression tests for /tmp eradication",
+      "story_type": "test",
+      "acceptance": [
+        "tests/test_no_tmp_paths.py exists and imports each production module that previously referenced /tmp; asserts no string '/tmp/' appears in any production file under infra/, listener/, telegram_formatter/, vehicle_matcher/.",
+        "Exception clause: /tmp tests themselves and test fixtures are allowed to have /tmp/ in their source.",
+        "Test fails with a clear message listing the offending file:line if anyone reintroduces a /tmp reference.",
+        "Single commit: 'regression: assert no /tmp/ in production code (US-024d)'.",
+        "Tree clean; pytest tests/test_no_tmp_paths.py -v passes; full suite still green."
+      ],
+      "files_added": ["tests/test_no_tmp_paths.py"],
+      "depends_on": ["US-024c"]
+    },
+    {
+      "id": "US-024e",
+      "title": "update stale _frame_diff_fn comments in gate.py",
+      "story_type": "cleanup",
+      "acceptance": [
+        "The §11.176 comment at infra/gate.py:1048-1052 currently says 'canonical crop emitter is listener._frame_diff_fn'. Update it to say 'canonical crop emitter is infra.alert_artifacts.prepare_alert_artifacts (PRD-V2-024 US-024c)'.",
+        "The crop_a_path=None comment at infra/gate.py:1110 says the same thing -- update to point at alert_artifacts.",
+        "No logic change; comment only.",
+        "Single commit: 'update gate.py _frame_diff_fn references to alert_artifacts (US-024e)'.",
+        "Tree clean; pytest still green."
+      ],
+      "files_modified": ["infra/gate.py"],
+      "depends_on": ["US-024c"]
+    }
+  ],
+  "depends_on_story_index": {
+    "US-024a": [],
+    "US-024b": ["US-024a"],
+    "US-024c": ["US-024b"],
+    "US-024d": ["US-024c"],
+    "US-024e": ["US-024c"]
+  },
+  "dispatch_order": ["US-024a", "US-024b", "US-024c", "US-024d", "US-024e"]
+}

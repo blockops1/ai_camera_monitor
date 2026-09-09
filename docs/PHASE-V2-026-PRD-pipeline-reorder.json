@@ -1,0 +1,108 @@
+{
+  "prd_id": "PHASE-V2-026",
+  "title": "pipeline reorder -- drop-on-none + cooldown-at-end",
+  "author": "the operator",
+  "status": "active",
+  "phase": "v2-pipeline-rearchitecture",
+  "plan_section": "v2-pipeline-control-flow",
+  "trigger": "operator directive 2026-09-09 ~12:55: 'After the Yolo gate identifies it as a vehicle, a person, or a animal, that's when we check if the pipeline cool down is in effect and if it is, that's when we stop the processing of that Web hook event / ... After this entire successful process is when that pipeline and camera cool down counter starts'. Follow-up directive 2026-09-09 ~12:57: 'For 25b. If yolo classification is not vehicle, person, or animal, that flow gets dropped directly after the gate / Yes, and it should be logged as dropped.' The motivation: the current pipeline suppresses at stage 2 based on the FIRST webhook's timestamp (a side-effect inside should_suppress), and never has a chance to run the full pipeline. The operator wants the cooldown to start ONLY when a webhook has gone end-to-end through TG#3 -- so a single noisy truck doesn't burn the entire 30-second window, but five real vehicles in a row get one alert each on the first webhook and silence on the rest.",
+  "background": "infra/pipeline_cooldown.py has two functions: should_suppress(camera_id, classification) and record_hit(camera_id, classification). The current code calls should_suppress at stage 2 of the pipeline, IMMEDIATELY after the gate, before any Telegram dispatch. Worse: should_suppress has a side-effect -- it records the timestamp on a miss (line 97), which means the cooldown window starts the first time a webhook arrives even if the pipeline later fails. This is wrong: per the operator, the cooldown starts 'after this entire successful process'. PRD-V2-026 has three jobs: (1) add a post-gate drop on classification=none with log line, (2) move the cooldown check from stage 2 to after TG#3 dispatch, (3) split should_suppress's check-only behavior from record_hit's record-only behavior so they cannot be accidentally combined.",
+  "shipping_definition": "All US-026 stories marked done; pytest 150/150 (or higher) green; tree clean; listener/pipeline.py calls the cooldown module only ONCE at the very end of run(); listener/pipeline.py returns a 'dropped' status when the gate emits classification=none, and the dropped path logs at INFO with the alert_id + classification + reason; infra/pipeline_cooldown.py has a clean separation: should_suppress is now a pure boolean check (no side-effect) and record_hit is the only writer; the tests prove that a webhook which fails mid-pipeline does NOT start the cooldown; telemetry on the old behavior (suppress at stage 2) is gone.",
+  "scope_exclusions": [
+    "Editing infra/gate.py is NOT this PRD -- the classification field comes from PRD-V2-025. PRD-V2-026 only consumes it.",
+    "Editing telegram_formatter/* files is NOT this PRD -- that is PRD-V2-027.",
+    "Replacing the cooldown's storage backend (e.g., moving from a dict to redis) is NOT this PRD -- the operator has not asked for distributed state.",
+    "Per-camera-classification cooldown keying changes are NOT this PRD -- the existing should_suppress(camera_id, classification) keying stays.",
+    "Removing the cooldown entirely is NOT this PRD -- the operator explicitly said the cooldown stays, just moves.",
+    "Renaming the function names is NOT this PRD -- the names stay so other code references keep working."
+  ],
+  "design_principles": [
+    "Cooldown has TWO atomic operations: check (read-only) and record (write-only). The compound 'check and record if miss' is GONE -- that was the bug. should_suppress is pure (no I/O beyond reading state); record_hit writes. They cannot be called from the same stage.",
+    "The pipeline runs every webhook to completion OR drops at known points. Drop points are: (1) post-gate classification=none (drop before cooldown check), (2) post-TG#3 cooldown.record_hit (write but proceed, this is the success path's exit). No other drop points.",
+    "The dropped webhook is LOGGED. Per the operator: 'Yes, and it should be logged as dropped.' Log line format: `pipeline: dropped alert_id=<id> camera=<camera> classification=<none|...> reason=...`. Reason examples: `no_class` (classification was none), `cooldown_active` (didn't reach this path because cooldown is checked AFTER gate but BEFORE TG#1 -- see below).",
+    "The cooldown check moves to STAGE 7 (post-gate, post-cooldown-skip-on-none, pre-TG#1). The order is: gate -> drop-if-none -> cooldown check -> if-suppressed drop -> if-not continue to TG#1. The cooldown-write happens at STAGE 12 (post-TG#3).",
+    "Telemetry-on-cooldown-miss is NOT telemetry. We don't log 'a webhook just came in' at the cooldown-check stage. We log 'pipeline proceeded past gate' at the cooldown-check stage ONLY -- that's a meaningful state. Webhook-arrival logs are at the daemon layer, not here.",
+    "Failures mid-pipeline (cascade1 fails, VM2 fails, match raises, TG send fails) do NOT call record_hit. The webhook is treated as if it never happened for cooldown purposes. Only success reaches record_hit.",
+    "No env-var defaults creep in. The cooldown window length is hardcoded (read from a module-level constant COOLDOWN_WINDOW_SECONDS) -- not configurable from the env. Per the operator's 'no fallback env vars' rule.",
+    "Telegram delivery path is unchanged -- the cooldown reorder does not touch telegram_formatter/*."
+  ],
+  "stories": [
+    {
+      "id": "US-026a",
+      "title": "split pipeline_cooldown: pure should_suppress + record_hit",
+      "story_type": "refactor",
+      "acceptance": [
+        "infra/pipeline_cooldown.py exports TWO functions: should_suppress(camera_id, classification, now) -> bool and record_hit(camera_id, classification, now).",
+        "should_suppress is PURE: it reads state, returns boolean, does NOT write. The previous side-effect of recording on miss is GONE.",
+        "record_hit is PURE WRITE: it takes now as an argument (no time.time() inside), and only writes. Returns None.",
+        "Both accept a `now` timestamp parameter so tests can pass a fixed time and assert precise cooldown windows. Default behavior for production callers is `time.time()` is wrapped by `should_suppress_default()` / `record_hit_default()` helpers that call the pure versions with time.time().",
+        "COOLDOWN_WINDOW_SECONDS module constant is exported (default 30 seconds). Tests can monkeypatch this.",
+        "State storage is still in-memory dict(_last_seen) -- no redis or filesystem.",
+        "All existing callers of should_suppress compile and pass; pytest tests/ --ignore=tests/test_home_env.py still 150/150 (or higher) green.",
+        "Single commit: 'split pipeline_cooldown: pure should_suppress + record_hit (US-026a)'."
+      ],
+      "files_modified": ["infra/pipeline_cooldown.py"],
+      "depends_on": []
+    },
+    {
+      "id": "US-026b",
+      "title": "add post-gate drop on classification=none with log",
+      "story_type": "feature-new",
+      "acceptance": [
+        "listener/pipeline.py::run() gets gate_verdict from gate.run_gate(...).",
+        "After the gate returns, pipeline.py checks gate_verdict.classification.",
+        "If classification == 'none': return {'status': 'dropped', 'reason': 'no_class', 'classification': 'none'} -- NO Telegram dispatch, NO cooldown check, NO cascade call.",
+        "The dropped webhook is logged at INFO with fields: alert_id, camera_id, classification='none', top_class, top_confidence, reason='no_class'. Line format: `pipeline: dropped alert_id=<id> camera=<camera> classification=none top_class='<top_class>' top_confidence=<conf> reason=no_class`.",
+        "The dropped webhook does NOT call should_suppress, does NOT call record_hit, does NOT increment any counter.",
+        "tests/test_drop_after_gate.py exists with at least 3 cases: (a) classification=person -> pipeline continues to stage 3, (b) classification=animal -> pipeline continues to stage 3, (c) classification=none -> pipeline returns dropped status and stage 3 is never reached (verify by checking mock was not called).",
+        "Single commit: 'post-gate drop on classification=none with log (US-026b)'.",
+        "pytest tests/test_drop_after_gate.py -v 100% pass; full suite still green."
+      ],
+      "files_modified": ["listener/pipeline.py"],
+      "files_added": ["tests/test_drop_after_gate.py"],
+      "depends_on": ["US-025b", "US-026a"]
+    },
+    {
+      "id": "US-026c",
+      "title": "move cooldown check + add record_hit at end",
+      "story_type": "refactor",
+      "acceptance": [
+        "listener/pipeline.py::run() has the cooldown check at STAGE 7 (after gate + drop-on-none, before cascade1 VM1). NOT at stage 2.",
+        "If should_suppress(camera_id, classification) returns True, return {'status': 'dropped', 'reason': 'cooldown_active', 'classification': classification} -- log dropped with reason=cooldown_active.",
+        "If False, continue to cascade1 VM1.",
+        "At the very end of run() (after TG#3 success), call record_hit(camera_id, classification). This is the ONLY call site for record_hit in the production tree.",
+        "If any stage between gate and TG#3 raises (cascade1 fails, VM2 fails, match raises, TG#1 send fails), record_hit is NOT called -- the webhook does not start the cooldown.",
+        "If TG#1 dispatch fails (network error, telegram returns non-2xx), the pipeline propagates the error and record_hit is NOT called -- the cooldown stays untriggered for THIS webhook.",
+        "If TG#2 or TG#3 fails after TG#1 succeeded, record_hit is NOT called -- partial dispatch counts as failure.",
+        "tests/test_cooldown_lifecycle.py exists with at least 4 cases: (a) First webhook arrives, runs to completion, record_hit called -> next webhook within window -> should_suppress returns True. (b) First webhook arrives, fails at TG#1, record_hit NOT called -> next webhook within window -> should_suppress returns False. (c) Webhook arrives 31 seconds after a successful previous -> should_suppress returns False (window expired). (d) Three concurrent webhooks for the same camera -> exactly ONE calls record_hit (the first to reach STAGE 12; rest hit should_suppress).",
+        "Single commit: 'move cooldown check to stage 7; add record_hit at stage 12 (US-026c)'.",
+        "pytest tests/test_cooldown_lifecycle.py -v 100% pass; full suite still green."
+      ],
+      "files_modified": ["listener/pipeline.py"],
+      "files_added": ["tests/test_cooldown_lifecycle.py"],
+      "depends_on": ["US-026b"]
+    },
+    {
+      "id": "US-026d",
+      "title": "telemetry log line 'pipeline: proceeded past gate'",
+      "story_type": "logging",
+      "acceptance": [
+        "listener/pipeline.py logs at STAGE 7 (post-gate, post-drop, pre-cooldown-check): `pipeline: proceeded alert_id=<id> camera=<camera> classification=<v/p/a> top_class=<...> top_confidence=<...>` -- this is the operator's signal that 'the gate said yes'.",
+        "The log appears EXACTLY once per webhook that survives the gate -- no duplicates on success or failure mid-pipeline.",
+        "If the pipeline is dropped on cooldown at stage 7, it logs `pipeline: dropped alert_id=<id> camera=<camera> classification=<v/p/a> reason=cooldown_active`.",
+        "Existing tests that grep pipeline log lines get updated; new tests assert that no extra log lines (e.g., 'started pipeline') exist.",
+        "Single commit: 'pipeline proceeded + dropped logs at stage 7 (US-026d)'.",
+        "pytest still green."
+      ],
+      "files_modified": ["listener/pipeline.py"],
+      "depends_on": ["US-026c"]
+    }
+  ],
+  "depends_on_story_index": {
+    "US-026a": [],
+    "US-026b": ["US-025b", "US-026a"],
+    "US-026c": ["US-026b"],
+    "US-026d": ["US-026c"]
+  },
+  "dispatch_order": ["US-026a", "US-026b", "US-026c", "US-026d"]
+}
