@@ -7,13 +7,22 @@ Tests behaviors across all stages:
   3. run returns 'ok' with gate, vm1, tg1 when flow completes.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from infra.gate import GateVerdict
 from listener.pipeline import run
 
 
-def _make_gate_verdict(decision="vehicle", class_label="car", confidence=0.85, reason="high_conf_vehicle"):
+def _make_gate_verdict(
+    decision="vehicle",
+    class_label="car",
+    confidence=0.85,
+    reason="high_conf_vehicle",
+    pairwise_diff_path=None,
+):
     """Build a mock GateVerdict for pipeline tests."""
     v = MagicMock(spec=GateVerdict)
     v.decision = decision
@@ -22,7 +31,7 @@ def _make_gate_verdict(decision="vehicle", class_label="car", confidence=0.85, r
     v.reason = reason
     v.crop_a = None
     v.crop_b = None
-    v.pairwise_diff_path = None
+    v.pairwise_diff_path = pairwise_diff_path
     return v
 
 
@@ -33,7 +42,9 @@ def _make_alert(**kwargs):
         "camera_id": "CAM1",
         "camera_label": "Front Gate",
         "classification": kwargs.get("classification", "vehicle"),
-        "frames": kwargs.get("frames", ["/tmp/f1.jpg", "/tmp/f2.jpg", "/tmp/f3.jpg", "/tmp/f4.jpg"]),
+        "frames": kwargs.get(
+            "frames", ["/tmp/f1.jpg", "/tmp/f2.jpg", "/tmp/f3.jpg", "/tmp/f4.jpg"]
+        ),
     }
 
 
@@ -47,9 +58,7 @@ class TestPipelineRun:
         mock_cooldown = MagicMock()
         mock_cooldown.should_suppress.return_value = True
 
-        with patch(
-            "listener.pipeline.PipelineCooldown", return_value=mock_cooldown
-        ):
+        with patch("listener.pipeline.PipelineCooldown", return_value=mock_cooldown):
             result = run(alert)
 
         assert result["status"] == "suppressed"
@@ -76,10 +85,12 @@ class TestPipelineRun:
         assert result["reason"] == "no_object_detected"
         assert "gate" in result
 
-    def test_run_ok_with_full_flow(self):
+    def test_run_ok_with_full_flow(self, tmp_path):
         """run returns 'ok' with gate, vm1, tg1, vm2, tg2, match, tg3."""
         alert = _make_alert()
-        gate_v = _make_gate_verdict()
+        diff_path = str(tmp_path / "diff.png")
+        Path(diff_path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
+        gate_v = _make_gate_verdict(pairwise_diff_path=diff_path)
 
         mock_cooldown = MagicMock()
         mock_cooldown.should_suppress.return_value = False
@@ -121,40 +132,37 @@ class TestPipelineRun:
         assert result["match_result"] == match_result
         assert result["tg3"] == tg3
 
-    def test_run_ok_with_empty_frames(self):
-        """run returns 'ok' with empty frames when alert has no frames key."""
+    def test_run_raises_on_empty_frames(self):
+        """run raises RuntimeError when alert has no frames key."""
         alert = {"camera_id": "CAM2", "classification": "person"}
-        gate_v = _make_gate_verdict(class_label="person")
+
+        with pytest.raises(RuntimeError, match="no frames captured from camera CAM2"):
+            run(alert)
+
+    def test_run_raises_on_missing_pairwise_diff(self):
+        """run raises RuntimeError when gate produces no pairwise_diff."""
+        alert = _make_alert()
+        gate_v = _make_gate_verdict(pairwise_diff_path=None)
 
         mock_cooldown = MagicMock()
         mock_cooldown.should_suppress.return_value = False
 
-        vm1_result = {"class": "person", "confidence": 0.78}
-        tg1 = {"caption": "Detected: person", "photos": []}
-        vm2_result = {"class_confirmed": "person", "distinctive_features": []}
-        tg2 = {"caption": "Camera: CAM2", "photos": []}
-        tg3 = {}
-
         with (
+            pytest.raises(
+                RuntimeError, match="gate produced no pairwise_diff for alert evt-test-001"
+            ),
             patch("listener.pipeline.PipelineCooldown", return_value=mock_cooldown),
             patch("listener.pipeline.run_gate", return_value=gate_v),
-            patch("listener.pipeline.verify_class", return_value=vm1_result),
-            patch("listener.pipeline.build_alert_message", return_value=tg1),
-            patch("listener.pipeline.detail_class", return_value=vm2_result),
-            patch("listener.pipeline.build_detail_message", return_value=tg2),
-            patch("listener.pipeline.build_match_message", return_value=tg3),
+            patch("listener.pipeline.verify_class", return_value={"class": "vehicle"}),
         ):
-            result = run(alert)
+            run(alert)
 
-        assert result["status"] == "ok"
-        assert result["camera_id"] == "CAM2"
-        assert result["classification"] == "person"
-        assert result["frames"] == []
-
-    def test_record_hit_called_on_success(self):
+    def test_record_hit_called_on_success(self, tmp_path):
         """record_hit is called on the cooldown when the pipeline succeeds."""
         alert = _make_alert()
-        gate_v = _make_gate_verdict()
+        diff_path = str(tmp_path / "diff.png")
+        Path(diff_path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
+        gate_v = _make_gate_verdict(pairwise_diff_path=diff_path)
 
         mock_cooldown = MagicMock()
         mock_cooldown.should_suppress.return_value = False
