@@ -28,6 +28,11 @@ def test_rendered_plist_has_no_literal_home_path(monkeypatch):
     for mod in list(sys.modules.keys()):
         if mod in ("listener.daemon", "infra.paths"):
             sys.modules.pop(mod, None)
+    # Also clear cached submodule reference on the `infra` package itself;
+    # otherwise Python's `from infra import paths` returns the cached
+    # attribute on `infra.__dict__` instead of re-loading infra.paths.
+    if "infra" in sys.modules:
+        sys.modules["infra"].__dict__.pop("paths", None)
 
     # Need to re-set env vars that daemon's logging setup depends on
     os.environ.setdefault("LOG_LEVEL", "WARNING")
