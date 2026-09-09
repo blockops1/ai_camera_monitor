@@ -53,6 +53,7 @@ import uuid
 from collections import deque
 from collections.abc import MutableMapping
 from datetime import UTC, datetime
+from pathlib import Path
 
 from flask import Flask, jsonify, request
 
@@ -82,6 +83,11 @@ logging.basicConfig(
 
 app = Flask(__name__)
 log = logging.getLogger("daemon")
+
+# Module-level cache of the repo-rooted .env path. Computed at module load
+# using __file__ -> repo root; tests can monkeypatch this name to redirect
+# lookups. Module-load computation avoids per-call Path traversal cost.
+_REPO_ENV_PATH: str = str(Path(__file__).resolve().parent.parent / ".env")
 
 
 # ---------------------------------------------------------------------------
@@ -385,34 +391,59 @@ def main():
 
 
 def _load_home_env() -> None:
-    """Load ~/.env into os.environ. Existing keys win over file values.
+    """Load .env files into os.environ. Existing keys win over file values.
 
-    US-017b: secrets (telegram token, etc.) live in ~/.env rather than the
-    launchd plist so they can be rotated without plist edits and so the
-    plist does not contain plaintext credentials.
+    Resolution order (first file found wins for any given key, but already-set
+    env vars always win over file values):
+
+      1. <repo>/.env          — operator-owned, in-repo, mode 600 (canonical)
+      2. ~/.env               — operator-global fallback (legacy)
+
+    US-017b: secrets (telegram token, etc.) live in a gitignored .env file
+    rather than the launchd plist so they can be rotated without plist edits
+    and so the plist does not contain plaintext credentials.
+
+    PRD-V2-022 (2026-09-09): operator directive — env file belongs INSIDE the
+    app directory so the app is self-contained. ~/.env is retained only as a
+    fallback for operators who keep their secrets at $HOME.
     """
     from dotenv import dotenv_values  # python-dotenv
 
-    env_path = os.path.expanduser("~/.env")
-    if not os.path.exists(env_path):
-        log.info("No %s found; skipping home-env load.", env_path)
-        return
-    values = dotenv_values(env_path) or {}
-    loaded = 0
-    for k, v in values.items():
-        if v is None:
+    # 1. Repo-rooted .env (canonical — operator directive 2026-09-09).
+    #    __file__ -> .../listener/daemon.py -> repo root is parent.parent.
+    #    Exposed at module level so tests can monkeypatch this constant
+    #    without having to mock Path traversal.
+    candidate_paths = [
+        _REPO_ENV_PATH,
+        # 2. Legacy ~/.env fallback for operators who keep secrets at $HOME.
+        os.path.expanduser("~/.env"),
+    ]
+
+    total_loaded = 0
+    for env_path in candidate_paths:
+        if not os.path.exists(env_path):
+            log.info("env: %s not present; skipping.", env_path)
             continue
-        # Launchd-injected values win so operators can override without
-        # touching ~/.env. Telegram token specifically is the one we
-        # explicitly want to NOT live in the plist, so even if the plist
-        # does NOT set it, this still loads from ~/.env.
-        if k not in os.environ:
-            os.environ[k] = v
-            loaded += 1
+        values = dotenv_values(env_path) or {}
+        loaded_here = 0
+        for k, v in values.items():
+            if v is None:
+                continue
+            # Launchd-injected values win so operators can override without
+            # touching the .env file.
+            if k not in os.environ:
+                os.environ[k] = v
+                loaded_here += 1
+        total_loaded += loaded_here
+        log.info(
+            "env: loaded %d var(s) from %s",
+            loaded_here,
+            env_path,
+        )
+
     log.info(
-        "Loaded %d env var(s) from %s (telegram_token_len=%d)",
-        loaded,
-        env_path,
+        "env load complete: total=%d (telegram_token_len=%d)",
+        total_loaded,
         len(os.environ.get("TELEGRAM_BOT_TOKEN", "")),
     )
 
