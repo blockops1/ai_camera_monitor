@@ -120,7 +120,9 @@ def run(alert: dict) -> dict:
     # Stage 3: load 4 frames.
     frames = list(alert.get("frames", []))
     if not frames:
-        raise RuntimeError(f"no frames captured from camera {camera_id}, refusing to process alert {alert.get('id')}")
+        raise RuntimeError(
+            f"no frames captured from camera {camera_id}, refusing to process alert {alert.get('id')}"
+        )
 
     # Stage 4: run YOLO gate.
     gate_verdict = run_gate(
@@ -148,7 +150,9 @@ def run(alert: dict) -> dict:
     vm1_result = verify_class(a_p, b_p)
 
     if gate_verdict.pairwise_diff_path is None:
-        raise RuntimeError(f"gate produced no pairwise_diff for alert {alert.get('id')}")
+        raise RuntimeError(
+            f"gate produced no pairwise_diff for alert {alert.get('id')}"
+        )
     diff = gate_verdict.pairwise_diff_path
     tg1 = build_alert_message(
         verdict=gate_verdict,
@@ -156,6 +160,7 @@ def run(alert: dict) -> dict:
         frames=frames,
         diff_image=Path(diff),
         camera_label=camera_label,
+        alert=alert,
     )
 
     # Stage 8: detail_class (VM2) — mode from vm1_result["class"].
