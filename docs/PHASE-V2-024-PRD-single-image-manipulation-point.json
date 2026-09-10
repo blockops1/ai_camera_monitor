@@ -6,7 +6,7 @@
   "phase": "v2-pipeline-rearchitecture",
   "plan_section": "v2-image-pipeline",
   "trigger": "operator directive 2026-09-09 ~12:50: 'crops should only be created at one time. After the Web hook comes in and after the four images are created from the RTSP stream crop a and crop B are created. That's also the time that the pairwise differential composite should be created. That's the only time for that web hook that any image manipulation should be done.' Preceded by the operator flag that the current TG#1 has 5 photos (best_frame + diff_image + 4 frame paths) instead of a single composite, and that the refactor version 1 has a working render_motion_composite() that v2 needs to port. The motivation is that scattered image manipulation makes it impossible to trace what a webhook produced -- the operator's previous fix attempts (changing dispatcher MIME, rewriting dispatcher.py) all failed because they were patching symptoms of the deeper issue: no single producer.",
-  "background": "v2 today has three image-write sites in one webhook: (1) infra/gate.py saves pairwise_diff.jpg when GATE_KEEP_DISK_ARTIFACTS=true (legacy); (2) listener/pipeline.py:51-74 _crop_paths saves crop_a.jpg and crop_b.jpg to /tmp; (3) telegram_formatter/alert.py attaches the diff_image + 4 frame paths to TG#1. The result is 5+ files produced per webhook, scattered across /tmp and the gate's optional disk-output, with no single function that documents 'this is what the webhook makes'. The refactor version 1 has the right design: a single render_motion_composite() function in infra/motion_visualization.py that takes (frames, bbox_a, bbox_b, output_dir) and writes composite.png. v2 needs the same single point. The §11.176 audit comment at infra/gate.py:1048-1052 already promised this consolidation ('canonical crop emitter is listener._frame_diff_fn') but the function was never built. PRD-V2-024 builds it.\n\nPRD-V2-024 depends on PRD-V2-019 having shipped first: US-019f switches the ring buffer from JPEG q85 to PNG, US-019g switches the pipeline crop saves from JPEG q75 to PNG. Without 019, V2-024 would inherit a JPEG ring buffer and JPEG pipeline crops -- even after porting the composite renderer, the underlying pixel data would still be quantized. The motion-diff geometry is correct in v2 today; the lossiness is purely an I/O chain problem, which 019 fixes. V2-024 then layers the single-producer / typed-artifacts / refactor-style composite on top of a clean PNG pipeline.",
+  "background": "v2 today has three image-write sites in one webhook: (1) infra/gate.py saves pairwise_diff.jpg when GATE_KEEP_DISK_ARTIFACTS=true (legacy); (2) listener/pipeline.py:51-74 _crop_paths saves crop_a.jpg and crop_b.jpg to /tmp; (3) telegram_formatter/alert.py attaches the diff_image + 4 frame paths to TG#1. The result is 5+ files produced per webhook, scattered across /tmp and the gate's optional disk-output, with no single function that documents 'this is what the webhook makes'. The refactor version 1 has the right design: a single render_motion_composite() function in infra/motion_visualization.py that takes (frames, bbox_a, bbox_b, output_dir) and writes composite.png. v2 needs the same single point. The \u00a711.176 audit comment at infra/gate.py:1048-1052 already promised this consolidation ('canonical crop emitter is listener._frame_diff_fn') but the function was never built. PRD-V2-024 builds it.\n\nPRD-V2-024 depends on PRD-V2-019 having shipped first: US-019f switches the ring buffer from JPEG q85 to PNG, US-019g switches the pipeline crop saves from JPEG q75 to PNG. Without 019, V2-024 would inherit a JPEG ring buffer and JPEG pipeline crops -- even after porting the composite renderer, the underlying pixel data would still be quantized. The motion-diff geometry is correct in v2 today; the lossiness is purely an I/O chain problem, which 019 fixes. V2-024 then layers the single-producer / typed-artifacts / refactor-style composite on top of a clean PNG pipeline.",
   "shipping_definition": "All US-024 stories marked done; pytest 150/150 (or higher) green; tree clean; listener/pipeline.py imports prepare_alert_artifacts and calls it exactly once per webhook; the new infra/motion_visualization.py module has unit tests for each layer (median, pairwise diff, morphology, red paint, green bbox); _crop_paths helper is deleted from pipeline.py; /tmp/diff.jpg reference is gone; a single TG#1 attachment list is built from the artifacts returned by prepare_alert_artifacts(); git log shows one commit per story; no Telegram message sent during tests; readiness verified by `python -c 'from infra.motion_visualization import render_motion_composite; ...'` smoke and `pytest tests/test_motion_visualization.py -v` 100% pass.",
   "scope_exclusions": [
     "Re-implementing motion-diff + bbox is NOT this PRD -- the gate already does this in memory and returns PIL crops via infra/gate.py:1044-1045. PRD-V2-024 only consumes the gate's PIL crops; it does not reimplement YOLO or diff math.",
@@ -45,7 +45,10 @@
         "tests/test_motion_visualization.py exists with at least 4 tests: test_render_with_two_frames, test_render_with_no_diff_returns_median, test_render_bbox_outline_visible, test_render_layer_mask_order. All pass.",
         "No commit, no merge -- the file lands in one commit with signature: 'port infra/motion_visualization.py from refactor (US-024a)'."
       ],
-      "files_added": ["infra/motion_visualization.py", "tests/test_motion_visualization.py"],
+      "files_added": [
+        "infra/motion_visualization.py",
+        "tests/test_motion_visualization.py"
+      ],
       "depends_on": []
     },
     {
@@ -62,8 +65,15 @@
         "tests/test_alert_artifacts.py exists with at least 3 tests: test_prepare_writes_three_files, test_prepare_returns_None_for_missing_bbox, test_prepare_with_no_motion_returns_no_crops. All pass.",
         "Single commit: 'add AlertArtifacts model + prepare_alert_artifacts (US-024b)'."
       ],
-      "files_added": ["infra/alert_artifacts.py", "tests/test_alert_artifacts.py"],
-      "depends_on": ["US-024a", "US-019f", "US-019g"]
+      "files_added": [
+        "infra/alert_artifacts.py",
+        "tests/test_alert_artifacts.py"
+      ],
+      "depends_on": [
+        "US-024a",
+        "US-019f",
+        "US-019g"
+      ]
     },
     {
       "id": "US-024c",
@@ -80,9 +90,13 @@
         "pytest tests/ --ignore=tests/test_home_env.py still 150/150 (or more) pass.",
         "Single commit: 'wire prepare_alert_artifacts into pipeline; delete _crop_paths + /tmp/diff.jpg (US-024c)'."
       ],
-      "files_modified": ["listener/pipeline.py"],
+      "files_modified": [
+        "listener/pipeline.py"
+      ],
       "files_deleted": [],
-      "depends_on": ["US-024b"]
+      "depends_on": [
+        "US-024b"
+      ]
     },
     {
       "id": "US-024d",
@@ -95,30 +109,138 @@
         "Single commit: 'regression: assert no /tmp/ in production code (US-024d)'.",
         "Tree clean; pytest tests/test_no_tmp_paths.py -v passes; full suite still green."
       ],
-      "files_added": ["tests/test_no_tmp_paths.py"],
-      "depends_on": ["US-024c"]
+      "files_added": [
+        "tests/test_no_tmp_paths.py"
+      ],
+      "depends_on": [
+        "US-024c"
+      ]
     },
     {
       "id": "US-024e",
       "title": "update stale _frame_diff_fn comments in gate.py",
       "story_type": "cleanup",
       "acceptance": [
-        "The §11.176 comment at infra/gate.py:1048-1052 currently says 'canonical crop emitter is listener._frame_diff_fn'. Update it to say 'canonical crop emitter is infra.alert_artifacts.prepare_alert_artifacts (PRD-V2-024 US-024c)'.",
+        "The \u00a711.176 comment at infra/gate.py:1048-1052 currently says 'canonical crop emitter is listener._frame_diff_fn'. Update it to say 'canonical crop emitter is infra.alert_artifacts.prepare_alert_artifacts (PRD-V2-024 US-024c)'.",
         "The crop_a_path=None comment at infra/gate.py:1110 says the same thing -- update to point at alert_artifacts.",
         "No logic change; comment only.",
         "Single commit: 'update gate.py _frame_diff_fn references to alert_artifacts (US-024e)'.",
         "Tree clean; pytest still green."
       ],
-      "files_modified": ["infra/gate.py"],
-      "depends_on": ["US-024c"]
+      "files_modified": [
+        "infra/gate.py"
+      ],
+      "depends_on": [
+        "US-024c"
+      ]
+    },
+    {
+      "id": "US-024f",
+      "title": "fix pipeline cooldown position \u2014 should_suppress after gate, record_hit at end",
+      "story_type": "fix",
+      "acceptance": [
+        "listener/pipeline.py:run() no longer calls cooldown.should_suppress() at the current Stage 2 position (before frames are loaded).",
+        "cooldown.should_suppress() is called AFTER run_gate() returns a non-suppress verdict \u2014 i.e., at the current Stage 5 location.",
+        "If should_suppress returns True, pipeline returns {'status': 'suppressed', 'camera_id': ..., 'classification': ...} with no Telegram sends.",
+        "cooldown.record_hit() is moved from the current Stage 6 position (right after gate) to the END of pipeline.run(), immediately before the return {'status': 'ok', ...} dict.",
+        "If any stage (VM1, TG#1, VM2, TG#2, match, TG#3) raises an exception, record_hit is NOT called \u2014 cooldown is not poisoned by partial failures.",
+        "tests/test_pipeline_cooldown_position.py exists with at least 4 tests: test_suppress_before_gate_returns_no_tg, test_suppress_after_gate_returns_no_tg, test_record_hit_called_only_on_full_success, test_record_hit_skipped_on_vm1_failure. All pass.",
+        "Full pytest suite still green (150/150 or more).",
+        "Single commit: 'fix(pipeline): cooldown should_suppress after gate, record_hit at end (US-024f)'."
+      ],
+      "files_modified": [
+        "listener/pipeline.py"
+      ],
+      "files_added": [
+        "tests/test_pipeline_cooldown_position.py"
+      ],
+      "depends_on": [
+        "US-024c"
+      ]
+    },
+    {
+      "id": "US-024g",
+      "title": "fix YOLO gate \u2014 bucket output into {vehicle, person, animal}",
+      "story_type": "fix",
+      "acceptance": [
+        "infra/gate.py:_bucket_yolo_class(raw_class_name) returns one of {'vehicle', 'person', 'animal'} for every input.",
+        "Mapping: vehicle \u2190 {car, truck, bus, motorcycle, bicycle, train, boat, aeroplane}; person \u2190 {person}; animal \u2190 {cat, dog, horse, sheep, cow, elephant, bear, zebra, giraffe, 'teddy bear', 'sports ball' (treated as unknown \u2014 covered separately)}.",
+        "Unknown classes (e.g., 'chair', 'laptop') return None and the gate suppresses with reason='unbucketed_class'.",
+        "GateVerdict.class_label is the BUCKETED class (vehicle/person/animal), not the raw 80-class label.",
+        "tests/test_gate_bucketing.py exists with at least 5 tests: test_car_buckets_to_vehicle, test_person_buckets_to_person, test_dog_buckets_to_animal, test_chair_returns_None, test_gate_verdict_class_label_is_bucketed. All pass.",
+        "Full pytest suite still green.",
+        "Single commit: 'fix(gate): bucket YOLO output into {vehicle, person, animal} (US-024g)'."
+      ],
+      "files_modified": [
+        "infra/gate.py"
+      ],
+      "files_added": [
+        "tests/test_gate_bucketing.py"
+      ],
+      "depends_on": [
+        "US-024c"
+      ]
+    },
+    {
+      "id": "US-024h",
+      "title": "fix TG#1 \u2014 send exactly 1 of 4 full frames + pairwise_diff + per-frame positions in caption",
+      "story_type": "fix",
+      "acceptance": [
+        "telegram_formatter/alert.py:build_alert_message() no longer attaches all 4 frame paths. It attaches exactly 2 photos: AlertArtifacts.full_frame_path (= frame_004.png = frames[3]) + AlertArtifacts.composite_path (the pairwise-diff composite).",
+        "The caption includes the four per-frame bbox positions from gate_verdict: 'Position frame_1: (x,y,w,h)', 'Position frame_2: ...', 'Position frame_3: ...', 'Position frame_4: ...'.",
+        "If a per-frame bbox is missing (e.g., crop_bbox_a was None), the caption shows 'Position frame_1: (n/a)' for that slot.",
+        "build_alert_message signature accepts the new positional/keyword args; old callers that passed frames= and diff_image= are migrated.",
+        "tests/test_alert_message.py exists with at least 3 tests: test_tg1_attachments_count_is_two, test_caption_includes_four_positions, test_caption_handles_missing_bbox. All pass.",
+        "Full pytest suite still green.",
+        "Single commit: 'fix(tg1): 1 frame + diff + 4 positions in caption (US-024h)'."
+      ],
+      "files_modified": [
+        "telegram_formatter/alert.py"
+      ],
+      "files_added": [
+        "tests/test_alert_message.py"
+      ],
+      "depends_on": [
+        "US-024c"
+      ]
     }
   ],
   "depends_on_story_index": {
     "US-024a": [],
-    "US-024b": ["US-024a", "US-019f", "US-019g"],
-    "US-024c": ["US-024b"],
-    "US-024d": ["US-024c"],
-    "US-024e": ["US-024c"]
+    "US-024b": [
+      "US-024a",
+      "US-019f",
+      "US-019g"
+    ],
+    "US-024c": [
+      "US-024b"
+    ],
+    "US-024d": [
+      "US-024c"
+    ],
+    "US-024e": [
+      "US-024c"
+    ],
+    "US-024f": [
+      "US-024c"
+    ],
+    "US-024g": [
+      "US-024c"
+    ],
+    "US-024h": [
+      "US-024c"
+    ]
   },
-  "dispatch_order": ["US-019f", "US-019g", "US-024a", "US-024b", "US-024c", "US-024d", "US-024e"]
+  "dispatch_order": [
+    "US-019f",
+    "US-019g",
+    "US-024a",
+    "US-024b",
+    "US-024c",
+    "US-024d",
+    "US-024e",
+    "US-024f",
+    "US-024g",
+    "US-024h"
+  ]
 }
