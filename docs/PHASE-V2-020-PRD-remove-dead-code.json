@@ -84,7 +84,7 @@
     {
       "id": "US-020c",
       "title": "add a no-orphan-modules scanner to enforce the invariant mechanically",
-      "status": "todo",
+      "status": "done",
       "depends_on": [
         "US-020a",
         "US-020b"
@@ -105,11 +105,11 @@
         "AC5: one commit, message 'feat(v2): US-020c — no-orphan-modules scanner + Makefile + pre-push wiring'."
       ],
       "rationale": "Without a guard, orphan modules can accumulate again — that's exactly how we got here. The scanner makes 'no production module goes uncalled' mechanically enforceable, same pattern as the privacy and resize scanners.",
-      "passes": false,
+      "passes": true,
       "attempts": 0,
       "last_error": null,
       "commit_sha": null,
-      "task_id": null
+      "task_id": "t_9b4e0c54"
     },
     {
       "id": "US-020d",
