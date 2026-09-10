@@ -44,3 +44,11 @@ For every webhook the listener receives, this is the ONLY valid order:
 | R9 (per-class matchers, not just vehicle) | **V2-024** |
 | R11 (cooldown record_hit at end) | **V2-024** |
 | R5, R7, R8, R10 (already correct, verify only) | verification only, no new cards |
+
+## V2-022 status
+
+PRD-V2-022 ("Telegram delivery path") was completed 2026-09-09 (commits 2ca15b2, 435e8e0, etc.). Its 4 stories — US-022a (dispatcher.py), US-022b (daemon calls dispatcher), US-022c (env-var consistency), US-022d (smoke test) — are all shipped. The PRD is intentionally NOT recreated as kanban cards; it is closed-by-history.
+
+## V2-025 status
+
+PRD-V2-025 ("operator-driven Telegram content verification") added 2026-09-10. One card: a live-fire smoke test that confirms TG#1 carries the spec'd 2-attachment content (1 full frame + pairwise diff + 4 bbox positions in caption) and that operator receives and visually validates it.
