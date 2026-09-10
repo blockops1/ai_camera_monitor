@@ -83,6 +83,7 @@ RELATED:
 """
 
 import os
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 PRODUCTION_MODE = os.environ.get("FARMSURV_PRODUCTION", "0") == "1"
@@ -304,3 +305,38 @@ def audit_log_path(timestamp=None) -> str:
     if timestamp is None:
         timestamp = datetime.now(LOCAL_TZ)
     return os.path.join(AUDIT_LOG_DIR, f"{timestamp.strftime('%Y-%m-%d')}.jsonl")
+
+
+# ---------------------------------------------------------------------------
+# Alert-scoped canonical paths (PHASE-V2-021)
+# ---------------------------------------------------------------------------
+# These replace the legacy /tmp writes. Every transient image produced by the
+# alert pipeline (crops, sentinels, pairwise diffs) lives under
+#   <PROJECT_ROOT>/data/frames/<camera_id>/<alert_id>/
+# The sentinel is shared across alerts and lives at
+#   <PROJECT_ROOT>/data/_sentinels/_empty.png
+# ---------------------------------------------------------------------------
+
+
+def data_dir_for(camera_id: str, alert_id: str) -> Path:
+    """Return the canonical alert-scoped directory path and ensure it exists.
+
+    Returns ``<PROJECT_ROOT>/data/frames/<camera_id>/<alert_id>``.
+    Creates the full directory tree (parents=True, exist_ok=True) so callers
+    do not need to worry about races between concurrent alerts.
+    """
+    p = Path(PROJECT_ROOT) / "data" / "frames" / camera_id / alert_id
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def empty_png_path() -> Path:
+    """Return the canonical sentinel-path and ensure its directory exists.
+
+    The sentinel is shared across alerts (not alert-scoped), so it lives at
+    ``<PROJECT_ROOT>/data/_sentinels/_empty.png`` rather than under an
+    alert_id subdirectory.
+    """
+    p = Path(PROJECT_ROOT) / "data" / "_sentinels" / "_empty.png"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
