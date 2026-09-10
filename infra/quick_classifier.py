@@ -41,7 +41,8 @@ CALLED BY:
 
 CALLS INTO:
     - onnxruntime: model inference (CoreML EP on Apple Silicon)
-    - PIL: image load + letterbox resize
+    - PIL: image load
+    - scripts.export_yolo_dynamic: pad_to_multiple_of_32 helper
     - numpy: tensor prep + brightness stats
     - cv2: NMS for duplicate detection removal
     - infra/time_of_day: is_night_at_edt() for night/day signal
@@ -67,6 +68,8 @@ import cv2  # only used for NMS in _postprocess
 import numpy as np
 import onnxruntime as ort
 from PIL import Image
+
+from scripts.export_yolo_dynamic import pad_to_multiple_of_32
 
 log = logging.getLogger("quick_classifier")
 
@@ -168,8 +171,8 @@ MOTION_GATE_PRIORITY_FLOOR = float(os.environ.get(
 # (after NMS), suppress. Shadows and flares typically score 0.10-0.30.
 DEFAULT_CONFIDENCE_THRESHOLD = 0.40
 
-# YOLOv8n ONNX expects 640x640 RGB, normalized to 0..1, NCHW float32.
-MODEL_INPUT_SIZE = 640
+# YOLOv8n dynamic-axes ONNX accepts any (h, w) where h%32==0 AND w%32==0.
+# The caller pads crops via pad_to_multiple_of_32() before inference.
 
 # Default model path (relative to project root). Download with:
 #   curl -sSL -o models/yolov8n.onnx \
@@ -302,26 +305,34 @@ class QuickClassifier:
                     n_detections=0,
                 )
 
-        # Preprocess: letterbox to 640x640, normalize to [0,1], NCHW float32
-        img_resized, scale, pad = _letterbox(img, MODEL_INPUT_SIZE)
-        img_array = np.asarray(img_resized, dtype=np.float32) / 255.0
+        # Preprocess: pad to multiple-of-32, normalize to [0,1], NCHW float32
+        img_array = np.asarray(img, dtype=np.float32) / 255.0
+        h, w = img_array.shape[:2]
+        h_p, w_p = pad_to_multiple_of_32(h, w)
+        # Zero-pad right+bottom to reach (h_p, w_p)
+        if (h_p, w_p) != (h, w):
+            img_array = np.pad(
+                img_array,
+                ((0, h_p - h), (0, w_p - w), (0, 0)),
+                mode="constant",
+                constant_values=0,
+            )
         img_array = img_array.transpose(2, 0, 1)[None]  # HWC -> CHW -> NCHW
 
         # Inference
         raw_output = self.session.run(
             [self.output_name], {self.input_name: img_array}
-        )[0]  # shape: (1, 84, 8400) — 4 bbox + 80 class scores per anchor
-        # Ensure 2D (84, 8400) for postprocess
+        )[0]  # shape: (1, 84, N) — 4 bbox + 80 class scores per anchor
+        # Ensure 2D (84, N) for postprocess
         output_2d: np.ndarray = np.asarray(raw_output).reshape(84, -1)
 
-        # Postprocess: NMS + scale bboxes back to original frame coords
+        # Postprocess: NMS — bboxes are in native pixel coords (pre-pad space)
         detections = _postprocess(
             output_2d,
             conf_threshold=self.raw_score_threshold,
             iou_threshold=0.45,
-            scale=scale,
-            pad=pad,
-            img_size=img.size,
+            orig_h=h,
+            orig_w=w,
         )
 
         # Build verdict from detections
@@ -496,27 +507,6 @@ def _select_top_detection(
 # Image preprocessing
 # ---------------------------------------------------------------------------
 
-def _letterbox(
-    img: Image.Image, target_size: int, color: tuple[int, int, int] = (114, 114, 114)
-) -> tuple[Image.Image, float, tuple[int, int]]:
-    """Resize image to target_size x target_size with letterbox padding.
-
-    Preserves aspect ratio. Returns (resized_image, scale, (pad_x, pad_y)).
-    """
-    w, h = img.size
-    scale = min(target_size / w, target_size / h)
-    new_w, new_h = round(w * scale), round(h * scale)
-    img_resized = img.resize((new_w, new_h), Image.BILINEAR)  # type: ignore[attr-defined]
-
-    pad_x = (target_size - new_w) // 2
-    pad_y = (target_size - new_h) // 2
-
-    # Paste onto gray canvas
-    canvas = Image.new("RGB", (target_size, target_size), color)
-    canvas.paste(img_resized, (pad_x, pad_y))
-    return canvas, scale, (pad_x, pad_y)
-
-
 # ---------------------------------------------------------------------------
 # Output postprocessing (YOLOv8 ONNX format)
 # ---------------------------------------------------------------------------
@@ -525,25 +515,24 @@ def _postprocess(
     output: np.ndarray,
     conf_threshold: float,
     iou_threshold: float,
-    scale: float,
-    pad: tuple[int, int],
-    img_size: tuple[int, int],
+    orig_h: int,
+    orig_w: int,
 ) -> list[tuple[int, float, tuple[int, int, int, int]]]:
     """Convert YOLOv8 ONNX output to detection list.
 
     Args:
-        output: shape (84, 8400) — 4 bbox values (cx, cy, w, h) + 80 class scores
-            per anchor. The 8400 anchors come from the YOLOv8 grid at 640x640.
+        output: shape (84, N) — 4 bbox values (cx, cy, w, h) + 80 class scores
+            per anchor. N varies with input resolution.
         conf_threshold: minimum class score to keep
         iou_threshold: NMS IoU threshold
-        scale: letterbox scale factor (to un-scale bbox coords)
-        pad: (pad_x, pad_y) from letterbox (to un-translate)
-        img_size: original (w, h) of input frame
+        orig_h: original (pre-pad) image height in pixels
+        orig_w: original (pre-pad) image width in pixels
 
     Returns:
-        List of (class_id, confidence, (x1, y1, x2, y2)) in original-frame coords.
+        List of (class_id, confidence, (x1, y1, x2, y2)) in original-image coords.
+        Bboxes are clipped to the original (pre-pad) image bounds.
     """
-    # output shape: (84, 8400) -> transpose to (8400, 84)
+    # output shape: (84, N) -> transpose to (N, 84)
     output = output.transpose()
     boxes = output[:, :4]      # cx, cy, w, h
     class_scores = output[:, 4:]  # 80 class probabilities
@@ -568,16 +557,10 @@ def _postprocess(
     y2 = boxes[:, 1] + boxes[:, 3] / 2
     xyxy = np.stack([x1, y1, x2, y2], axis=1)
 
-    # Undo letterbox: subtract pad, divide by scale
-    pad_x, pad_y = pad
-    xyxy[:, [0, 2]] -= pad_x
-    xyxy[:, [1, 3]] -= pad_y
-    xyxy /= scale
-
-    # Clip to original image bounds
-    img_w, img_h = img_size
-    xyxy[:, [0, 2]] = np.clip(xyxy[:, [0, 2]], 0, img_w)
-    xyxy[:, [1, 3]] = np.clip(xyxy[:, [1, 3]], 0, img_h)
+    # Bboxes are in native pixel coords (same space as original crop).
+    # Clip to original (pre-pad) image bounds.
+    xyxy[:, [0, 2]] = np.clip(xyxy[:, [0, 2]], 0, orig_w)
+    xyxy[:, [1, 3]] = np.clip(xyxy[:, [1, 3]], 0, orig_h)
 
     # NMS (using cv2.dnn.NMSBoxes — simpler than rolling our own)
     nms_boxes = [
@@ -615,7 +598,7 @@ def _brightness_ratio(img: Image.Image) -> float:
     the sky. Day frames usually sit at 0.8-1.2.
 
     Cheap: ~5ms on a 1296x2304 frame. Done on the unaltered RGB image
-    BEFORE letterbox so the result is interpretable.
+    (before pad-to-32) so the result is interpretable.
     """
     gray = np.asarray(img.convert("L"))
     h = gray.shape[0]
