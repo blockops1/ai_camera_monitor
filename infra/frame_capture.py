@@ -13,10 +13,10 @@ OUTPUTS:
 PUBLIC API:
     start() — Open RTSP and start decode loop (idempotent).
     stop(timeout=5.0) — Stop decode loop and close socket (idempotent).
-    get_recent_frames(n, output_dir, max_size=None) -> list[str]
+    get_recent_frames(n, output_dir) -> list[str]
     is_healthy(stale_seconds=5.0) -> bool
     uptime_seconds() -> float
-    get_frames_by_offset(indices, output_dir, max_size=None) -> list[str]
+    get_frames_by_offset(indices, output_dir) -> list[str]
     CameraCaptureRegistry.start_all() — Boot one reader per camera.
     CameraCaptureRegistry.stop_all() — Stop all readers, drain threads.
     CameraCaptureRegistry.is_healthy_all() -> dict[str, bool]
@@ -268,7 +268,6 @@ class PersistentRTSPReader:
         self,
         n: int,
         output_dir: str,
-        max_size: tuple[int, int] | None = None,
     ) -> list[str]:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         self._clean_old(output_dir)
@@ -276,13 +275,12 @@ class PersistentRTSPReader:
             frames = list(self._ring)[-n:]
         if not frames:
             return []
-        return self._save_frames(frames, output_dir, max_size, start=1)
+        return self._save_frames(frames, output_dir, start=1)
 
     def get_frames_by_offset(
         self,
         indices: list[int],
         output_dir: str,
-        max_size: tuple[int, int] | None = None,
     ) -> list[str]:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         self._clean_old(output_dir)
@@ -293,7 +291,7 @@ class PersistentRTSPReader:
             if idx < 0 or idx >= len(ring_list):
                 continue
             self._save_one(
-                ring_list[idx], output_dir, max_size, len(out_paths) + 1, out_paths
+                ring_list[idx], output_dir, len(out_paths) + 1, out_paths
             )
         return out_paths
 
@@ -310,26 +308,21 @@ class PersistentRTSPReader:
         self,
         frames: list[Image.Image],
         output_dir: str,
-        max_size: tuple[int, int] | None,
         start: int = 1,
     ) -> list[str]:
         out_paths: list[str] = []
         for i, frame in enumerate(frames, start=start):
-            self._save_one(frame, output_dir, max_size, i, out_paths)
+            self._save_one(frame, output_dir, i, out_paths)
         return out_paths
 
     def _save_one(
         self,
         img: Image.Image,
         output_dir: str,
-        max_size: tuple[int, int] | None,
         n: int,
         out_paths: list[str],
     ) -> None:
         out_path = os.path.join(output_dir, f"frame_{n:03d}.png")
-        if max_size is not None:
-            img = img.copy()
-            img.thumbnail(max_size, Image.Resampling.LANCZOS)
         img.save(out_path, format="PNG", optimize=True)
         out_paths.append(out_path)
 
@@ -769,7 +762,6 @@ def get_recent_frames(
     camera_id: str,
     n: int = 4,
     offset_seconds: int = 6,
-    max_size: tuple[int, int] | None = None,
 ) -> list[str]:
     """Get recent frames for *camera_id*, aged within *offset_seconds*."""
     reader = _get_healthy_reader(camera_id)
@@ -778,7 +770,7 @@ def get_recent_frames(
     from infra.paths import FRAMES_DIR
 
     frame_paths = reader.get_recent_frames(
-        n, os.path.join(FRAMES_DIR, camera_id), max_size=max_size
+        n, os.path.join(FRAMES_DIR, camera_id)
     )
     now = time.time()
     cutoff = now - offset_seconds
@@ -795,7 +787,6 @@ def get_recent_frames(
 def get_frames_by_offset(
     camera_id: str,
     indices: list[int],
-    max_size: tuple[int, int] | None = None,
 ) -> list[str]:
     """Pull frames at specific deque indices from *camera_id*'s ring buffer."""
     reader = _get_healthy_reader(camera_id)
@@ -804,5 +795,5 @@ def get_frames_by_offset(
     from infra.paths import FRAMES_DIR
 
     return reader.get_frames_by_offset(
-        indices, os.path.join(FRAMES_DIR, camera_id), max_size=max_size
+        indices, os.path.join(FRAMES_DIR, camera_id)
     )
