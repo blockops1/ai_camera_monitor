@@ -34,7 +34,7 @@ import json
 from pathlib import Path
 
 from infra.gate import GateVerdict, run as run_gate
-from infra.paths import VEHICLE_KNOWN_FILE
+from infra.paths import VEHICLE_KNOWN_FILE, data_dir_for, empty_png_path
 from infra.pipeline_cooldown import PipelineCooldown
 from infra.vision_analyzer import detail_class, verify_class
 from telegram_formatter.alert import build_alert_message
@@ -52,21 +52,8 @@ def _gsum(v: GateVerdict) -> dict:
     }
 
 
-def _crop_paths(crop_a, crop_b) -> tuple[str, str]:
-    a_p, b_p = "/tmp/_ga.png", "/tmp/_gb.png"
-    if crop_a is not None:
-        crop_a.save(a_p, format="PNG", optimize=True)
-    else:
-        a_p = _tiny_png()
-    if crop_b is not None:
-        crop_b.save(b_p, format="PNG", optimize=True)
-    else:
-        b_p = _tiny_png()
-    return a_p, b_p
-
-
-def _tiny_png() -> str:
-    p = "/tmp/_empty.png"
+def _ensure_sentinel() -> None:
+    """Ensure the shared sentinel PNG exists on disk."""
     _P = (
         b"\x89PNG\r\n\x1a\n"
         b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -75,7 +62,56 @@ def _tiny_png() -> str:
         b"\xfeA\xb6\x95"
         b"\x00\x00\x00\x00IEND\xaeB`\x82"
     )
-    Path(p).write_bytes(_P)
+    sentinel = empty_png_path()
+    if not sentinel.is_file():
+        sentinel.write_bytes(_P)
+
+
+def _crop_paths(
+    crop_a, crop_b, camera_id: str, alert_id: str
+) -> tuple[str, str]:
+    """Save crops (or sentinel) to the canonical alert-scoped directory.
+
+    Each crop path lives at ``data/frames/<camera_id>/<alert_id>/crop_{a,b}.png``.
+    When a crop is None, the sentinel PNG is written to that path instead.
+    The shared sentinel source is ``data/_sentinels/_empty.png`` (via
+    :func:`infra.paths.empty_png_path`).
+    """
+    out_dir = data_dir_for(camera_id, alert_id)
+    a_p = str(out_dir / "crop_a.png")
+    b_p = str(out_dir / "crop_b.png")
+    sentinel = empty_png_path()
+    # Ensure sentinel exists on disk before copying.
+    _ensure_sentinel()
+    if crop_a is not None:
+        crop_a.save(a_p, format="PNG", optimize=False)
+    else:
+        Path(a_p).write_bytes(sentinel.read_bytes())
+    if crop_b is not None:
+        crop_b.save(b_p, format="PNG", optimize=False)
+    else:
+        Path(b_p).write_bytes(sentinel.read_bytes())
+    return a_p, b_p
+
+
+def _tiny_png() -> str:
+    """Return the sentinel path (idempotent — writes only on first call).
+
+    Kept for backward-compat with any code that still calls _tiny_png()
+    directly. The sentinel lives at <PROJECT_ROOT>/data/_sentinels/_empty.png.
+    """
+    p = str(empty_png_path())
+    _sentinel = empty_png_path()
+    if not _sentinel.is_file():
+        _P = (
+            b"\x89PNG\r\n\x1a\n"
+            b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+            b"\x00\x00\x00\rIDATx\x9cc\xfc\xff\xff?\x00\x05\xfe\x02"
+            b"\xfeA\xb6\x95"
+            b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        _sentinel.write_bytes(_P)
     return p
 
 
@@ -105,6 +141,7 @@ def run(alert: dict) -> dict:
     """Stages 1-11: extract, cooldown, frames, gate, record, verify, TG#1,
     VM2 detail, TG#2, vehicle match, TG#3."""
     camera_id = alert.get("camera_id", "unknown")
+    alert_id = alert.get("id", camera_id)
     classification = alert.get("classification", "motion")
     camera_label = alert.get("camera_label", camera_id)
 
@@ -146,7 +183,12 @@ def run(alert: dict) -> dict:
     cooldown.record_hit(camera_id, classification)
 
     # Stage 7: verify_class + build TG#1.
-    a_p, b_p = _crop_paths(gate_verdict.crop_a, gate_verdict.crop_b)
+    a_p, b_p = _crop_paths(
+        gate_verdict.crop_a,
+        gate_verdict.crop_b,
+        camera_id,
+        alert_id,
+    )
     vm1_result = verify_class(a_p, b_p)
 
     if gate_verdict.pairwise_diff_path is None:
