@@ -73,8 +73,12 @@ def post_alert(camera_id: str) -> dict | None:
         with urllib.request.urlopen(req, timeout=60) as resp:
             if resp.status == 200:
                 return json.loads(resp.read().decode())
-    except (urllib.error.URLError, urllib.error.HTTPError,
-            json.JSONDecodeError, ValueError) as exc:
+    except (
+        urllib.error.URLError,
+        urllib.error.HTTPError,
+        json.JSONDecodeError,
+        ValueError,
+    ) as exc:
         print(f"  ERROR: {exc}", file=sys.stderr)
     return None
 
