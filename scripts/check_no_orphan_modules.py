@@ -1,55 +1,79 @@
 #!/usr/bin/env python3
-"""check_no_orphan_modules.py — Scan for orphan production modules.
+"""check_no_orphan_modules.py -- Static scanner for orphan production modules.
 
-A production module is "orphaned" when none of its public symbols are
-referenced by any other production file. This scanner walks the production
-source tree, collects public symbols (top-level functions and classes) from
-each .py file, then checks whether at least one symbol is imported or used
-by a file outside its own package subtree.
+Walks the production source tree and flags any .py file that defines public
+symbols (top-level functions and classes) but is not imported or referenced
+by any file outside its own subtree.
 
-Exits 0 (clean) if no orphans are found; exits 1 and prints one line per
-orphan:
+A module is an *orphan* when every file that references its symbols lives
+inside the same package -- no external caller exists.
 
-    orphan module: <path> (<symbol_count> symbols, 0 cross-references)
+Scan targets (production source tree only):
+  infra/  listener/  vehicle_matcher/  telegram_formatter/
 
-Exclusions (directories never scanned):
-    tests/, docs/, scripts/, models/, archive/, data/, .venv/, .git/
+Exclusions:
+  - tests/
+  - models/
+  - scripts/
+  - docs/
+  - archive/
+  - data/
+  - .venv/
+  - .git/
+  - __pycache__/
+
+Usage:
+    python scripts/check_no_orphan_modules.py
+    python scripts/check_no_orphan_modules.py infra/
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Data structures
 # ---------------------------------------------------------------------------
 
-PRODUCTION_DIRS: list[str] = [
+
+class ModuleInfo(NamedTuple):
+    """Metadata about a single .py module."""
+
+    path: Path  # relative to repo root
+    symbols: set[str]  # public top-level function/class names
+
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+# Production source directories (relative to repo root).
+# vehicle_position/ was removed in US-020b; it no longer exists.
+_PROD_DIRS: tuple[str, ...] = (
     "infra",
     "listener",
-    "telegram_formatter",
     "vehicle_matcher",
-]
+    "telegram_formatter",
+)
 
-EXCLUDE_DIRS: set[str] = {
+# Directories to skip entirely when walking.
+_SKIP_PARTS: tuple[str, ...] = (
+    ".git",
+    ".venv",
     "tests",
-    "docs",
-    "scripts",
     "models",
+    "scripts",
+    "docs",
     "archive",
     "data",
-    ".venv",
-    ".git",
-    "logs",
-    "config",
-    "venv",
-}
+    "__pycache__",
+    "_tmp_",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -57,159 +81,139 @@ EXCLUDE_DIRS: set[str] = {
 # ---------------------------------------------------------------------------
 
 
-def _get_repo_root() -> Path:
-    """Return the git repository root."""
-    result = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return Path.cwd()
-    return Path(result.stdout.strip())
+def _should_skip_dir(rel_path: str) -> bool:
+    """Return True if any component of the relative path is in the skip set."""
+    return any(part in _SKIP_PARTS for part in rel_path.split("/"))
 
 
-def _get_production_py_files(repo_root: Path) -> list[Path]:
-    """Walk production dirs and return .py files, skipping __init__.py."""
-    files: list[Path] = []
-    for d in PRODUCTION_DIRS:
-        dir_path = repo_root / d
-        if not dir_path.is_dir():
-            continue
-        for fname in sorted(dir_path.iterdir()):
-            if fname.is_file() and fname.suffix == ".py" and fname.name != "__init__.py":
-                files.append(fname)
-    return sorted(files)
+def collect_public_symbols(filepath: Path) -> set[str]:
+    """Parse a .py file and collect its public top-level symbols.
 
-
-def _get_public_symbols(path: Path) -> list[str]:
-    """Parse a .py file and return top-level function and class names."""
+    Returns a set of names defined at the top level that do NOT start with
+    a single underscore (i.e. public functions and classes).
+    """
+    symbols: set[str] = set()
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            tree = ast.parse(f.read(), filename=str(path))
-    except (SyntaxError, UnicodeDecodeError):
+        source = filepath.read_text(errors="replace")
+        tree = ast.parse(source, filename=str(filepath))
+    except (SyntaxError, OSError):
+        return symbols
+
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            name = node.name
+            if not name.startswith("_"):
+                symbols.add(name)
+
+    return symbols
+
+
+def find_cross_references(
+    symbol: str, repo_root: Path, module_file: Path
+) -> list[Path]:
+    """Find files outside *module_file* that reference *symbol*.
+
+    A module's "own subtree" is the file itself. Any reference from a
+    different file in the production tree is a cross-reference.
+    """
+    hits: list[Path] = []
+    pattern = re.compile(r"\b" + re.escape(symbol) + r"\b")
+    for dname in _PROD_DIRS:
+        dpath = repo_root / dname
+        if not dpath.is_dir():
+            continue
+        for pyfile in dpath.rglob("*.py"):
+            rel = str(pyfile.relative_to(repo_root))
+            if _should_skip_dir(rel):
+                continue
+            # Exclude the module's own file.
+            if pyfile == module_file:
+                continue
+            try:
+                text = pyfile.read_text(errors="replace")
+            except OSError:
+                continue
+            if pattern.search(text):
+                hits.append(pyfile)
+    return hits
+
+
+def discover_modules(repo_root: Path) -> list[ModuleInfo]:
+    """Walk production dirs and return ModuleInfo for every .py file."""
+    modules: list[ModuleInfo] = []
+    for dname in _PROD_DIRS:
+        dpath = repo_root / dname
+        if not dpath.is_dir():
+            continue
+        for pyfile in dpath.rglob("*.py"):
+            rel = str(pyfile.relative_to(repo_root))
+            if _should_skip_dir(rel):
+                continue
+            symbols = collect_public_symbols(pyfile)
+            if symbols:
+                modules.append(ModuleInfo(path=pyfile, symbols=symbols))
+    return modules
+
+
+def scan(repo_root: Path, target: Path | None = None) -> list[str]:
+    """Run the orphan scanner. Return list of finding strings."""
+    modules = discover_modules(repo_root)
+    if not modules:
         return []
 
-    return [
-        node.name
-        for node in ast.iter_child_nodes(tree)
-        if isinstance(node, (ast.FunctionDef, ast.ClassDef))
-    ]
+    findings: list[str] = []
+
+    for mod in modules:
+        # Check each symbol for cross-references outside the module's own file.
+        external_refs: set[str] = set()
+        for symbol in mod.symbols:
+            refs = find_cross_references(symbol, repo_root, mod.path)
+            if refs:
+                external_refs.add(symbol)
+
+        # If NO symbol has external references, flag the module.
+        if not external_refs:
+            rel_path = mod.path.relative_to(repo_root)
+            findings.append(
+                f"orphan module: {rel_path} "
+                f"({len(mod.symbols)} symbols, 0 cross-references)"
+            )
+
+    return findings
 
 
-def _get_all_production_files(repo_root: Path) -> list[Path]:
-    """Return ALL .py files in production dirs (including __init__.py)."""
-    files: list[Path] = []
-    for d in PRODUCTION_DIRS:
-        dir_path = repo_root / d
-        if not dir_path.is_dir():
-            continue
-        for fname in sorted(dir_path.rglob("*.py")):
-            files.append(fname)
-    return sorted(files)
-
-
-def _get_all_other_production_files(repo_root: Path, module_path: Path) -> list[Path]:
-    """Return production .py files that are NOT in the same top-level dir as module_path."""
-    module_dir = str(module_path.parent.name)  # e.g. "infra"
-    all_files = _get_all_production_files(repo_root)
-    return [
-        f for f in all_files
-        if str(f.parent.name) != module_dir
-    ]
-
-
-def _count_cross_references(
-    module_path: Path,
-    symbols: list[str],
-    other_files: list[Path],
-) -> int:
-    """Count how many of the module's public symbols appear in other files."""
-    if not symbols:
-        return 0
-
-    # Build a regex that matches any of the public symbols as a whole-word
-    # occurrence (import, usage, etc.), but NOT as a substring of another name.
-    escaped = [re.escape(s) for s in symbols]
-    pattern = re.compile(r"\b(?:" + "|".join(escaped) + r")\b")
-
-    total_refs = 0
-    for fpath in other_files:
-        try:
-            with open(fpath, "r", encoding="utf-8") as f:
-                content = f.read()
-        except (UnicodeDecodeError, OSError):
-            continue
-        if pattern.search(content):
-            total_refs += 1
-
-    return total_refs
-
-
-# ---------------------------------------------------------------------------
-# Core scan
-# ---------------------------------------------------------------------------
-
-
-def check_no_orphans(repo_root: Path | None = None) -> list[tuple[str, int, int]]:
-    """Run the orphan scan. Returns list of (path, sym_count, xref_count) orphans."""
-    if repo_root is None:
-        repo_root = _get_repo_root()
-
-    py_files = _get_production_py_files(repo_root)
-    all_files = _get_all_production_files(repo_root)
-
-    orphans: list[tuple[str, int, int]] = []
-
-    for module_path in py_files:
-        symbols = _get_public_symbols(module_path)
-        if not symbols:
-            # Module has no public symbols — it's effectively empty,
-            # which is a form of orphan (nothing to import).
-            orphans.append((str(module_path), 0, 0))
-            continue
-
-        other_files = [f for f in all_files if str(f.parent.name) != module_path.parent.name]
-
-        if not other_files:
-            # Only one production dir — every module is potentially cross-referenced.
-            # Still do the cross-ref check against all files.
-            pass
-
-        xrefs = _count_cross_references(module_path, symbols, other_files)
-
-        if xrefs == 0:
-            orphans.append((str(module_path), len(symbols), 0))
-
-    return orphans
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-
-def main(argv: list[str] | None = None) -> int:
-    """Entry point. Parse args, scan, report."""
+def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Detect orphan production modules with no external references."
+        description="Scan production source tree for orphan modules."
     )
     parser.add_argument(
-        "--repo-root",
-        type=str,
-        help="Override the git repo root (default: auto-detect).",
+        "target",
+        nargs="?",
+        default=None,
+        help="Directory to scan (defaults to production source tree).",
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args()
 
-    repo_root = Path(args.repo_root) if args.repo_root else _get_repo_root()
-    orphans = check_no_orphans(repo_root)
+    repo_root = Path(__file__).resolve().parent.parent
 
-    if orphans:
-        for path, sym_count, xref_count in orphans:
-            print(f"orphan module: {path} ({sym_count} symbols, {xref_count} cross-references)")
+    if args.target:
+        target = Path(args.target)
+        if target.is_dir():
+            # Override production dirs for targeted scans.
+            global _PROD_DIRS
+            _PROD_DIRS = (target.name,)
+            repo_root = target.parent
+
+    findings = scan(repo_root)
+
+    if findings:
+        print(f"Orphan modules found ({len(findings)} hit(s)):\n")
+        for f in findings:
+            print(f)
         return 1
-    return 0
+    else:
+        print("OK: no orphan production modules found.")
+        return 0
 
 
 if __name__ == "__main__":
