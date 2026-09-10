@@ -9,6 +9,7 @@ INPUTS:
       'class', 'confidence', optional 'notes'
     - frames: list[Path] (required) -- 4 frame paths on disk, index 0..3
     - diff_image: Path (required) -- pairwise-differential composite
+    - alert: dict | None (optional) -- parent alert dict, for error context
 
 OUTPUTS:
     - return dict: {"caption": str, "photos": list[str]}
@@ -48,8 +49,13 @@ def build_alert_message(
     frames: list[Path],
     diff_image: Path,
     camera_label: str = "Camera",
+    alert: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a TG#1 Telegram message dict."""
+    if not frames:
+        raise RuntimeError(
+            f"telegram_formatter/alert: no frames for alert {alert.get('id') if alert else 'unknown'}"
+        )
     cls = vm1_result["class"]
     conf = vm1_result["confidence"]
     notes = vm1_result.get("notes")
@@ -62,7 +68,7 @@ def build_alert_message(
     if notes:
         lines.append(notes)
 
-    best_frame = str(frames[3]) if frames else str(diff_image)
+    best_frame = str(frames[3])
     frame_paths = [str(f) for f in frames]
 
     return {
