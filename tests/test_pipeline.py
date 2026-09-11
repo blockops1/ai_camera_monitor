@@ -54,9 +54,9 @@ def _make_artifacts():
 def _make_alert(**kwargs):
     """Build a sample alert dict."""
     return {
-        "id": "evt-test-001",
-        "camera_id": "CAM1",
-        "camera_label": "Front Gate",
+        "id": kwargs.get("id", "evt-test-001"),
+        "camera_id": kwargs.get("camera_id", "CAM1"),
+        "camera_label": kwargs.get("camera_label", "Front Gate"),
         "classification": kwargs.get("classification", "vehicle"),
         "frames": kwargs.get(
             "frames", ["/tmp/f1.jpg", "/tmp/f2.jpg", "/tmp/f3.jpg", "/tmp/f4.jpg"]
@@ -265,3 +265,102 @@ class TestPipelineRun:
             assert actual == expected
         finally:
             _paths_mod.PROJECT_ROOT = orig_project_root
+
+
+class TestPipelineLogLines:
+    """AC4/AC1/AC3: Verify proceeded and dropped log lines at stage 7."""
+
+    def test_proceeded_log_line_format(self, caplog):
+        """Pipeline emits exactly one 'proceeded' log with top_class and top_confidence."""
+        import logging
+
+        caplog.set_level(logging.INFO, logger="listener.pipeline")
+
+        alert = _make_alert(classification="person")
+        diff_path = str(Path("/tmp/t"))
+        Path(diff_path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
+        gate_v = _make_gate_verdict(
+            classification="person",
+            class_label="person",
+            confidence=0.85,
+            top_class="person",
+            top_confidence=0.85,
+            pairwise_diff_path=diff_path,
+        )
+
+        vm1_result = {"class": "person", "confidence": 0.90}
+        tg1 = {"caption": "test", "photos": []}
+        vm2_result = {"class_confirmed": "person", "distinctive_features": []}
+        tg2 = {"caption": "test", "photos": []}
+        tg3 = {}
+
+        with (
+            patch("listener.pipeline.should_suppress", return_value=False),
+            patch("listener.pipeline.run_gate", return_value=gate_v),
+            patch("listener.pipeline.prepare_alert_artifacts", return_value=_make_artifacts()),
+            patch("listener.pipeline.verify_class", return_value=vm1_result),
+            patch("listener.pipeline.build_alert_message", return_value=tg1),
+            patch("listener.pipeline.detail_class", return_value=vm2_result),
+            patch("listener.pipeline.build_detail_message", return_value=tg2),
+            patch("listener.pipeline._load_candidates", return_value=[]),
+            patch("listener.pipeline.build_match_message", return_value=tg3),
+            patch("listener.pipeline.record_hit"),
+        ):
+            run(alert)
+
+        proceeded_logs = [
+            record
+            for record in caplog.records
+            if record.levelname == "INFO"
+            and "pipeline: proceeded" in record.message
+            and "alert_id=evt-test-001" in record.message
+            and "camera=CAM1" in record.message
+            and "classification=person" in record.message
+            and "top_class='person'" in record.message
+            and "top_confidence=0.85" in record.message
+        ]
+        assert len(proceeded_logs) == 1, (
+            f"Expected exactly 1 'proceeded' log line, got {len(proceeded_logs)}"
+        )
+        # No 'started pipeline' or other extra log lines
+        extra_logs = [
+            record
+            for record in caplog.records
+            if record.levelname == "INFO"
+            and "started pipeline" in record.message
+        ]
+        assert len(extra_logs) == 0, "No 'started pipeline' log line should exist"
+
+    def test_cooldown_dropped_log_line_format(self, caplog):
+        """Pipeline emits 'pipeline: dropped' log with classification and reason=cooldown_active."""
+        import logging
+
+        caplog.set_level(logging.INFO, logger="listener.pipeline")
+        caplog.clear()
+
+        alert = _make_alert(camera_id="CAM_X", id="alert-cooldown-001")
+
+        with (
+            patch("listener.pipeline.should_suppress", return_value=True),
+            patch("listener.pipeline.run_gate") as mock_gate,
+        ):
+            mock_gate.return_value = _make_gate_verdict(
+                classification="vehicle",
+                top_class="car",
+                top_confidence=0.85,
+            )
+            run(alert)
+
+        dropped_logs = [
+            record
+            for record in caplog.records
+            if record.levelname == "INFO"
+            and "pipeline: dropped" in record.message
+            and "alert_id=alert-cooldown-001" in record.message
+            and "camera=CAM_X" in record.message
+            and "classification=vehicle" in record.message
+            and "reason=cooldown_active" in record.message
+        ]
+        assert len(dropped_logs) == 1, (
+            f"Expected exactly 1 'dropped' cooldown log line, got {len(dropped_logs)}"
+        )
