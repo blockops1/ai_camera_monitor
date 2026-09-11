@@ -170,22 +170,6 @@ class TestPipelineRun:
         with pytest.raises(RuntimeError, match="no frames captured from camera CAM2"):
             run(alert)
 
-    def test_run_raises_on_missing_pairwise_diff(self):
-        """run raises RuntimeError when gate produces no pairwise_diff."""
-        alert = _make_alert()
-        gate_v = _make_gate_verdict(pairwise_diff_path=None)
-
-        with (
-            pytest.raises(
-                RuntimeError, match="gate produced no pairwise_diff for alert evt-test-001"
-            ),
-            patch("listener.pipeline.should_suppress", return_value=False),
-            patch("listener.pipeline.run_gate", return_value=gate_v),
-            patch("listener.pipeline.prepare_alert_artifacts", return_value=_make_artifacts()),
-            patch("listener.pipeline.verify_class", return_value={"class": "vehicle"}),
-        ):
-            run(alert)
-
     def test_record_hit_called_on_success(self, tmp_path):
         """record_hit is called with camera_id, classification when the pipeline succeeds."""
         alert = _make_alert()

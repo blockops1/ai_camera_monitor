@@ -7,8 +7,7 @@ INPUTS:
     - verdict: GateVerdict (required) -- YOLO gate result
     - vm1_result: dict (required) -- VM1 classify output with
       'class', 'confidence', optional 'notes'
-    - frames: list[Path] (required) -- 4 frame paths on disk, index 0..3
-    - diff_image: Path (required) -- pairwise-differential composite
+    - artifacts: AlertArtifacts (required) -- composite + full frame paths
     - alert: dict | None (optional) -- parent alert dict, for error context
 
 OUTPUTS:
@@ -16,7 +15,7 @@ OUTPUTS:
       shaped for the Telegram client
 
 PUBLIC API:
-    build_alert_message(verdict, vm1_result, frames, diff_image) -> dict
+    build_alert_message(verdict, vm1_result, artifacts, alert=None) -> dict
         Build a Telegram-ready message dict for TG#1
 
 DOES NOT DO:
@@ -25,14 +24,14 @@ DOES NOT DO:
     - Do any filesystem I/O (paths are passed in)
 
 CALLED BY:
-    - listener/pipeline.py stage 6 (TG#1 emission after VM1)
+    - listener/pipeline.py stage 7 (TG#1 emission after VM1)
 
 CALLS INTO:
     - stdlib str(): path-to-string conversion
 
 RELATED:
     - infra.gate.GateVerdict
-    - infra/vm1_prompt.SCHEMA_JSON
+    - infra.alert_artifacts.AlertArtifacts
 """
 
 from __future__ import annotations
@@ -40,22 +39,26 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from infra.alert_artifacts import AlertArtifacts
 from infra.gate import GateVerdict
 
 
 def build_alert_message(
     verdict: GateVerdict,
     vm1_result: dict[str, Any],
-    frames: list[Path],
-    diff_image: Path,
+    artifacts: AlertArtifacts,
     camera_label: str = "Camera",
     alert: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build a TG#1 Telegram message dict."""
-    if not frames:
-        raise RuntimeError(
-            f"telegram_formatter/alert: no frames for alert {alert.get('id') if alert else 'unknown'}"
-        )
+    """Build a TG#1 Telegram message dict.
+
+    Returns photos = [composite_path, full_frame_path] if composite_path
+    is not None.  If composite_path is None (gate returned no bbox),
+    returns photos = [full_frame_path] only -- single photo.
+    """
+    full_frame_path = artifacts.full_frame_path
+    composite_path = artifacts.composite_path
+
     cls = vm1_result["class"]
     conf = vm1_result["confidence"]
     notes = vm1_result.get("notes")
@@ -68,10 +71,13 @@ def build_alert_message(
     if notes:
         lines.append(notes)
 
-    best_frame = str(frames[3])
-    frame_paths = [str(f) for f in frames]
+    # Photos: composite + full frame, or full frame only.
+    photos: list[str] = []
+    if composite_path is not None:
+        photos.append(composite_path)
+    photos.append(full_frame_path)
 
     return {
         "caption": "\n".join(lines),
-        "photos": [best_frame, str(diff_image)] + frame_paths,
+        "photos": photos,
     }
