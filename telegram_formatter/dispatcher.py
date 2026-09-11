@@ -14,10 +14,13 @@ lossless PNG). sendPhoto re-encodes to JPEG server-side and is forbidden
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigError(RuntimeError):
@@ -26,6 +29,26 @@ class ConfigError(RuntimeError):
 
 class DeliveryError(RuntimeError):
     """Raised when api.telegram.org returns 4xx/5xx."""
+
+
+def _sniff_mime(path: str) -> tuple[str, str]:
+    """Sniff the first 16 bytes of a file to determine MIME type and suffix.
+
+    Returns (mime_type, suffix) where suffix is the correct file extension
+    ('.png', '.jpg', or '.bin' for unknown types).
+
+    Raises logger.warning for unknown byte sequences.
+    """
+    data = Path(path).read_bytes()[:16]
+    if not data:
+        logger.warning("empty file at %s — sending as octet-stream", path)
+        return "application/octet-stream", ".bin"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png", ".png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg", ".jpg"
+    logger.warning("unknown magic bytes at %s — sending as octet-stream", path)
+    return "application/octet-stream", ".bin"
 
 
 def _require(bot_token: str, chat_id: str) -> None:
@@ -85,7 +108,8 @@ def _send_media_group(
     for i, path in enumerate(photo_paths):
         with open(path, "rb") as f:
             data = f.read()
-        files.append((f"photo_{i}", (f"photo_{i}.png", data, "image/png")))
+        mime, suffix = _sniff_mime(path)
+        files.append((f"photo_{i}", (f"photo_{i}{suffix}", data, mime)))
     return client.post(url, data={"chat_id": chat_id, "media": str(media).replace("'", '"')}, files=files)
 
 
