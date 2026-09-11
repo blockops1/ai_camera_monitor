@@ -20,7 +20,7 @@ DOES NOT DO:
 CALLS INTO:
     - infra.alert_artifacts: prepare_alert_artifacts() for crops + composite
     - infra.gate: run_gate() for YOLO motion gate
-    - infra.pipeline_cooldown: PipelineCooldown.record_hit
+    - infra.pipeline_cooldown: should_suppress(), record_hit()
     - infra.vision_analyzer: verify_class(), detail_class()
     - infra.paths: VEHICLE_KNOWN_FILE for candidates
     - telegram_formatter.alert: build_alert_message() for TG#1
@@ -33,12 +33,17 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 
 from infra.alert_artifacts import prepare_alert_artifacts
 from infra.gate import GateVerdict, run as run_gate
 from infra.paths import VEHICLE_KNOWN_FILE, data_dir_for
-from infra.pipeline_cooldown import PipelineCooldown
+from infra.pipeline_cooldown import (
+    COOLDOWN_WINDOW_SECONDS,
+    record_hit,
+    should_suppress,
+)
 from infra.vision_analyzer import detail_class, verify_class
 from telegram_formatter.alert import build_alert_message
 from telegram_formatter.detail import build_detail_message
@@ -80,21 +85,12 @@ def _load_candidates() -> list[dict]:
 
 
 def run(alert: dict) -> dict:
-    """Stages 1-12: extract, cooldown, frames, gate, drop-if-suppressed,
-    record, prepare-artifacts, verify, TG#1, VM2 detail, TG#2, vehicle match, TG#3."""
+    """Stages 1-12: extract, frames, gate, drop-if-none, cooldown,
+    prepare-artifacts, verify, TG#1, VM2 detail, TG#2, vehicle match, TG#3, record."""
     camera_id = alert.get("camera_id", "unknown")
     alert_id = alert.get("id", camera_id)
     classification = alert.get("classification", "motion")
     camera_label = alert.get("camera_label", camera_id)
-
-    # Stage 2: cooldown check.
-    cooldown = PipelineCooldown()
-    if cooldown.should_suppress(camera_id, classification):
-        return {
-            "status": "suppressed",
-            "camera_id": camera_id,
-            "classification": classification,
-        }
 
     # Stage 3: load 4 frames.
     frames = list(alert.get("frames", []))
@@ -127,10 +123,20 @@ def run(alert: dict) -> dict:
             "classification": "none",
         }
 
-    # Stage 6: record_hit.
-    cooldown.record_hit(camera_id, classification)
+    # Stage 7: cooldown check — after gate + drop-on-none, before cascade1 VM1.
+    if should_suppress(camera_id, classification, time.monotonic()):
+        log.info(
+            f"pipeline: alert_id={alert.get('id', camera_id)} "
+            f"camera={camera_id} classification={classification} "
+            f"reason=cooldown_active"
+        )
+        return {
+            "status": "dropped",
+            "reason": "cooldown_active",
+            "classification": classification,
+        }
 
-    # Stage 7: prepare alert artifacts (crops + composite) via prepare_alert_artifacts.
+    # Stage 8: prepare alert artifacts (crops + composite) via prepare_alert_artifacts.
     output_dir = str(data_dir_for(camera_id, alert_id))
     artifacts = prepare_alert_artifacts(
         gate_verdict=gate_verdict,
@@ -141,7 +147,7 @@ def run(alert: dict) -> dict:
     a_p = artifacts.crop_a_path
     b_p = artifacts.crop_b_path
 
-    # Stage 8: verify_class + build TG#1 (reads crop paths from artifacts).
+    # Stage 9: verify_class + build TG#1 (reads crop paths from artifacts).
     if a_p is None or b_p is None:
         raise RuntimeError(
             f"gate produced no crops for alert {alert.get('id')}"
@@ -162,25 +168,28 @@ def run(alert: dict) -> dict:
         alert=alert,
     )
 
-    # Stage 9: detail_class (VM2) — mode from vm1_result["class"].
+    # Stage 10: detail_class (VM2) — mode from vm1_result["class"].
     mode = vm1_result.get("class", "vehicle")
     vm2_result = detail_class(mode, a_p, b_p)
 
-    # Stage 10: build TG#2 via detail formatter.
+    # Stage 11: build TG#2 via detail formatter.
     tg2 = build_detail_message(
         mode, vm2_result, Path(a_p), Path(b_p), camera_label=camera_label
     )
 
-    # Stage 11: vehicle match (vehicle only).
+    # Stage 12: vehicle match (vehicle only).
     match_result: dict = {"matched": False}
     if mode == "vehicle":
         candidates = _load_candidates()
         match_result = match_vehicle(vm2_result, candidates)
 
-    # Stage 12: build TG#3 (vehicle only).
+    # Stage 13: build TG#3 (vehicle only).
     tg3 = {}
     if mode == "vehicle":
         tg3 = build_match_message(match_result, vm2_result)
+
+    # Stage 14: record_hit — only on full pipeline success (TG#1+TG#2+TG#3).
+    record_hit(camera_id, classification, time.monotonic())
 
     return {
         "status": "ok",

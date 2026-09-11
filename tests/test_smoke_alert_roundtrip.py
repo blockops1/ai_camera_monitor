@@ -172,7 +172,7 @@ class TestSmokeRoundTrip:
             expected_dir = tmp_path / "data" / "frames" / cam / alert_id
 
             with (
-                patch("listener.pipeline.PipelineCooldown") as mock_cd,
+                patch("listener.pipeline.should_suppress", return_value=False),
                 patch("listener.pipeline.run_gate", return_value=gate_v),
                 patch("listener.pipeline.verify_class", return_value={"class": "vehicle"}),
                 patch("listener.pipeline.build_alert_message", return_value={"caption": ""}),
@@ -180,8 +180,8 @@ class TestSmokeRoundTrip:
                 patch("listener.pipeline.build_detail_message", return_value={}),
                 patch("listener.pipeline._load_candidates", return_value=[]),
                 patch("listener.pipeline.build_match_message", return_value={}),
+                patch("listener.pipeline.record_hit"),
             ):
-                mock_cd.return_value.should_suppress.return_value = False
                 run(alert)
 
             artifacts = alert.get("artifacts")
@@ -262,10 +262,9 @@ class TestSmokeRoundTrip:
 
             with (
                 pytest.raises(RuntimeError, match="gate produced no crops for alert smoke-alert-003"),
-                patch("listener.pipeline.PipelineCooldown") as mock_cd,
+                patch("listener.pipeline.should_suppress", return_value=False),
                 patch("listener.pipeline.run_gate", return_value=gate_v),
             ):
-                mock_cd.return_value.should_suppress.return_value = False
                 run(alert)
 
         finally:
