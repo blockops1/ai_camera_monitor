@@ -100,7 +100,7 @@ def _pipeline_result(classification="motion", camera_id="FRONT"):
         "classification": classification,
         "frames": [],
         "gate": {
-            "decision": "pass",
+            "classification": "pass",
             "class_label": "vehicle",
             "confidence": 0.9,
             "reason": "test",
@@ -402,7 +402,7 @@ class TestAlertRouteIntegration:
             "classification": "motion",
             "reason": "no_vehicle",
             "gate": {
-                "decision": "suppress",
+                "classification": "none",
                 "class_label": "vehicle",
                 "confidence": 0.3,
                 "reason": "low_conf",
