@@ -2,24 +2,31 @@
 pipeline_cooldown.py — Per-(camera_id, classification) cooldown suppression.
 
 STATUS: stable
-THREAD SAFETY: uses threading.Lock (single lock guards both maps)
+THREAD SAFETY: uses threading.Lock (single lock guards the state dict)
 
 INPUTS:
     - function arg `camera_id: str` (required)
     - function arg `classification: str` (required)
-    - function arg `window_seconds: int` (optional, defaults per-class)
+    - function arg `now: float` (required) — monotonic timestamp from caller
 
 OUTPUTS:
-    - return value: bool (should_suppress) — True if within cooldown
-    - side effect: in-memory dict updates under a lock
+    - should_suppress(camera_id, classification, now) -> bool
+        Return True if within cooldown; does NOT record on miss.
+    - record_hit(camera_id, classification, now) -> None
+        Record timestamp for (camera_id, classification) without checking.
 
 PUBLIC API:
-    should_suppress(camera_id, classification, window_seconds=0) -> bool
-        Return True if within cooldown; records timestamp on miss.
-    record_hit(camera_id, classification) -> None
-        Record timestamp for (camera_id, classification) without checking.
+    should_suppress(camera_id, classification, now) -> bool
+        Pure function: reads state, returns boolean, does NOT write.
+    record_hit(camera_id, classification, now) -> None
+        Pure write: takes now as argument, only writes state. Returns None.
+    should_suppress_default(camera_id, classification) -> bool
+        Production wrapper: calls should_suppress with time.monotonic().
+    record_hit_default(camera_id, classification) -> None
+        Production wrapper: calls record_hit with time.monotonic().
     clear() -> None
-        Test helper. Drop both maps. Never call in production.
+        Test helper. Drop state. Never call in production.
+    PipelineCooldown  — backward-compatible class wrapping module-level state.
 
 DOES NOT DO:
     - Persist cooldowns to disk — in-memory only; resets on restart
@@ -32,11 +39,11 @@ WHY HERE:
     (alert-level). Covers the full pipeline path.
 
 CALLED BY:
-    - (to be wired by US-002 or later — not yet connected to listener)
+    - listener/pipeline.py (via PipelineCooldown class)
 
 CALLS INTO:
-    - threading.Lock: guards both maps
-    - time.monotonic(): cooldown window comparison
+    - threading.Lock: guards the state dict
+    - time.monotonic(): production callers supply now from this
 
 RELATED:
     - infra/gate_cooldown.py — gate-level (camera, event_type) cooldown
@@ -48,6 +55,16 @@ from __future__ import annotations
 import threading
 import time
 
+# ---------------------------------------------------------------------------
+# Module-level constant — default cooldown window in seconds.
+# Tests can monkeypatch this at module level.
+# ---------------------------------------------------------------------------
+COOLDOWN_WINDOW_SECONDS: int = 30
+
+# ---------------------------------------------------------------------------
+# Per-class default windows (used by PipelineCooldown class only).
+# The pure module functions use COOLDOWN_WINDOW_SECONDS.
+# ---------------------------------------------------------------------------
 DEFAULT_WINDOWS: dict[str, int] = {
     "vehicle": 60,
     "person": 30,
@@ -55,13 +72,87 @@ DEFAULT_WINDOWS: dict[str, int] = {
     "animal": 0,
 }
 
+# ---------------------------------------------------------------------------
+# Module-level state — a single shared dict guarded by a lock.
+# Pure functions read/write this dict; the PipelineCooldown class wraps it.
+# ---------------------------------------------------------------------------
+_state: dict[str, float] = {}  # (camera_id, classification) -> last_hit timestamp
+_state_lock = threading.Lock()
 
+
+def should_suppress(
+    camera_id: str,
+    classification: str,
+    now: float,
+) -> bool:
+    """Return True if (camera_id, classification) is within cooldown.
+
+    PURE FUNCTION: reads state, returns boolean, does NOT write.
+    The previous side-effect of recording on miss is GONE — the caller
+    must explicitly call record_hit() after deciding to proceed.
+
+    Window resolution: uses COOLDOWN_WINDOW_SECONDS module constant.
+    """
+    key = f"{camera_id}:{classification}"
+
+    with _state_lock:
+        last = _state.get(key)
+
+    if last is None:
+        return False
+
+    elapsed = now - last
+    return elapsed < COOLDOWN_WINDOW_SECONDS
+
+
+def record_hit(
+    camera_id: str,
+    classification: str,
+    now: float,
+) -> None:
+    """Record timestamp for (camera_id, classification).
+
+    PURE WRITE: takes now as an argument, only writes state. Returns None.
+    Does NOT check suppression — pure timestamp writer.
+    """
+    key = f"{camera_id}:{classification}"
+
+    with _state_lock:
+        _state[key] = now
+
+
+def should_suppress_default(
+    camera_id: str,
+    classification: str,
+) -> bool:
+    """Production wrapper: calls should_suppress with time.monotonic()."""
+    return should_suppress(camera_id, classification, time.monotonic())
+
+
+def record_hit_default(
+    camera_id: str,
+    classification: str,
+) -> None:
+    """Production wrapper: calls record_hit with time.monotonic()."""
+    record_hit(camera_id, classification, time.monotonic())
+
+
+def clear() -> None:
+    """Test helper. Drop all cooldown state."""
+    with _state_lock:
+        _state.clear()
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatible class wrapper (used by existing callers).
+# ---------------------------------------------------------------------------
 class PipelineCooldown:
     """Per-(camera_id, classification) cooldown suppression.
 
-    Two maps under a single lock: _last_hit (timestamps) and
-    _window (per-class window sizes). Thread-safe for the
-    listener's 4-thread worker pool.
+    Wraps the module-level _state dict so existing PipelineCooldown()
+    callers continue to work unchanged. The class uses DEFAULT_WINDOWS
+    for per-class window sizes (not COOLDOWN_WINDOW_SECONDS) to preserve
+    existing behavior for callers that pass window_seconds arguments.
 
     Default windows (seconds): vehicle=60, person=30, motion=120, animal=0.
     """
