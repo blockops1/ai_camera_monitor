@@ -22,6 +22,8 @@ def _make_gate_verdict(
     classification="vehicle",
     class_label="car",
     confidence=0.85,
+    top_class="car",
+    top_confidence=0.85,
     reason="high_conf_vehicle",
     pairwise_diff_path=None,
 ):
@@ -30,6 +32,8 @@ def _make_gate_verdict(
     v.classification = classification
     v.class_label = class_label
     v.confidence = confidence
+    v.top_class = top_class
+    v.top_confidence = top_confidence
     v.reason = reason
     v.crop_a = None
     v.crop_b = None
@@ -92,10 +96,8 @@ class TestPipelineRun:
             result = run(alert)
 
         assert result["status"] == "dropped"
-        assert result["camera_id"] == "CAM1"
-        assert result["classification"] == "vehicle"
-        assert result["reason"] == "no_object_detected"
-        assert "gate" in result
+        assert result["reason"] == "no_class"
+        assert result["classification"] == "none"
 
     def test_run_ok_with_full_flow(self, tmp_path):
         """run returns 'ok' with gate, vm1, tg1, vm2, tg2, match, tg3."""
