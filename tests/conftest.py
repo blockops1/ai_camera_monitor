@@ -96,13 +96,13 @@ def mock_llama_server(monkeypatch):
 
 @pytest.fixture()
 def make_gate_verdict():
-    """Build a mock GateVerdict with decision='vehicle'."""
+    """Build a mock GateVerdict with classification='vehicle'."""
     from unittest.mock import MagicMock, PropertyMock
 
     from infra.gate import GateVerdict
 
     v = MagicMock(spec=GateVerdict)
-    v.decision = "vehicle"
+    v.classification = "vehicle"
     v.class_label = "car"
     v.confidence = 0.95
     v.reason = "high_conf_vehicle"
