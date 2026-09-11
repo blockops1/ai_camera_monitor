@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from infra.alert_artifacts import AlertArtifacts
 from infra.gate import GateVerdict
 from telegram_formatter.alert import build_alert_message
@@ -44,7 +42,10 @@ def _make_verdict() -> GateVerdict:
     v.classification = "vehicle"
     v.class_label = "car"
     v.confidence = 0.95
+    v.top_class = "car"
+    v.top_confidence = 0.95
     v.reason = "high_conf_vehicle"
+    v.crop_bbox_a = (100, 200, 50, 80)
     return v
 
 
