@@ -153,21 +153,13 @@ def run(alert: dict) -> dict:
 
     # Stage 9: verify_class + build TG#1 (reads crop paths from artifacts).
     if a_p is None or b_p is None:
-        raise RuntimeError(
-            f"gate produced no crops for alert {alert.get('id')}"
-        )
+        raise RuntimeError(f"gate produced no crops for alert {alert.get('id')}")
     vm1_result = verify_class(a_p, b_p)
 
-    if gate_verdict.pairwise_diff_path is None:
-        raise RuntimeError(
-            f"gate produced no pairwise_diff for alert {alert.get('id')}"
-        )
-    diff = gate_verdict.pairwise_diff_path
     tg1 = build_alert_message(
         verdict=gate_verdict,
         vm1_result=vm1_result,
-        frames=frames,
-        diff_image=Path(diff),
+        artifacts=artifacts,
         camera_label=camera_label,
         alert=alert,
     )
