@@ -1,0 +1,62 @@
+{
+  "prd_id": "PHASE-V2-029",
+  "title": "misc fallback removal (camera_creds URL parsing + cooldown telemetry)",
+  "author": "the operator",
+  "status": "active",
+  "phase": "v2-pipeline-rearchitecture",
+  "plan_section": "v2-misc-cleanup",
+  "trigger": "FROZEN inventory (V2-023, 2026-09-10) identified 2 IDENTIFIED entries assigned to V2-029: infra/camera_creds.py:85 (silent exception on URL parsing returns None) and infra/pipeline_cooldown.py:74 (cooldown suppress with no operator visibility). The motivation: URL parsing silently returning None can cause the daemon to operate with missing camera credentials without any signal, and the cooldown mechanism drops real events silently without the operator knowing suppression occurred.",
+  "background": "In infra/camera_creds.py:85, the code catches (IndexError, ValueError) during URL parsing and returns None. The caller (at line 75-76) checks for None, so this is a defensible fallback — but the lack of any logging means the operator never knows the URL parsing failed. In infra/pipeline_cooldown.py:74, the should_suppress() function returns True if (camera_id, classification) is within the cooldown window, silently dropping real events without the operator seeing the suppression. The operator's pain point is that this IS the cooldown mechanism itself: the function returns True and the caller suppresses the alert, but there is no telemetry or logging of the suppression.",
+  "shipping_definition": "All US-029 stories marked done; pytest 150/150 (or higher) green; tree clean; infra/camera_creds.py:85 logs a debug message when URL parsing returns None (so the operator can see it in daemon.log); infra/pipeline_cooldown.py emits a telemetry/log line when should_suppress returns True (so the operator can see which events were suppressed); docs/FALLBACK-INVENTORY.md entries for US-029a (both entries) flipped to REMOVED with commit SHAs.",
+  "scope_exclusions": [
+    "Changing the cooldown window logic or semantics is NOT this PRD — this PRD only adds observability to the suppression signal.",
+    "Adding a cooldown suppression counter or metric backend is NOT this PRD — a simple log line is sufficient; a future PRD may add structured metrics.",
+    "Changing camera_creds.py's return value from None to raising an error is NOT this PRD — the caller already handles None correctly; we only add visibility.",
+    "Editing listener/pipeline.py's error handling is NOT this PRD — the ValueError propagation already works."
+  ],
+  "design_principles": [
+    "Every silent suppression must leave a trace. If the system drops an event (whether via URL parsing failure or cooldown suppression), there MUST be a log line or telemetry event so the operator can correlate missing alerts with known suppression.",
+    "Debug-level logging is sufficient for URL parsing failures. The URL parsing path is not expected to fail in production (valid URLs are injected from the launchd plist). A debug-level log is enough — no need for ERROR or WARNING unless the failure rate becomes measurable.",
+    "Cooldown suppression logging is at INFO level. The operator SHOULD see cooldown suppressions in the log — this is a normal operational signal, not an error. Log line format: `pipeline_cooldown: suppressed camera=<id> classification=<class> reason=cooldown_active`.",
+    "No new modules, no new dependencies. Both changes are single-line additions (logger.debug + logger.info calls)."
+  ],
+  "stories": [
+    {
+      "id": "US-029a",
+      "title": "camera_creds.py:85 log debug message when URL parsing returns None",
+      "story_type": "logging",
+      "acceptance": [
+        "infra/camera_creds.py:85 (the except (IndexError, ValueError) block) logs a debug message: logger.debug(\"camera_creds: URL parsing failed, returning None: %s\", exc) where exc is the caught exception.",
+        "The logger import exists (verify against existing imports in the file; add if missing).",
+        "The caller's None-handling logic is unchanged — it still returns None and the caller checks for it.",
+        "No test file needed — this is a debug-level log on an edge case that should never fire in production. A smoke test verifying the log message is acceptable but not required.",
+        "Single commit: 'camera_creds.py:85 log debug on URL parsing failure (US-029a)'.",
+        "pytest tests/ --ignore=tests/test_home_env.py still 150/150 (or higher) green."
+      ],
+      "files_modified": ["infra/camera_creds.py"],
+      "depends_on": []
+    },
+    {
+      "id": "US-029b",
+      "title": "pipeline_cooldown.py: emit INFO log line when should_suppress returns True",
+      "story_type": "logging",
+      "acceptance": [
+        "infra/pipeline_cooldown.py:should_suppress() logs at INFO when it returns True (cooldown active): `pipeline_cooldown: suppressed camera=<camera_id> classification=<classification> reason=cooldown_active`.",
+        "The log includes camera_id and classification so the operator can identify which camera/classification is being suppressed most frequently.",
+        "The log line appears EXACTLY once per suppression — no duplicates from the caller.",
+        "No change to the boolean return value — the function still returns True/False; only the observability surface is added.",
+        "tests/test_cooldown_logging.py covers: (a) cooldown active -> log line with correct camera_id and classification, (b) cooldown not active -> no suppression log line.",
+        "Single commit: 'pipeline_cooldown.py: log INFO on suppression (US-029b)'.",
+        "pytest tests/ --ignore=tests/test_home_env.py still 150/150 (or higher) green."
+      ],
+      "files_modified": ["infra/pipeline_cooldown.py"],
+      "files_added": ["tests/test_cooldown_logging.py"],
+      "depends_on": []
+    }
+  ],
+  "depends_on_story_index": {
+    "US-029a": [],
+    "US-029b": []
+  },
+  "dispatch_order": ["US-029a", "US-029b"]
+}

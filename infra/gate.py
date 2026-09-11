@@ -17,8 +17,8 @@ INPUTS:
   - paths.alert_id, paths.output_dir
   - env var MOTION_GATE_V2 (opt-in: enables V2 fallback + tighter routing)
 OUTPUTS:
-  - GateVerdict dataclass (decision, class_label, confidence, crop paths,
-    bboxes, raw verdicts, reason)
+  - GateVerdict dataclass (classification, class_label, confidence, crop paths,
+    bboxes, raw verdicts, reason, top_class, top_confidence)
   - pairwise diff image at `<output_dir>/pairwise_diff.png` (Phase 6B.144,
     §11.66) — read by vehicle_identifier.identify_from_crops so Qwen can
     see what pixels changed between frame_3 and frame_4.
@@ -73,7 +73,7 @@ Architecture (LOCKED §11.37, modified §11.66 + §11.93 Phase 6B.169):
       with bbox overlay, so Qwen sees what pixels moved.
     per-class + per-camera threshold gate
     return GateVerdict
-  → listener.py routes by verdict.decision
+  → listener.py routes by verdict.classification
 
 Phase 6B.169 §11.93 (2026-08-31): crop source frame corrected. The diff
 bbox covers the *trail* of motion between two frames — at the LATER
@@ -92,18 +92,19 @@ the crops have no vehicle in them").
 Routing decision tree (LOCKED §11.37 + V2 §11.39 + §11.59 catchall fix):
   1. ANY crop high-conf vehicle-class → vehicle pipeline ("high_conf_vehicle")
   2. BOTH crops high-conf person → person pipeline ("high_conf_person")
-  3. ANY crop high-conf animal → suppress ("animal_suppressed_no_pipeline")
-  4. All low conf → suppress ("no_object_detected")
+  3. ANY crop high-conf animal → animal classification ("animal_classified")
+     (animal pipeline not yet built — classified for future routing)
+  4. All low conf → none ("no_object_detected")
   5. Mixed (vehicle somewhere in the high-conf mix) → vehicle pipeline
      ("mixed_vehicle_wins")
   5b. High-conf non-vehicle class with no vehicle anywhere in the mix →
-      suppress ("high_conf_<class>_not_vehicle_no_pipeline").
+      none ("high_conf_<class>_not_vehicle").
       §11.59 split: the prior catchall unconditionally emitted
       ("vehicle", <class>, ..., "mixed_vehicle_wins") regardless of
-      whether a vehicle was present. That produced decision=vehicle
+      whether a vehicle was present. That produced classification=vehicle
       class=person alerts that the vehicle pipeline could not process.
       225 occurrences in logs/launchctl-stderr.log
-      between 2026-08-23 and 2026-08-27. Now suppressed with the
+      between 2026-08-23 and 2026-08-27. Now routed to none with the
       observed class named in the reason for postmortem clarity.
   V2 §11.39: rule 5 requires vehicle conf >= 0.6 to override person conf >= 0.4.
 
@@ -297,8 +298,9 @@ VEHICLE_CLASSES: set[str] = {
     "bicycle",
 }
 
-# Animals: currently suppressed (no animal pipeline). Listed here so future
-# work has a clear group to route to when an animal pipeline is built.
+# Animals: classified (not suppressed) — animal pipeline not yet built.
+# Listed here so future work has a clear group to route to when an
+# animal pipeline is implemented.
 ANIMAL_CLASSES: set[str] = {
     "dog",
     "cat",
@@ -322,7 +324,7 @@ THRESHOLDS_BY_CLASS: dict[str, float] = {
     "motorcycle": 0.45,
     "bicycle": 0.45,
     "person": 0.35,
-    # Animals — only "confident" animal detections pass (currently suppressed)
+    # Animals — only "confident" animal detections pass (classified, not suppressed)
     "dog": 0.60,
     "cat": 0.60,
     "horse": 0.60,
@@ -369,7 +371,7 @@ V2_PERSON_OVERRIDE_MAX_CONF: float = 0.4  # person at or below is overridden by 
 # Public dataclass: GateVerdict
 # ---------------------------------------------------------------------------
 
-DecisionType = Literal["vehicle", "person", "suppress"]
+ClassificationType = DecisionType = Literal["vehicle", "person", "animal", "none"]
 
 
 @dataclass
@@ -382,8 +384,8 @@ class GateVerdict:
     on the gate's writes before reading them.
 
     Fields:
-      decision: routing decision — "vehicle" / "person" / "suppress"
-      class_label: top COCO class detected (or None if suppress)
+      classification: routing classification — "vehicle" / "person" / "animal" / "none"
+      class_label: top COCO class detected (or None if none)
       confidence: max confidence across both crops (0.0 if no detection)
       frames: 4 full frames as PIL.Image (BGR→RGB). Loaded once at gate
         start, used for diff + crops + downstream pipeline. This is the
@@ -416,9 +418,11 @@ class GateVerdict:
       reason: human-readable string for logging / audit
     """
 
-    decision: DecisionType
+    classification: ClassificationType
     class_label: str | None
     confidence: float
+    top_class: str  # raw YOLO top class for DEBUG logging
+    top_confidence: float  # raw YOLO top confidence for DEBUG logging
     frames: list = field(default_factory=list)  # list[PIL.Image.Image] — 4 full frames
     crop_a: object | None = None  # PIL.Image.Image | None
     crop_b: object | None = None  # PIL.Image.Image | None
@@ -440,13 +444,13 @@ class GateVerdict:
     raw_verdicts: list[QuickVerdict] = field(default_factory=list)
     reason: str = ""
 
-    @property
-    def is_suppress(self) -> bool:
-        return self.decision == "suppress"
+    def is_none(self) -> bool:
+        """Return True when classification is 'none' (skip this alert)."""
+        return self.classification == "none"
 
     @property
     def is_pass(self) -> bool:
-        return self.decision in ("vehicle", "person")
+        return self.classification in ("vehicle", "person", "animal")
 
 
 # ---------------------------------------------------------------------------
@@ -667,7 +671,7 @@ def _route_decision(
         other = verdict_a if top is verdict_b else verdict_b
         reason: str = top.reason or other.reason or "no_object_detected"
         return (
-            "suppress",
+            "none",
             top.top_class if top.top_confidence > 0 else None,
             top.top_confidence,
             reason,
@@ -699,13 +703,13 @@ def _route_decision(
         elif len(high_conf) == 2 and high_conf[1].top_class == "person":
             return ("person", "person", top.top_confidence, "high_conf_person")
 
-    # Rule 3: ANY crop high-conf animal → suppress (no animal pipeline)
+    # Rule 3: ANY crop high-conf animal → animal classification (animal pipeline not yet built)
     if top.top_class in ANIMAL_CLASSES:
         return (
-            "suppress",
+            "animal",
             top.top_class,
             top.top_confidence,
-            "animal_suppressed_no_pipeline",
+            "animal_classified",
         )
 
     # Rule 5: Mixed (person + other-not-vehicle, or other-not-vehicle alone)
@@ -728,13 +732,13 @@ def _route_decision(
             person_top.top_confidence >= V2_PERSON_OVERRIDE_MAX_CONF
             and vehicle_top.top_confidence < V2_VEHICLE_OVERRIDE_MIN_CONF
         ):
-            # Vehicle override not confident enough — suppress rather
+            # Vehicle override not confident enough — classify as none rather
             # than route a likely-person to the vehicle pipeline.
             return (
-                "suppress",
+                "none",
                 person_top.top_class,
                 person_top.top_confidence,
-                "v2_person_present_low_vehicle_override_suppressed",
+                "v2_person_present_low_vehicle_override_none",
             )
 
     # Catchall: at this point we have ≥1 high-conf verdict with a class
@@ -765,10 +769,10 @@ def _route_decision(
             "mixed_vehicle_wins",
         )
     return (
-        "suppress",
+        "none",
         top.top_class,
         top.top_confidence,
-        f"high_conf_{top.top_class}_not_vehicle_no_pipeline",
+        f"high_conf_{top.top_class}_not_vehicle",
     )
 
 
@@ -841,9 +845,11 @@ def run(
             f"[{alert_id}] motion_gate: expected 4 frame_paths, got {len(frame_paths)}"
         )
         return GateVerdict(
-            decision="suppress",
+            classification="none",
             class_label=None,
             confidence=0.0,
+            top_class="",
+            top_confidence=0.0,
             bbox_a=None,
             bbox_b=None,
             reason="wrong_frame_count",
@@ -870,9 +876,11 @@ def run(
     except Exception as e:
         log.error(f"[{alert_id}] motion_gate: failed to load frames: {e}")
         return GateVerdict(
-            decision="suppress",
+            classification="none",
             class_label=None,
             confidence=0.0,
+            top_class="",
+            top_confidence=0.0,
             bbox_a=None,
             bbox_b=None,
             reason="frame_load_failed",
@@ -1011,9 +1019,11 @@ def run(
                 )
                 reason = "no_subject_detected"
             return GateVerdict(
-                decision="suppress",
+                classification="none",
                 class_label=None,
                 confidence=0.0,
+                top_class="",
+                top_confidence=0.0,
                 frames=pil_frames,
                 bbox_a=None,
                 bbox_b=None,
@@ -1058,6 +1068,11 @@ def run(
     decision, class_label, confidence, reason = _route_decision(
         verdict_a, verdict_b, thresholds, v2=is_v2_enabled()
     )
+    # Pick the higher-confidence verdict's raw top_class/top_confidence
+    # for the debug fields on GateVerdict.
+    top_verdict = verdict_a if verdict_a.top_confidence >= verdict_b.top_confidence else verdict_b
+    top_class = top_verdict.top_class
+    top_confidence = top_verdict.top_confidence
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
     log.info(
@@ -1084,9 +1099,11 @@ def run(
         )
 
     return GateVerdict(
-        decision=decision,
+        classification=decision,
         class_label=class_label,
         confidence=confidence,
+        top_class=top_class,
+        top_confidence=top_confidence,
         frames=pil_frames,
         crop_a=crop_a_pil,
         crop_b=crop_b_pil,

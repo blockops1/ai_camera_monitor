@@ -19,7 +19,7 @@ from listener.pipeline import run
 
 
 def _make_gate_verdict(
-    decision="vehicle",
+    classification="vehicle",
     class_label="car",
     confidence=0.85,
     reason="high_conf_vehicle",
@@ -27,7 +27,7 @@ def _make_gate_verdict(
 ):
     """Build a mock GateVerdict for pipeline tests."""
     v = MagicMock(spec=GateVerdict)
-    v.decision = decision
+    v.classification = classification
     v.class_label = class_label
     v.confidence = confidence
     v.reason = reason
@@ -35,6 +35,7 @@ def _make_gate_verdict(
     v.crop_b = None
     v.pairwise_diff_path = pairwise_diff_path
     v.frames = []
+    v.is_none = lambda: classification == "none"
     return v
 
 
@@ -77,9 +78,9 @@ class TestPipelineRun:
         assert result["classification"] == "vehicle"
 
     def test_run_dropped_by_gate(self):
-        """run returns 'dropped' when gate returns decision='suppress'."""
+        """run returns 'dropped' when gate returns classification='none'."""
         alert = _make_alert()
-        gate_v = _make_gate_verdict(decision="suppress", reason="no_object_detected")
+        gate_v = _make_gate_verdict(classification="none", reason="no_object_detected")
 
         mock_cooldown = MagicMock()
         mock_cooldown.should_suppress.return_value = False

@@ -95,8 +95,7 @@ class TestScannerOnProductionTree:
     def test_zero_matches(self, modules_on_clean_tree: list):
         """Scanner must produce zero findings on the clean production tree."""
         assert len(modules_on_clean_tree) > 0, (
-            "Expected at least one module with public symbols in the "
-            "production tree"
+            "Expected at least one module with public symbols in the production tree"
         )
         repo_root = Path(__file__).resolve().parent.parent
         findings = scan(repo_root)
@@ -132,9 +131,7 @@ class TestScannerDetectsOrphans:
         tmpdir.mkdir(exist_ok=True)
         try:
             orphan = tmpdir / "orphan_fn.py"
-            orphan.write_text(
-                "def never_called():\n" "    pass\n"
-            )
+            orphan.write_text("def never_called():\n    pass\n")
             # Temporarily add tmpdir to PROD_DIRS
             import check_no_orphan_modules as scanner_mod
 
@@ -157,9 +154,7 @@ class TestScannerDetectsOrphans:
         tmpdir.mkdir(exist_ok=True)
         try:
             orphan = tmpdir / "orphan_class.py"
-            orphan.write_text(
-                "class NeverUsed:\n" "    pass\n"
-            )
+            orphan.write_text("class NeverUsed:\n    pass\n")
             import check_no_orphan_modules as scanner_mod
 
             orig = scanner_mod._PROD_DIRS
@@ -180,13 +175,10 @@ class TestScannerDetectsOrphans:
         tmpdir.mkdir(exist_ok=True)
         try:
             used = tmpdir / "used_module.py"
-            used.write_text("def used_fn():\n" "    pass\n")
+            used.write_text("def used_fn():\n    pass\n")
             # Create a consumer
             consumer = tmpdir / "consumer.py"
-            consumer.write_text(
-                "from used_module import used_fn\n"
-                "result = used_fn()\n"
-            )
+            consumer.write_text("from used_module import used_fn\nresult = used_fn()\n")
             import check_no_orphan_modules as scanner_mod
 
             orig = scanner_mod._PROD_DIRS

@@ -146,7 +146,7 @@
     {
       "id": "US-021e",
       "title": "hourly cleanup of alert artifacts older than 24 hours under data/frames/<camera_id>/<alert_id>/ (launchd-driven)",
-      "status": "todo",
+      "status": "done",
       "depends_on": [
         "US-021a",
         "US-021b",

@@ -62,14 +62,17 @@ def _make_frame_dir(tmp_path: Path) -> list[str]:
 
 
 def _make_gate_verdict_mock(
-    decision="suppress",
+    classification="none",
     pairwise_diff_path=None,
     crop_a=None,
     crop_b=None,
 ):
     """Build a GateVerdict mock."""
     v = MagicMock(spec=GateVerdict)
-    v.decision = decision
+    v.classification = classification
+    v.classification_type = classification
+    v.is_none = MagicMock(return_value=classification == "none")
+    v.is_pass = MagicMock(return_value=classification in ("vehicle", "person", "animal"))
     v.class_label = None
     v.confidence = 0.0
     v.crop_a = crop_a
@@ -150,7 +153,9 @@ class TestSmokeRoundTrip:
             mock_crop = Image.fromarray(arr, mode="RGB")
 
             gate_v = MagicMock(spec=GateVerdict)
-            gate_v.decision = "vehicle"
+            gate_v.classification = "vehicle"
+            gate_v.is_none = MagicMock(return_value=False)
+            gate_v.is_pass = MagicMock(return_value=True)
             gate_v.class_label = "car"
             gate_v.confidence = 0.9
             gate_v.reason = "test"
@@ -240,7 +245,9 @@ class TestSmokeRoundTrip:
             arr = np.zeros((64, 64, 3), dtype=np.uint8)
 
             gate_v = MagicMock(spec=GateVerdict)
-            gate_v.decision = "vehicle"
+            gate_v.classification = "vehicle"
+            gate_v.is_none = MagicMock(return_value=False)
+            gate_v.is_pass = MagicMock(return_value=True)
             gate_v.class_label = "car"
             gate_v.confidence = 0.9
             gate_v.reason = "test"

@@ -27,7 +27,7 @@ from infra.alert_artifacts import AlertArtifacts, prepare_alert_artifacts
 class FakeGateVerdict:
     """Minimal GateVerdict-like object for tests."""
 
-    decision: str = "vehicle"
+    classification: str = "vehicle"
     class_label: str | None = "car"
     confidence: float = 0.85
     frames: list = field(default_factory=list)  # list[PIL.Image.Image]
@@ -73,7 +73,7 @@ def test_prepare_writes_three_files():
         cb = _make_cropped_frame(64, 48)
 
         verdict = FakeGateVerdict(
-            decision="vehicle",
+            classification="vehicle",
             class_label="car",
             confidence=0.85,
             frames=[f1, f2, f3, f4],
@@ -122,7 +122,7 @@ def test_prepare_returns_None_for_missing_bbox():
         f4 = _make_frame(160, 120)
 
         verdict = FakeGateVerdict(
-            decision="vehicle",
+            classification="vehicle",
             class_label="car",
             confidence=0.85,
             frames=[f1, f2, f3, f4],
@@ -158,7 +158,7 @@ def test_prepare_with_no_motion_returns_no_crops():
         f4 = _make_frame(160, 120)
 
         verdict = FakeGateVerdict(
-            decision="vehicle",
+            classification="vehicle",
             class_label="car",
             confidence=0.85,
             frames=[f1, f2, f3, f4],

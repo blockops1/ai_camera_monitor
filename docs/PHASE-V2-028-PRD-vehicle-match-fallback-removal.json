@@ -1,0 +1,64 @@
+{
+  "prd_id": "PHASE-V2-028",
+  "title": "vehicle match fallback removal",
+  "author": "the operator",
+  "status": "active",
+  "phase": "v2-pipeline-rearchitecture",
+  "plan_section": "v2-vehicle-match",
+  "trigger": "FROZEN inventory (V2-023, 2026-09-10) identified 2 IDENTIFIED entries assigned to V2-028: telegram_formatter/detail.py:54 (.get() fallback for class defaults to 'unknown') and telegram_formatter/match_alert.py:45 (.get() fallback for matched key defaults to False). The motivation: both entries silently mask malformed VM2 or match output, causing the operator to see 'unknown' classes or 'unrecognized vehicle' without any error signal.",
+  "background": "The vehicle match path spans two modules. In telegram_formatter/detail.py:54, the code chains `.get(\"class_confirmed\") or .get(\"class\", \"unknown\")` — if both keys are absent (malformed VM2 output or schema drift), the caption silently says \"Class confirmed: unknown\" instead of raising, and the operator never sees that the pipeline produced incomplete data. In telegram_formatter/match_alert.py:45, the code checks `match_result.get(\"matched\")` — if the key is missing (malformed match output), the message silently says \"unrecognized vehicle\" without any error signal, causing the operator to see a false-negative. Both are P03 (.get() returning fallback) patterns from the V2-023 inventory.",
+  "shipping_definition": "All US-028 stories marked done; pytest 150/150 (or higher) green; tree clean; telegram_formatter/detail.py:54 raises ValueError when neither class_confirmed nor class key exists in vm2_result; telegram_formatter/match_alert.py:45 raises ValueError when matched key is missing from match_result; both callers in listener/pipeline.py updated to handle the new exception; tests/assertions verify that malformed input raises; docs/FALLBACK-INVENTORY.md entries for US-028a and US-028b flipped to REMOVED with commit SHAs.",
+  "scope_exclusions": [
+    "Editing vehicle_matcher/match.py is NOT this PRD — it already returns {\"matched\": False} explicitly on no-match; the issue is the consumer (match_alert.py) that silently interprets a missing key as False.",
+    "Editing listener/pipeline.py's VM2 contract is NOT this PRD — the contract itself is fine; this PRD only makes the downstream consumers fail-fast on contract violations.",
+    "Adding VM2 schema validation is NOT this PRD — a future PRD may validate VM2 output at the pipeline boundary; this PRD only fixes the two .get() fallbacks.",
+    "Editing telegram_formatter/alert.py or dispatcher.py is NOT this PRD — they are covered by PRD-V2-027."
+  ],
+  "design_principles": [
+    "Fail-fast on contract violations. If a function's input contract requires a key, accessing it with .get() and returning a default silently masks the violation. Use direct key access (d[\"key\"]) which raises KeyError, then convert to a clear ValueError in the caller.",
+    "No silent 'unknown' defaults. When the pipeline produces incomplete data, the operator MUST see an error signal. A caption of 'unknown' or 'unrecognized' without an error is worse than crashing — it teaches the operator to ignore the signal.",
+    "Each story is independent. detail.py:54 and match_alert.py:45 are in different functions called at different pipeline stages. They have no shared state and no cross-dependency.",
+    "No new modules. Both fixes are local edits — add a validation check and raise ValueError. No new files, no new imports beyond what's already present."
+  ],
+  "stories": [
+    {
+      "id": "US-028a",
+      "title": "detail.py:54 raise ValueError when neither class_confirmed nor class key exists in vm2_result",
+      "story_type": "refactor",
+      "acceptance": [
+        "telegram_formatter/detail.py:54 checks for the presence of 'class_confirmed' and 'class' keys in vm2_result before accessing them.",
+        "If both keys are missing, raise ValueError(f\"vm2_result missing 'class_confirmed' and 'class' keys: {vm2_result}\").",
+        "If 'class_confirmed' exists, use it. If only 'class' exists, use it. The fallback chain still works for valid input.",
+        "The existing caller in listener/pipeline.py (stage 7) does NOT need updating — the ValueError propagates through the pipeline's existing error handling.",
+        "tests/test_detail_build_message.py (or equivalent) covers: (a) valid vm2_result with class_confirmed, (b) valid vm2_result with only class, (c) malformed vm2_result missing both keys -> raises ValueError.",
+        "Single commit: 'detail.py:54 fail-fast on missing class key (US-028a)'.",
+        "pytest tests/ --ignore=tests/test_home_env.py still 150/150 (or higher) green."
+      ],
+      "files_modified": ["telegram_formatter/detail.py"],
+      "files_added": ["tests/test_detail_fallback.py"],
+      "depends_on": []
+    },
+    {
+      "id": "US-028b",
+      "title": "match_alert.py:45 raise ValueError when matched key is missing from match_result",
+      "story_type": "refactor",
+      "acceptance": [
+        "telegram_formatter/match_alert.py:45 checks for the presence of 'matched' key in match_result before accessing it.",
+        "If 'matched' is missing, raise ValueError(f\"match_result missing 'matched' key: {match_result}\").",
+        "If 'matched' is present (True or False), proceed as before — True for recognized vehicle, False for unrecognized.",
+        "The caller in listener/pipeline.py (stage 9) does NOT need updating — the ValueError propagates through the pipeline's existing error handling.",
+        "tests/test_match_alert_build_message.py (or equivalent) covers: (a) match_result with matched=True, (b) match_result with matched=False, (c) malformed match_result missing 'matched' -> raises ValueError.",
+        "Single commit: 'match_alert.py:45 fail-fast on missing matched key (US-028b)'.",
+        "pytest tests/ --ignore=tests/test_home_env.py still 150/150 (or higher) green."
+      ],
+      "files_modified": ["telegram_formatter/match_alert.py"],
+      "files_added": ["tests/test_match_alert_fallback.py"],
+      "depends_on": []
+    }
+  ],
+  "depends_on_story_index": {
+    "US-028a": [],
+    "US-028b": []
+  },
+  "dispatch_order": ["US-028a", "US-028b"]
+}

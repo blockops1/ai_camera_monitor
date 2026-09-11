@@ -47,7 +47,7 @@ from vehicle_matcher import match_vehicle
 
 def _gsum(v: GateVerdict) -> dict:
     return {
-        "decision": v.decision,
+        "classification": v.classification,
         "class_label": v.class_label,
         "confidence": v.confidence,
         "reason": v.reason,
@@ -109,7 +109,7 @@ def run(alert: dict) -> dict:
     )
 
     # Stage 5: if gate suppresses, drop.
-    if gate_verdict.decision == "suppress":
+    if gate_verdict.is_none():
         return {
             "status": "dropped",
             "camera_id": camera_id,
