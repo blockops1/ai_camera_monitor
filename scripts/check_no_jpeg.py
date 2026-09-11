@@ -66,7 +66,9 @@ _EXCLUDE_DIRS: set[str] = {
 
 # Known false positives: (relative_path, line_number)
 _KNOWN_FP: set[tuple[str, int]] = {
-    ("infra/vision_analyzer.py", 111),  # mime fallback, not JPEG producer
+    ("infra/vision_analyzer.py", 111),   # mime fallback, not JPEG producer
+    ("telegram_formatter/dispatcher.py", 38),  # _sniff_mime docstring mentions .jpg
+    ("telegram_formatter/dispatcher.py", 49),  # _sniff_mime returns image/jpeg, .jpg for JPEG files
 }
 
 

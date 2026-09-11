@@ -53,12 +53,12 @@ def test_dispatch_with_photos_uses_sendMediaGroup_with_document(mock_llama_serve
     This is the lossless-PNG guarantee. sendPhoto would re-encode to JPEG
     server-side (operator zero-JPEG directive 2026-09-09).
     """
-    # Write two fake PNG files (1x1 transparent PNGs).
-    png_bytes = b"\x89PNG\r\n\x1a\n"
-    photo1 = tmp_path / "photo1.png"
-    photo2 = tmp_path / "photo2.png"
-    photo1.write_bytes(png_bytes)
-    photo2.write_bytes(png_bytes)
+    # Write two fake JPEG files (matching pipeline output).
+    jpeg_bytes = b"\xff\xd8\xff\xe0"
+    photo1 = tmp_path / "photo1.jpg"
+    photo2 = tmp_path / "photo2.jpg"
+    photo1.write_bytes(jpeg_bytes)
+    photo2.write_bytes(jpeg_bytes)
     mock_llama_server.post.return_value = httpx.Response(200, json={"ok": True})
 
     responses = dispatcher.dispatch(
@@ -77,8 +77,11 @@ def test_dispatch_with_photos_uses_sendMediaGroup_with_document(mock_llama_serve
     files = last_call.kwargs["files"]
     assert len(files) == 2
     # Each file tuple: (form_field_name, (filename, bytes, mime))
-    assert files[0][1][2] == "image/png"
-    assert files[1][1][2] == "image/png"
+    assert files[0][1][2] == "image/jpeg"
+    assert files[1][1][2] == "image/jpeg"
+    # File suffixes match the actual MIME.
+    assert files[0][1][0].endswith(".jpg")
+    assert files[1][1][0].endswith(".jpg")
     # The data field carries chat_id + media descriptor as JSON.
     data = last_call.kwargs["data"]
     assert data["chat_id"] == "12345"
