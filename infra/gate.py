@@ -1076,8 +1076,9 @@ def run(
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
     log.info(
-        f"[{alert_id}] motion_gate: decision={decision} class={class_label} "
-        f"conf={confidence:.2f} reason={reason} elapsed={elapsed_ms:.1f}ms"
+        f"[{alert_id}] motion_gate: classification={decision} "
+        f"top_class={top_class} top_confidence={top_confidence:.2f} "
+        f"reason={reason} elapsed={elapsed_ms:.1f}ms"
     )
 
     # ---- pairwise differential image for Qwen (Phase 6B.144 §11.66) ----
