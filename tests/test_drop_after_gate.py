@@ -94,9 +94,6 @@ class TestPersonClassification:
             pairwise_diff_path=diff_path,
         )
 
-        mock_cooldown = MagicMock()
-        mock_cooldown.should_suppress.return_value = False
-
         vm1_result = {"class": "person", "confidence": 0.90}
         tg1 = {"caption": "Detected: person", "photos": []}
         vm2_result = {"class_confirmed": "person", "distinctive_features": []}
@@ -104,7 +101,7 @@ class TestPersonClassification:
         tg3 = {}
 
         with (
-            patch("listener.pipeline.PipelineCooldown", return_value=mock_cooldown),
+            patch("listener.pipeline.should_suppress", return_value=False),
             patch("listener.pipeline.run_gate", return_value=gate_v),
             patch(
                 "listener.pipeline.prepare_alert_artifacts",
@@ -116,6 +113,7 @@ class TestPersonClassification:
             patch("listener.pipeline.build_detail_message", return_value=tg2),
             patch("listener.pipeline._load_candidates", return_value=[]),
             patch("listener.pipeline.build_match_message", return_value=tg3),
+            patch("listener.pipeline.record_hit") as mock_record,
         ):
             result = run(alert)
 
@@ -126,7 +124,8 @@ class TestPersonClassification:
         assert "vm2_result" in result
         assert "tg2" in result
         # record_hit should be called since pipeline succeeded
-        mock_cooldown.record_hit.assert_called_once_with("CAM1", "person")
+        mock_record.assert_called_once()
+        assert mock_record.call_args[0][:2] == ("CAM1", "person")
 
 
 # ---------------------------------------------------------------------------
@@ -152,9 +151,6 @@ class TestAnimalClassification:
             pairwise_diff_path=diff_path,
         )
 
-        mock_cooldown = MagicMock()
-        mock_cooldown.should_suppress.return_value = False
-
         vm1_result = {"class": "animal", "confidence": 0.80}
         tg1 = {"caption": "Detected: animal", "photos": []}
         vm2_result = {"class_confirmed": "animal", "distinctive_features": []}
@@ -162,7 +158,7 @@ class TestAnimalClassification:
         tg3 = {}
 
         with (
-            patch("listener.pipeline.PipelineCooldown", return_value=mock_cooldown),
+            patch("listener.pipeline.should_suppress", return_value=False),
             patch("listener.pipeline.run_gate", return_value=gate_v),
             patch(
                 "listener.pipeline.prepare_alert_artifacts",
@@ -174,6 +170,7 @@ class TestAnimalClassification:
             patch("listener.pipeline.build_detail_message", return_value=tg2),
             patch("listener.pipeline._load_candidates", return_value=[]),
             patch("listener.pipeline.build_match_message", return_value=tg3),
+            patch("listener.pipeline.record_hit") as mock_record,
         ):
             result = run(alert)
 
@@ -184,7 +181,8 @@ class TestAnimalClassification:
         assert "vm2_result" in result
         assert "tg2" in result
         # record_hit should be called since pipeline succeeded
-        mock_cooldown.record_hit.assert_called_once_with("CAM1", "animal")
+        mock_record.assert_called_once()
+        assert mock_record.call_args[0][:2] == ("CAM1", "animal")
 
 
 # ---------------------------------------------------------------------------
@@ -208,14 +206,12 @@ class TestNoneClassification:
             pairwise_diff_path=None,
         )
 
-        mock_cooldown = MagicMock()
-        mock_cooldown.should_suppress.return_value = False
-
         with (
-            patch("listener.pipeline.PipelineCooldown", return_value=mock_cooldown),
+            patch("listener.pipeline.should_suppress", return_value=False),
             patch("listener.pipeline.run_gate", return_value=gate_v),
             patch("listener.pipeline.prepare_alert_artifacts") as mock_artifacts,
             patch("listener.pipeline.verify_class") as mock_verify,
+            patch("listener.pipeline.record_hit") as mock_record,
         ):
             result = run(alert)
 
@@ -225,7 +221,7 @@ class TestNoneClassification:
         assert result["classification"] == "none"
 
         # Stage 3 functions should NOT have been called
-        mock_cooldown.record_hit.assert_not_called()
+        mock_record.assert_not_called()
         mock_artifacts.assert_not_called()
         mock_verify.assert_not_called()
 
@@ -243,12 +239,9 @@ class TestNoneClassification:
             pairwise_diff_path=None,
         )
 
-        mock_cooldown = MagicMock()
-        mock_cooldown.should_suppress.return_value = False
-
         # Patch the stage 3 functions — if any of them is called, the test fails
         with (
-            patch("listener.pipeline.PipelineCooldown", return_value=mock_cooldown),
+            patch("listener.pipeline.should_suppress", return_value=False),
             patch("listener.pipeline.run_gate", return_value=gate_v),
             patch("listener.pipeline.prepare_alert_artifacts") as mock_artifacts,
             patch("listener.pipeline.verify_class") as mock_verify,
@@ -256,6 +249,7 @@ class TestNoneClassification:
             patch("listener.pipeline.detail_class") as mock_detail,
             patch("listener.pipeline.build_detail_message") as mock_tg2,
             patch("listener.pipeline.build_match_message") as mock_match,
+            patch("listener.pipeline.record_hit") as mock_record,
         ):
             result = run(alert)
 
@@ -270,7 +264,7 @@ class TestNoneClassification:
         mock_detail.assert_not_called()
         mock_tg2.assert_not_called()
         mock_match.assert_not_called()
-        mock_cooldown.record_hit.assert_not_called()
+        mock_record.assert_not_called()
 
     def test_none_classification_log_format(self, caplog):
         """The dropped alert is logged at INFO with the expected format."""
@@ -289,11 +283,8 @@ class TestNoneClassification:
             pairwise_diff_path=None,
         )
 
-        mock_cooldown = MagicMock()
-        mock_cooldown.should_suppress.return_value = False
-
         with (
-            patch("listener.pipeline.PipelineCooldown", return_value=mock_cooldown),
+            patch("listener.pipeline.should_suppress", return_value=False),
             patch("listener.pipeline.run_gate", return_value=gate_v),
         ):
             result = run(alert)
