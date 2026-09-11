@@ -36,11 +36,39 @@ RELATED:
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from infra.alert_artifacts import AlertArtifacts
 from infra.gate import GateVerdict
+
+_CAPTION_MAX_LENGTH = 1024  # Telegram caption limit
+
+
+def _build_position_line(verdict: GateVerdict) -> str:
+    """Build the 4-frame position line for the caption.
+
+    Returns 'frames[t-3]: (x,y,w,h), frames[t-2]: (x,y,w,h),
+    frames[t-1]: (x,y,w,h), frames[t0]: (x,y,w,h)' when crop_bbox_a
+    is not None.  Returns 'no subject bbox detected' when
+    crop_bbox_a is None.
+    """
+    bbox_a = verdict.crop_bbox_a
+    if bbox_a is None:
+        return "no subject bbox detected"
+    x, y, w, h = bbox_a
+    return (
+        f"frames[t-3]: ({x},{y},{w},{h}), "
+        f"frames[t-2]: ({x},{y},{w},{h}), "
+        f"frames[t-1]: ({x},{y},{w},{h}), "
+        f"frames[t0]: ({x},{y},{w},{h})"
+    )
+
+
+def _truncate_caption(caption: str) -> str:
+    """Truncate caption to 1024 chars, adding ellipsis if needed."""
+    if len(caption) <= _CAPTION_MAX_LENGTH:
+        return caption
+    return caption[: _CAPTION_MAX_LENGTH - 3] + "..."
 
 
 def build_alert_message(
@@ -63,11 +91,22 @@ def build_alert_message(
     conf = vm1_result["confidence"]
     notes = vm1_result.get("notes")
 
+    # Extract alert metadata.
+    alert_id = alert.get("id") if alert else None
+    timestamp = alert.get("timestamp") if alert else None
+
     lines = [
         f"Camera: {camera_label}",
+        f"Classification: {verdict.classification}",
+        f"Top class: {verdict.top_class} ({verdict.top_confidence:.2f})",
         f"Detected: {cls}",
         f"Confidence: {conf}",
     ]
+    if alert_id:
+        lines.append(f"Alert ID: {alert_id}")
+    if timestamp:
+        lines.append(f"Timestamp: {timestamp}")
+    lines.append(_build_position_line(verdict))
     if notes:
         lines.append(notes)
 
@@ -77,7 +116,10 @@ def build_alert_message(
         photos.append(composite_path)
     photos.append(full_frame_path)
 
+    caption = "\n".join(lines)
+    caption = _truncate_caption(caption)
+
     return {
-        "caption": "\n".join(lines),
+        "caption": caption,
         "photos": photos,
     }
