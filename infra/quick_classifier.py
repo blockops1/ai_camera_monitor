@@ -60,6 +60,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Literal
 
 UTC = timezone.utc  # compat shim for Python 3.9 (UTC was added in 3.11)
 from pathlib import Path
@@ -153,6 +154,25 @@ VEHICLE_CLASSES: frozenset[str] = frozenset(
 ANIMAL_CLASSES: frozenset[str] = frozenset(
     {"cat", "dog", "horse", "sheep", "cow", "bear", "bird"}
 )
+
+
+def _class_to_bucket(class_id: int) -> Literal['vehicle', 'person', 'animal', 'none']:
+    """Map a COCO class_id to its surveillance bucket.
+
+    Mapping rule: person classes → 'person', vehicle classes → 'vehicle',
+    animal classes → 'animal', everything else → 'none'.
+    """
+    if class_id >= len(COCO_NAMES):
+        return 'none'
+    name = COCO_NAMES[class_id]
+    if name in PERSON_CLASSES:
+        return 'person'
+    if name in VEHICLE_CLASSES:
+        return 'vehicle'
+    if name in ANIMAL_CLASSES:
+        return 'animal'
+    return 'none'
+
 
 # Priority floor — a surveillance-class detection must clear this conf to
 # activate priority. Below the floor, the detection is treated as noise
