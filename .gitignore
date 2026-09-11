@@ -33,3 +33,10 @@ logs/*.log
 /public/
 /scratch/
 .kanban-bodies/
+
+# ML model weights (large binaries; release via artifacts, not source)
+/models/
+*.pt
+*.onnx
+*.weights
+yolo*.pt
