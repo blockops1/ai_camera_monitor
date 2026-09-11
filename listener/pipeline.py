@@ -1,5 +1,5 @@
 """
-pipeline.py — Stages 1-11 of the 11-stage linear alert pipeline.
+pipeline.py — Stages 1-12 of the 12-stage linear alert pipeline.
 
 STATUS: stable
 THREAD SAFETY: single-threaded
@@ -18,6 +18,7 @@ DOES NOT DO:
     - Severity scoring (no severity fields in pipeline)
     - Per-class dispatch (single linear flow; mode dispatch in detail_class)
 CALLS INTO:
+    - infra.alert_artifacts: prepare_alert_artifacts() for crops + composite
     - infra.gate: run_gate() for YOLO motion gate
     - infra.pipeline_cooldown: PipelineCooldown.record_hit
     - infra.vision_analyzer: verify_class(), detail_class()
@@ -33,8 +34,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from infra.alert_artifacts import prepare_alert_artifacts
 from infra.gate import GateVerdict, run as run_gate
-from infra.paths import VEHICLE_KNOWN_FILE, data_dir_for, empty_png_path
+from infra.paths import VEHICLE_KNOWN_FILE, data_dir_for
 from infra.pipeline_cooldown import PipelineCooldown
 from infra.vision_analyzer import detail_class, verify_class
 from telegram_formatter.alert import build_alert_message
@@ -50,69 +52,6 @@ def _gsum(v: GateVerdict) -> dict:
         "confidence": v.confidence,
         "reason": v.reason,
     }
-
-
-def _ensure_sentinel() -> None:
-    """Ensure the shared sentinel PNG exists on disk."""
-    _P = (
-        b"\x89PNG\r\n\x1a\n"
-        b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-        b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
-        b"\x00\x00\x00\rIDATx\x9cc\xfc\xff\xff?\x00\x05\xfe\x02"
-        b"\xfeA\xb6\x95"
-        b"\x00\x00\x00\x00IEND\xaeB`\x82"
-    )
-    sentinel = empty_png_path()
-    if not sentinel.is_file():
-        sentinel.write_bytes(_P)
-
-
-def _crop_paths(
-    crop_a, crop_b, camera_id: str, alert_id: str
-) -> tuple[str, str]:
-    """Save crops (or sentinel) to the canonical alert-scoped directory.
-
-    Each crop path lives at ``data/frames/<camera_id>/<alert_id>/crop_{a,b}.png``.
-    When a crop is None, the sentinel PNG is written to that path instead.
-    The shared sentinel source is ``data/_sentinels/_empty.png`` (via
-    :func:`infra.paths.empty_png_path`).
-    """
-    out_dir = data_dir_for(camera_id, alert_id)
-    a_p = str(out_dir / "crop_a.png")
-    b_p = str(out_dir / "crop_b.png")
-    sentinel = empty_png_path()
-    # Ensure sentinel exists on disk before copying.
-    _ensure_sentinel()
-    if crop_a is not None:
-        crop_a.save(a_p, format="PNG", optimize=False)
-    else:
-        Path(a_p).write_bytes(sentinel.read_bytes())
-    if crop_b is not None:
-        crop_b.save(b_p, format="PNG", optimize=False)
-    else:
-        Path(b_p).write_bytes(sentinel.read_bytes())
-    return a_p, b_p
-
-
-def _tiny_png() -> str:
-    """Return the sentinel path (idempotent — writes only on first call).
-
-    Kept for backward-compat with any code that still calls _tiny_png()
-    directly. The sentinel lives at <PROJECT_ROOT>/data/_sentinels/_empty.png.
-    """
-    p = str(empty_png_path())
-    _sentinel = empty_png_path()
-    if not _sentinel.is_file():
-        _P = (
-            b"\x89PNG\r\n\x1a\n"
-            b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
-            b"\x00\x00\x00\rIDATx\x9cc\xfc\xff\xff?\x00\x05\xfe\x02"
-            b"\xfeA\xb6\x95"
-            b"\x00\x00\x00\x00IEND\xaeB`\x82"
-        )
-        _sentinel.write_bytes(_P)
-    return p
 
 
 def _load_candidates() -> list[dict]:
@@ -138,8 +77,8 @@ def _load_candidates() -> list[dict]:
 
 
 def run(alert: dict) -> dict:
-    """Stages 1-11: extract, cooldown, frames, gate, record, verify, TG#1,
-    VM2 detail, TG#2, vehicle match, TG#3."""
+    """Stages 1-12: extract, cooldown, frames, gate, drop-if-suppressed,
+    record, prepare-artifacts, verify, TG#1, VM2 detail, TG#2, vehicle match, TG#3."""
     camera_id = alert.get("camera_id", "unknown")
     alert_id = alert.get("id", camera_id)
     classification = alert.get("classification", "motion")
@@ -166,7 +105,7 @@ def run(alert: dict) -> dict:
         frame_paths=frames,
         camera_name=camera_id,
         alert_id=alert.get("id", camera_id),
-        output_dir="/tmp",
+        output_dir=str(data_dir_for(camera_id, alert.get("id", camera_id))),
     )
 
     # Stage 5: if gate suppresses, drop.
@@ -182,13 +121,22 @@ def run(alert: dict) -> dict:
     # Stage 6: record_hit.
     cooldown.record_hit(camera_id, classification)
 
-    # Stage 7: verify_class + build TG#1.
-    a_p, b_p = _crop_paths(
-        gate_verdict.crop_a,
-        gate_verdict.crop_b,
-        camera_id,
-        alert_id,
+    # Stage 7: prepare alert artifacts (crops + composite) via prepare_alert_artifacts.
+    output_dir = str(data_dir_for(camera_id, alert_id))
+    artifacts = prepare_alert_artifacts(
+        gate_verdict=gate_verdict,
+        frame_paths=frames,
+        output_dir=output_dir,
     )
+    alert["artifacts"] = artifacts
+    a_p = artifacts.crop_a_path
+    b_p = artifacts.crop_b_path
+
+    # Stage 8: verify_class + build TG#1 (reads crop paths from artifacts).
+    if a_p is None or b_p is None:
+        raise RuntimeError(
+            f"gate produced no crops for alert {alert.get('id')}"
+        )
     vm1_result = verify_class(a_p, b_p)
 
     if gate_verdict.pairwise_diff_path is None:
@@ -205,22 +153,22 @@ def run(alert: dict) -> dict:
         alert=alert,
     )
 
-    # Stage 8: detail_class (VM2) — mode from vm1_result["class"].
+    # Stage 9: detail_class (VM2) — mode from vm1_result["class"].
     mode = vm1_result.get("class", "vehicle")
     vm2_result = detail_class(mode, a_p, b_p)
 
-    # Stage 9: build TG#2 via detail formatter.
+    # Stage 10: build TG#2 via detail formatter.
     tg2 = build_detail_message(
         mode, vm2_result, Path(a_p), Path(b_p), camera_label=camera_label
     )
 
-    # Stage 10: vehicle match (vehicle only).
+    # Stage 11: vehicle match (vehicle only).
     match_result: dict = {"matched": False}
     if mode == "vehicle":
         candidates = _load_candidates()
         match_result = match_vehicle(vm2_result, candidates)
 
-    # Stage 11: build TG#3 (vehicle only).
+    # Stage 12: build TG#3 (vehicle only).
     tg3 = {}
     if mode == "vehicle":
         tg3 = build_match_message(match_result, vm2_result)
