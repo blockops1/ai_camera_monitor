@@ -76,8 +76,12 @@ class TestScannerOnProductionTree:
         assert total > 0, "Expected at least one .py file in production dirs"
 
     def test_known_fp_excluded(self, repo_root: Path):
-        """The known false-positive line in vision_analyzer.py must be excluded."""
-        assert _KNOWN_FP == {("infra/vision_analyzer.py", 111)}
+        """Known false-positive lines (vision_analyzer mime fallback + dispatcher _sniff_mime) must be excluded."""
+        assert _KNOWN_FP == {
+            ("infra/vision_analyzer.py", 111),  # mime fallback, not JPEG producer
+            ("telegram_formatter/dispatcher.py", 38),  # _sniff_mime docstring mentions .jpg
+            ("telegram_formatter/dispatcher.py", 49),  # _sniff_mime returns image/jpeg, .jpg
+        }
 
     def test_main_exits_zero(self, repo_root: Path):
         """CLI invocation must exit 0 on the clean tree."""
