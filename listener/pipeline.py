@@ -32,6 +32,7 @@ CALLS INTO:
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from infra.alert_artifacts import prepare_alert_artifacts
@@ -43,6 +44,8 @@ from telegram_formatter.alert import build_alert_message
 from telegram_formatter.detail import build_detail_message
 from telegram_formatter.match_alert import build_match_message
 from vehicle_matcher import match_vehicle
+
+log = logging.getLogger(__name__)
 
 
 def _gsum(v: GateVerdict) -> dict:
@@ -108,14 +111,20 @@ def run(alert: dict) -> dict:
         output_dir=str(data_dir_for(camera_id, alert.get("id", camera_id))),
     )
 
-    # Stage 5: if gate suppresses, drop.
+    # Stage 5: if gate returns classification='none', drop immediately.
+    # NO cooldown check, NO record_hit, NO cascade call, NO Telegram dispatch.
     if gate_verdict.is_none():
+        log.info(
+            f"pipeline: dropped alert_id={alert.get('id', camera_id)} "
+            f"camera={camera_id} classification=none "
+            f"top_class='{gate_verdict.top_class}' "
+            f"top_confidence={gate_verdict.top_confidence} "
+            f"reason=no_class"
+        )
         return {
             "status": "dropped",
-            "camera_id": camera_id,
-            "classification": classification,
-            "reason": gate_verdict.reason,
-            "gate": _gsum(gate_verdict),
+            "reason": "no_class",
+            "classification": "none",
         }
 
     # Stage 6: record_hit.
