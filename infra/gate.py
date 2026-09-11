@@ -1041,11 +1041,10 @@ def run(
 
     # ---- classify both crops ----
     # §11.176 (2026-09-06): gate writes NO crop files. The canonical
-    # crop emitter is listener._frame_diff_fn (pairwise diff on
-    # frame_2→frame_3 and frame_3→frame_4 → crop_a, crop_b). Gate
-    # disk writes for crop_a_path/crop_b_path were legacy artifacts
-    # — zero consumers in single_pipeline or per-class pipelines.
-    # classify_frame accepts PIL directly.
+    # crop emitter is infra.alert_artifacts.prepare_alert_artifacts
+    # (PRD-V2-024 US-024c). Gate disk writes for crop_a_path/crop_b_path
+    # were legacy artifacts — zero consumers in single_pipeline or
+    # per-class pipelines. classify_frame accepts PIL directly.
     verdict_a = _classify_crop(classifier, crop_a_pil, thresholds, timestamp=timestamp)
     verdict_b = _classify_crop(classifier, crop_b_pil, thresholds, timestamp=timestamp)
 
@@ -1099,7 +1098,7 @@ def run(
         subject_bbox_b=subject_bbox_b,
         frame_paths=frame_paths if keep_disk else [],
         crop_a_path=None,  # §11.176 (2026-09-06): gate no longer writes crops.
-        crop_b_path=None,  # Canonical crop emitter is listener._frame_diff_fn.
+        crop_b_path=None,  # Canonical crop emitter is infra.alert_artifacts.prepare_alert_artifacts (PRD-V2-024 US-024c).
         pairwise_diff_path=pairwise_diff_path,
         raw_verdicts=[verdict_a, verdict_b],
         reason=reason,
