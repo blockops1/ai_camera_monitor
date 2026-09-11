@@ -158,6 +158,8 @@ class TestSmokeRoundTrip:
             gate_v.is_pass = MagicMock(return_value=True)
             gate_v.class_label = "car"
             gate_v.confidence = 0.9
+            gate_v.top_class = "car"
+            gate_v.top_confidence = 0.9
             gate_v.reason = "test"
             gate_v.crop_a = mock_crop
             gate_v.crop_b = mock_crop
@@ -250,6 +252,8 @@ class TestSmokeRoundTrip:
             gate_v.is_pass = MagicMock(return_value=True)
             gate_v.class_label = "car"
             gate_v.confidence = 0.9
+            gate_v.top_class = "car"
+            gate_v.top_confidence = 0.9
             gate_v.reason = "test"
             gate_v.crop_a = None  # No crop
             gate_v.crop_b = None  # No crop

@@ -39,11 +39,7 @@ from pathlib import Path
 from infra.alert_artifacts import prepare_alert_artifacts
 from infra.gate import GateVerdict, run as run_gate
 from infra.paths import VEHICLE_KNOWN_FILE, data_dir_for
-from infra.pipeline_cooldown import (
-    COOLDOWN_WINDOW_SECONDS,
-    record_hit,
-    should_suppress,
-)
+from infra.pipeline_cooldown import record_hit, should_suppress
 from infra.vision_analyzer import detail_class, verify_class
 from telegram_formatter.alert import build_alert_message
 from telegram_formatter.detail import build_detail_message
@@ -126,7 +122,7 @@ def run(alert: dict) -> dict:
     # Stage 7: cooldown check — after gate + drop-on-none, before cascade1 VM1.
     if should_suppress(camera_id, classification, time.monotonic()):
         log.info(
-            f"pipeline: alert_id={alert.get('id', camera_id)} "
+            f"pipeline: dropped alert_id={alert.get('id', camera_id)} "
             f"camera={camera_id} classification={classification} "
             f"reason=cooldown_active"
         )
@@ -135,6 +131,14 @@ def run(alert: dict) -> dict:
             "reason": "cooldown_active",
             "classification": classification,
         }
+
+    # Stage 7: log that we proceeded past the gate (operator signal).
+    log.info(
+        f"pipeline: proceeded alert_id={alert.get('id', camera_id)} "
+        f"camera={camera_id} classification={classification} "
+        f"top_class='{gate_verdict.top_class}' "
+        f"top_confidence={gate_verdict.top_confidence}"
+    )
 
     # Stage 8: prepare alert artifacts (crops + composite) via prepare_alert_artifacts.
     output_dir = str(data_dir_for(camera_id, alert_id))
