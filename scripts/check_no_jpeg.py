@@ -66,9 +66,17 @@ _EXCLUDE_DIRS: set[str] = {
 
 # Known false positives: (relative_path, line_number)
 _KNOWN_FP: set[tuple[str, int]] = {
-    ("infra/vision_analyzer.py", 111),   # mime fallback, not JPEG producer
-    ("telegram_formatter/dispatcher.py", 38),  # _sniff_mime docstring mentions .jpg
-    ("telegram_formatter/dispatcher.py", 49),  # _sniff_mime returns image/jpeg, .jpg for JPEG files
+    ("infra/vision_analyzer.py", 111),  # mime fallback, not JPEG producer
+    ("telegram_formatter/dispatcher.py", 39),  # _sniff_mime docstring mentions .jpg
+    ("telegram_formatter/dispatcher.py", 50),  # _sniff_mime returns image/jpeg, .jpg
+    (
+        "telegram_formatter/codec.py",
+        93,
+    ),  # US-030a: intentional JPEG encoding for Telegram photo
+    (
+        "telegram_formatter/codec.py",
+        94,
+    ),  # US-030a: format="JPEG" for Telegram photo delivery
 }
 
 
