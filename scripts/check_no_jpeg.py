@@ -66,17 +66,15 @@ _EXCLUDE_DIRS: set[str] = {
 
 # Known false positives: (relative_path, line_number)
 _KNOWN_FP: set[tuple[str, int]] = {
-    ("infra/vision_analyzer.py", 111),  # mime fallback, not JPEG producer
+    ("infra/vision_analyzer.py", 111),   # mime fallback, not JPEG producer
     ("telegram_formatter/dispatcher.py", 39),  # _sniff_mime docstring mentions .jpg
     ("telegram_formatter/dispatcher.py", 50),  # _sniff_mime returns image/jpeg, .jpg
-    (
-        "telegram_formatter/codec.py",
-        93,
-    ),  # US-030a: intentional JPEG encoding for Telegram photo
-    (
-        "telegram_formatter/codec.py",
-        94,
-    ),  # US-030a: format="JPEG" for Telegram photo delivery
+    # V2-030 EXCEPTION: Telegram photo delivery uses JPEG q88 1920px.
+    # Authorized by operator (Rolfe) on 2026-09-13: this is the one permitted
+    # JPEG producer path. Compression + cache + retention are wired per the
+    # V2-030 PRD. Must not be re-flagged by this scanner.
+    ("telegram_formatter/codec.py", 93),  # JPEG dst filename
+    ("telegram_formatter/codec.py", 94),  # JPEG save call
 }
 
 
