@@ -235,3 +235,61 @@ class TestCaptionTruncation:
             alert=_make_alert(),
         )
         assert result["caption"].endswith("...")
+
+
+# ---------------------------------------------------------------------------
+# TG#2 caption alert metadata tests (US-033a)
+# ---------------------------------------------------------------------------
+
+from pathlib import Path
+
+
+class TestTg2CaptionAlertMetadata:
+    """US-033a: TG#2 caption includes/excludes alert metadata."""
+
+    def test_tg2_caption_includes_alert_metadata_when_alert_provided(self):
+        """TG#2 caption includes Alert 2 of 3 / Alert ID / Timestamp."""
+        from telegram_formatter.detail import build_detail_message
+
+        alert = _make_alert(alert_id="evt-xyz-789", timestamp="2026-09-12T08:00:00Z")
+        result = build_detail_message(
+            mode="vehicle",
+            vm2_result={"class_confirmed": "car"},
+            crop_a=Path("/mock/crop_a.png"),
+            crop_b=Path("/mock/crop_b.png"),
+            camera_label="Front Gate",
+            alert=alert,
+        )
+        caption = result["caption"]
+        assert "Alert 2 of 3" in caption
+        assert "Alert ID: evt-xyz-789" in caption
+        assert "Timestamp: 2026-09-12T08:00:00Z" in caption
+        # Verify order: Camera -> Mode -> Class -> Alert lines -> plate/feats
+        parts = caption.split("\n")
+        idx_alert2 = parts.index("Alert 2 of 3")
+        idx_alert_id = parts.index("Alert ID: evt-xyz-789")
+        idx_ts = parts.index("Timestamp: 2026-09-12T08:00:00Z")
+        assert idx_alert2 < idx_alert_id < idx_ts
+        # Camera line comes first
+        assert parts[0] == "Camera: Front Gate"
+
+    def test_tg2_caption_omits_alert_metadata_when_alert_none(self):
+        """TG#2 caption omits Alert lines when alert is None."""
+        from telegram_formatter.detail import build_detail_message
+
+        result = build_detail_message(
+            mode="person",
+            vm2_result={"class_confirmed": "person"},
+            crop_a=Path("/mock/crop_a.png"),
+            crop_b=Path("/mock/crop_b.png"),
+            camera_label="Back Yard",
+            alert=None,
+        )
+        caption = result["caption"]
+        assert "Alert 2 of 3" not in caption
+        assert "Alert ID:" not in caption
+        assert "Timestamp:" not in caption
+        # Basic lines still present
+        assert "Camera: Back Yard" in caption
+        assert "Mode: person" in caption
+        assert "Class confirmed: person" in caption
