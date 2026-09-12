@@ -105,9 +105,49 @@ DEFAULT_DIFF_THRESHOLD = 25
 # Default minimum bbox area in pixels. Smaller regions are noise.
 DEFAULT_MIN_AREA_PX = 64
 
-# Default bbox padding (pixels on each side) — adds context for YOLO without
-# diluting the motion signal.
-DEFAULT_BBOX_PADDING_PX = 16
+# Default bbox padding — 10% per side (20% overall per dimension), then
+# rounded UP to the nearest multiple of 32.  This gives YOLO consistent
+# context regardless of subject size and makes YOLO's pad-to-multiple-of-32
+# a no-op (dimensions are already multiples of 32).
+DEFAULT_BBOX_PAD_PCT = 0.10
+
+
+def _expand_bbox_pct(
+    bbox: tuple[int, int, int, int],
+    pad_pct: float,
+    frame_w: int,
+    frame_h: int,
+) -> tuple[int, int, int, int]:
+    """Expand a bbox by *pad_pct* on each side, round UP to mult of 32, clamp.
+
+    Math:
+      1. raw_w = round(w * (1 + 2*pad_pct)), raw_h = round(h * (1 + 2*pad_pct))
+      2. new_w = min(((raw_w + 31) // 32) * 32, frame_w)
+      3. new_h = min(((raw_h + 31) // 32) * 32, frame_h)
+      4. Re-center on original bbox center: new_x = round(cx - new_w/2),
+         new_y = round(cy - new_h/2)
+      5. Clamp: new_x = max(0, min(new_x, frame_w - new_w)),
+         new_y = max(0, min(new_y, frame_h - new_h))
+
+    Returns (x, y, new_w, new_h) clamped to the image frame.
+    """
+    x, y, w, h = bbox
+    cx = x + w / 2.0
+    cy = y + h / 2.0
+
+    raw_w = round(w * (1 + 2 * pad_pct))
+    raw_h = round(h * (1 + 2 * pad_pct))
+
+    new_w = min(((raw_w + 31) // 32) * 32, frame_w)
+    new_h = min(((raw_h + 31) // 32) * 32, frame_h)
+
+    new_x = round(cx - new_w / 2.0)
+    new_y = round(cy - new_h / 2.0)
+
+    new_x = max(0, min(new_x, frame_w - new_w))
+    new_y = max(0, min(new_y, frame_h - new_h))
+
+    return (int(new_x), int(new_y), int(new_w), int(new_h))
 
 
 def load_frame(path: str) -> np.ndarray | None:
@@ -152,13 +192,14 @@ def pairwise_diff(
 def bbox_from_mask(
     mask: np.ndarray,
     min_area_px: int = DEFAULT_MIN_AREA_PX,
-    padding_px: int = DEFAULT_BBOX_PADDING_PX,
+    pad_pct: float = DEFAULT_BBOX_PAD_PCT,
 ) -> tuple[int, int, int, int] | None:
     """Find the largest connected region in the mask and return its bbox.
 
     Returns (x, y, w, h) of the largest connected component that meets
-    min_area_px. Pads the bbox by padding_px on each side (clamped to image
-    bounds). Returns None if no component meets the area threshold.
+    min_area_px. Expands the bbox by pad_pct on each side (10% per side
+    = 20% overall), rounds UP to the nearest multiple of 32, and clamps
+    to image bounds. Returns None if no component meets the area threshold.
 
     Why "largest component" instead of "union of all components":
       - Option C1 (§11.37) wants one bbox per diff pair. The motion object
@@ -166,10 +207,6 @@ def bbox_from_mask(
         (sensor glitches, JPEG artifacts).
       - If the diff has multiple motion objects, the LARGEST one is most
         likely the Reolink-detected motion. Smaller blobs can be ignored.
-
-    Padding rationale: YOLO performs better with a little context around the
-    object. 16 pixels (~1-2% of a 1920-wide frame) gives the bbox some
-    breathing room without diluting the motion signal.
     """
     if mask is None or mask.size == 0:
         return None
@@ -198,14 +235,9 @@ def bbox_from_mask(
     w = int(stats[largest_idx, cv2.CC_STAT_WIDTH])
     h = int(stats[largest_idx, cv2.CC_STAT_HEIGHT])
 
-    # Pad and clamp to image bounds
+    # Expand by percentage, round UP to mult of 32, clamp to image bounds.
     h_img, w_img = mask.shape
-    x = max(0, x - padding_px)
-    y = max(0, y - padding_px)
-    w = min(w_img - x, w + 2 * padding_px)
-    h = min(h_img - y, h + 2 * padding_px)
-
-    return (x, y, w, h)
+    return _expand_bbox_pct((x, y, w, h), pad_pct, w_img, h_img)
 
 
 # Phase 6B.171 (2026-09-01): erosion kernel for subject_bbox_from_mask. 3×3 rectangular
@@ -370,7 +402,7 @@ def subject_bbox_from_mask(
 def subject_bbox_from_two_masks(
     mask_2to3: np.ndarray,
     mask_3to4: np.ndarray,
-    padding_px: int = 8,
+    pad_pct: float = DEFAULT_BBOX_PAD_PCT,
     min_cc_area_px: int = 100,
 ) -> tuple[int, int, int, int] | None:
     """Phase 6B.173 (2026-09-01): bbox at the logical AND of motion.
@@ -390,8 +422,10 @@ def subject_bbox_from_two_masks(
 
     Returns:
       (x, y, w, h) of the largest connected component of (mask_2to3 AND
-      mask_3to4), padded and clamped to image bounds — or None if the
-      intersection is empty or has no CC above min_cc_area_px.
+      mask_3to4), expanded by pad_pct on each side (10% per side = 20%
+      overall), rounded UP to the nearest multiple of 32, and clamped
+      to image bounds — or None if the intersection is empty or has no
+      CC above min_cc_area_px.
 
     Single bbox returned: the vehicle's footprint in frame_3. The crop
     is applied to frame_3 (the anchor frame shared by both diffs). Operator:
@@ -411,7 +445,8 @@ def subject_bbox_from_two_masks(
     Args:
       mask_2to3: uint8 ndarray (HxW) binary motion mask (frame_2 → frame_3)
       mask_3to4: uint8 ndarray (HxW) binary motion mask (frame_3 → frame_4)
-      padding_px: context pixels added on each side of the bbox (default 8)
+      pad_pct: fractional padding on each side (default 0.10 = 10% per side).
+               The result is rounded UP to multiples of 32.
       min_cc_area_px: minimum CC area to consider (default 500). Filters
         noise CCs smaller than a typical vehicle component.
 
@@ -458,12 +493,9 @@ def subject_bbox_from_two_masks(
     w = int(stats[best_idx, cv2.CC_STAT_WIDTH])
     h = int(stats[best_idx, cv2.CC_STAT_HEIGHT])
 
+    # Expand by percentage, round UP to mult of 32, clamp to image bounds.
     h_img, w_img = intersection.shape
-    x = max(0, x - padding_px)
-    y = max(0, y - padding_px)
-    w = min(w_img - x, w + 2 * padding_px)
-    h = min(h_img - y, h + 2 * padding_px)
-    return (x, y, w, h)
+    return _expand_bbox_pct((x, y, w, h), pad_pct, w_img, h_img)
 
 
 def _pick_best_cc(
@@ -541,7 +573,7 @@ def diff_pair_with_bbox(
     frame_b_path: str,
     threshold: int = DEFAULT_DIFF_THRESHOLD,
     min_area_px: int = DEFAULT_MIN_AREA_PX,
-    padding_px: int = DEFAULT_BBOX_PADDING_PX,
+    pad_pct: float = DEFAULT_BBOX_PAD_PCT,
 ) -> tuple[tuple[int, int, int, int] | None, int, np.ndarray]:
     """One-shot helper: load 2 frames, diff them, return bbox + stats.
 
@@ -570,7 +602,7 @@ def diff_pair_with_bbox(
 
     mask = pairwise_diff(a, b, threshold=threshold)
     changed_count = int(np.count_nonzero(mask))
-    bbox = bbox_from_mask(mask, min_area_px=min_area_px, padding_px=padding_px)
+    bbox = bbox_from_mask(mask, min_area_px=min_area_px, pad_pct=pad_pct)
     return bbox, changed_count, mask
 
 
