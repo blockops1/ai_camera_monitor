@@ -1,85 +1,119 @@
 """
-animal_prompt.py — Vision Model 2: detail an animal subject.
+animal_prompt.py — §11.115.4 animal call-2 prompt + schema.
 
-Stage 6 (VM2) of the linear pipeline. Triggered when VM1 (or the YOLO
-gate) classifies the moving subject as `animal`. Output consumed by
-the animal matcher (vehicle_matcher.match on an animal subject) and
-the Telegram formatter.
+STATUS: provisional (Phase §11.115; will stabilize after live telemetry)
+THREAD SAFETY: thread-safe (module-level constants; no shared state)
 
-Operator-locked contract (the operator 2026-09-06):
-  "the threat-level" is NOT requested. TG#2 contains 2 crops + VM2
-  output; no threat classification. This prompt follows that —
-  animal identification + description only, no threat assessment.
+INPUTS:
+  - fn `build_animal_prompt()` — no IO, no env vars.
 
-The YOLO gate may flag "dog" as a frequent false-positive for coyote
-(or vice versa). Per Rule 1 of the vision-prompt-design skill, vision-
-8B OVERRIDES the gate hint. The prompt explicitly grants this
-override license so the model can say "coyote" when YOLO said "dog."
+OUTPUTS:
+  - SCHEMA_JSON: JSON Schema dict for the llama-server strict-mode
+    response_format. Mirrors v1 animal schema (species, breed, size,
+    color_pattern, distinctive_features, action, confidence,
+    notable_details).
+  - PROMPT_TEXT: instruction text directing the model to identify an
+    animal, use tail-shape / ear-shape / coat-pattern vocabulary,
+    emit null for unobservable values, never invent breed.
+  - build_animal_prompt() -> str.
 
-Schema (response_format layer):
-  {
-    "class_confirmed":      enum["vehicle", "person", "animal", "unsure"],
-    "species":              string|null,    # free-form per Rule 3
-    "size_class":           enum["small", "medium", "large", "unsure"],
-    "behavior":             string|null,
-    "domesticated":         enum["yes", "no", "unsure"],
-    "collar_visible":       enum["yes", "no", "unsure"],
-    "distinctive_features": string[],       # 1-5 re-ID markers
-    "description":          string,
-    "confidence":           enum["definite", "likely", "unsure"]
-  }
+PUBLIC API:
+  - SCHEMA_JSON             dict
+  - PROMPT_TEXT             str
+  - build_animal_prompt()   str
+
+DOES NOT DO:
+  - Call Qwen. (See infra.vision_analyzer.analyze_frames_queued.)
+  - Validate the model response. (Class-specific validators handle that.)
+  - Match animals to enrolled identities. (See infra.animal_matcher.)
+
+CALLED BY:
+  - listener.single_pipeline — call 2 prompt factory for ClassLabel.ANIMAL.
+
+RELATED:
+  - PLAN.md §11.115 — design rationale.
+  - infra.animal_prompt_template.py — LEGACY module with old schema.
+    Will be removed in a follow-up commit.
+  - infra.classify_prompt — Qwen call 1 (shared classify).
+
+Design notes:
+  - Animal call-2 is much simpler than person call-2: no face selection,
+    no crop bias, no two-call Qwen logic inside this module.
+  - Schema mirrors the existing animal_prompt_template.py but is keyed
+    on the §11.115 single-pipeline model: 2 crops in, 1 JSON out.
+  - Breed and color_pattern may be null (wildlife, mixed breeds).
 """
 from __future__ import annotations
 
+# ============================================================================
+# JSON Schema — used by _response_format for server-side enforcement.
+# Mirrors v1 animal_prompt.py lines 48-58 schema shape.
+# ============================================================================
 SCHEMA_JSON: dict = {
     "type": "object",
     "properties": {
-        "class_confirmed": {
-            "type": "string",
-            "enum": ["vehicle", "person", "animal", "unsure"],
-            "description": "Confirm the class (should match VM1).",
-        },
         "species": {
             "type": ["string", "null"],
-            "description": "Most specific name: coyote, Eastern coyote, red fox, gray fox, fisher, raccoon, white-tailed deer, wild turkey, domestic dog (breed if recognizable), domestic cat (breed if recognizable), opossum, bobcat, ... Use null only if truly unidentifiable.",
+            "enum": [
+                "dog", "cat", "deer", "raccoon", "fox",
+                "coyote", "rabbit", "squirrel", "bird",
+                "other", None,
+            ],
+            "description": "Common name. null if unidentifiable.",
         },
-        "size_class": {
-            "type": "string",
-            "enum": ["small", "medium", "large", "unsure"],
-            "description": "Approximate size relative to common yard fauna. 'small' = squirrel/cat size; 'medium' = dog/fox/coyote; 'large' = deer/horse.",
-        },
-        "behavior": {
+        "breed": {
             "type": ["string", "null"],
-            "description": "What the animal is doing: 'walking east along fence', 'foraging', 'trotting', 'eating from bowl', 'staring at camera'. null if not discernible.",
+            "enum": [
+                "labrador", "golden retriever", "german shepherd",
+                "tabby", "siamese", "mixed", None,
+            ],
+            "description": "Common breed if dog/cat; null if wildlife or mixed.",
         },
-        "domesticated": {
-            "type": "string",
-            "enum": ["yes", "no", "unsure"],
-            "description": "Does this look like a domesticated animal? (pet, livestock, working animal)",
+        "size": {
+            "type": ["string", "null"],
+            "enum": ["small", "medium", "large", None],
+            "description": "Approximate size. null if unobservable.",
         },
-        "collar_visible": {
-            "type": "string",
-            "enum": ["yes", "no", "unsure"],
-            "description": "Is a collar visible (a domesticated marker)?",
+        "color_pattern": {
+            "type": ["string", "null"],
+            "enum": [
+                "black", "white", "gray", "brown", "tan",
+                "spotted", "striped", "multi", None,
+            ],
+            "description": "Primary color + pattern. null if unobservable.",
         },
         "distinctive_features": {
             "type": "array",
             "items": {"type": "string"},
             "minItems": 0,
-            "maxItems": 5,
-            "description": "1-5 re-ID markers that distinguish THIS individual from other members of the same species. Examples: 'left ear notched', 'white-tipped tail', 'scar on right shoulder', 'limp in left rear leg', 'blue collar', 'asymmetric gait', 'mange patch on left flank'. Generic descriptors like 'brown fur' or 'medium size' are NOT distinctive — they apply to most individuals.",
+            "description": "Short noun phrases (collar, tags, markings). Empty array if none.",
         },
-        "description": {
-            "type": "string",
-            "description": "1-2 sentence natural-language description.",
+        "action": {
+            "type": ["string", "null"],
+            "enum": [
+                "walking", "running", "sitting",
+                "standing", "eating", "sleeping",
+                "other", None,
+            ],
+            "description": "Single verb describing what it's doing. null if unobservable.",
         },
         "confidence": {
-            "type": "string",
-            "enum": ["definite", "likely", "unsure"],
-            "description": "Overall call certainty.",
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Overall confidence in the call, 0.0 to 1.0.",
+        },
+        "notable_details": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 0,
+            "description": "1-3 short observations the operator should see. Empty array if none.",
         },
     },
-    "required": ["class_confirmed", "size_class", "domesticated", "collar_visible", "distinctive_features", "description", "confidence"],
+    "required": [
+        "species", "breed", "size", "color_pattern",
+        "distinctive_features", "action", "confidence", "notable_details",
+    ],
     "additionalProperties": False,
 }
 
@@ -88,38 +122,48 @@ You are looking at TWO crops of one moving animal, taken fractions of
 a second apart. The crops show the same animal from slightly different
 angles or moments.
 
-Your species call OVERRIDES any upstream classifier hint. If you see
-a coyote, say coyote, even if the gate said dog. If you see a fox,
-say fox, even if the gate said cat. Trust your eyes.
+Identify the animal(s) visible. For each, report:
 
-Use the most specific species name you can — null only if you truly
-cannot tell what is in the crops. Examples of valid specificity:
-coyote, Eastern coyote, red fox, gray fox, fisher, raccoon,
-white-tailed deer, wild turkey, domestic dog (with breed if you can
-read it), domestic cat (with breed if you can read it), opossum,
-bobcat.
+  species               — common name from enum. "other" if not listed.
+  breed                 — common breed if dog/cat; null if wildlife or mixed.
+  size                  — small / medium / large.
+  color_pattern         — primary color + pattern.
+  distinctive_features  — short noun phrases (collar, tags, markings).
+  action                — single verb describing what it's doing.
+  confidence            — 0.0 (no idea) to 1.0 (certain).
+  notable_details       — 1-3 short observations.
 
-For distinctive_features, list 1-5 features that distinguish THIS individual
-from other members of the same species. Examples: left ear notched,
-white-tipped tail, scar on right shoulder, limp in left rear leg,
-blue collar, asymmetric gait, mange patch on left flank. Generic
-descriptors like 'brown fur' or 'medium size' are NOT distinctive.
+Output (return EXACTLY this JSON shape, nothing else):
 
-Confidence:
-  - definite — high visual certainty, clear subject, all fields reliable
-  - likely   — best call but caveats (lighting, partial occlusion)
-  - unsure   — guessing between plausible alternatives
+{
+  "species": "dog" | "cat" | "deer" | "raccoon" | "fox" | "coyote" |
+             "rabbit" | "squirrel" | "bird" | "other" | null,
+  "breed": "labrador" | "golden retriever" | "german shepherd" |
+           "tabby" | "siamese" | "mixed" | null,
+  "size": "small" | "medium" | "large" | null,
+  "color_pattern": "black" | "white" | "gray" | "brown" | "tan" |
+                   "spotted" | "striped" | "multi" | null,
+  "distinctive_features": ["white-tipped tail", "blue collar with name tag"] | [],
+  "action": "walking" | "running" | "sitting" | "standing" | "eating" |
+            "sleeping" | "other" | null,
+  "confidence": 0.0-1.0 (number),
+  "notable_details": ["walking along fence line", "appears to be unleashed"] | []
+}
 
-Respond ONLY with JSON. The JSON object MUST have exactly these keys:
-  - "class_confirmed"      — one of: vehicle, person, animal, unsure
-  - "species"              — string|null
-  - "size_class"           — one of: small, medium, large, unsure
-  - "behavior"             — string|null
-  - "domesticated"         — one of: yes, no, unsure
-  - "collar_visible"       — one of: yes, no, unsure
-  - "distinctive_features" — array of 0-5 strings
-  - "description"          — string
-  - "confidence"           — one of: definite, likely, unsure
+Rules:
+- Focus on ONE animal only.
+- Never invent fields that are not in this schema.
+- Use null for anything you cannot observe. Never guess.
+- Breed and color_pattern may be null (wildlife, mixed breeds).
+- Use the most specific species name you can — null only if you truly
+  cannot tell what is in the crops.
+- For distinctive_features, list 1-5 features that distinguish THIS
+  individual from other members of the same species. Generic descriptors
+  like "brown fur" or "medium size" are NOT distinctive.
+- Tail-shape, ear-shape, and coat-pattern are key identification markers.
+
+When uncertain, return null for the field you can't determine,
+and lower confidence. Do NOT guess the breed for wildlife.
 
 No prose, no markdown, no keys outside the list above.
 """
@@ -131,5 +175,10 @@ MODE_NAME: str = "vm2_animal"
 
 
 def build_animal_prompt() -> str:
-    """Return the VM2 animal text prompt."""
+    """Return the §11.115 animal call-2 text prompt.
+
+    The schema is the constraint layer (Rule 8); the text describes
+    the task. Uses tail-shape / ear-shape / coat-pattern vocabulary,
+    null for unobservable, never invent breed.
+    """
     return PROMPT_TEXT
