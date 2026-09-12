@@ -1,0 +1,155 @@
+{
+  "prd_id": "PHASE-V2-034",
+  "title": "VM2 prompts mirror v1 D1 detail schemas (vehicle + person + animal) and TG#2 caption shape copied from v1 refactor",
+  "author": "the operator",
+  "status": "active",
+  "phase": "v2-pipeline-rearchitecture",
+  "plan_section": "v2-vision-prompt-mirror-d1",
+  "trigger": "Operator (2026-09-12): 'The entire purpose of getting a detailed list of attributes is so we can match against known vehicles. We went through this whole long development process in the listener version one refactor process. Look back to that one to see what detail details we requested.' Three decisions: (1) mirror v1 D1 exactly — 'I didn't ask for the license plate. That was something you made up'; (2) same restructure for person and animal prompts; (3) TG#2 caption shape = copy v1's render_qwen_dict_lines recursion — 'we spend a lot of time developing it. Copy that over from the v1 refactor.'",
+  "background": "The current v2 VM2 prompts (infra/vehicle_prompt.py, infra/person_prompt.py, infra/animal_prompt.py) emit flat JSON schemas with invented fields that the v1 refactor explicitly did not request. Most critically, v2's vehicle prompt asks for license_plate and plate_visible, which v1 never asked for and the operator did not request. The v1 refactor at /Users/jill/farm-surveillance-refactor/ defines a much richer schema designed specifically for matching against known_vehicles.json: the vehicle_features block contains 12 matching-relevant sub-fields (wheel_style, wheel_arch, front_grille_style, rear_lights_signature, etc.) that the v1 scored matcher uses for tie-breaks between visually similar candidates. Likewise v1's person prompt encodes stable/transient signature attributes for identity matching; v1's animal prompt encodes species/breed/size/color_pattern/action fields. The current v2 caller in vehicle_matcher/match.py reads license_plate and distinctive_features Jaccard which would silently break once v2's vehicle prompt drops those fields. The TG#2 caption shape in telegram_formatter/detail.py renders one field per line without expanding nested dicts (so vehicle_features would print as a single inline blob); v1's render_qwen_dict_lines expands nested dicts, walks every key the model returned, and is the canonical caption shape the operator spent weeks developing.",
+  "shipping_definition": "All US-034 stories marked done; pytest suite green (no regressions in test_alert_message_caption.py, test_pipeline.py, test_smoke_alert_roundtrip.py); tree clean; on the next live alert, the vehicle TG#2 caption lists 'Make / Model / Color / Type / vehicle_features {wheel_style, front_grille_style, rear_lights_signature, window_tint, bed_cover, ...} / description / confidence' in that order with each sub-field on its own indented line under vehicle_features; person TG#2 lists 'attributes (clothing_upper, clothing_lower, carrying, action, silhouette) / signature {stable, transient} / confidence'; animal TG#2 lists 'species / breed / size / color_pattern / distinctive_features / action / confidence'. The TG#2 caption shape mirrors v1's render_qwen_dict_lines recursion exactly (no curated whitelist, every Qwen key rendered, nested dicts expanded, lists JSON-inline, free-text wrapped at ~70 cols). The vehicle matcher uses make+model+color+type as primary passes plus vehicle_features tie-breaks (wheel/wheel_arch/grille/rear_lights) with confidence-aware scoring per /Users/jill/farm-surveillance-refactor/infra/matcher_spec.py. None of the v2 prompts or matchers reference license_plate, plate_visible, or class_confirmed anywhere.",
+  "scope_exclusions": [
+    "Altering data/vehicles/known_vehicles.json is NOT this PRD. The file already contains the v1-style fields (make, model, color, type, vehicle_features sub-fields) from the US-018e anonymization work; existing entries are sufficient inputs for the upgraded matcher.",
+    "Re-running real alerts end-to-end is NOT this PRD. The shipping proof is the unit test suite plus a synthetic struct-shape assertion on a fixture vm2_result.",
+    "Replacing the entire v2 vehicle_matcher with the v1 matcher is NOT this PRD. We ADD make+model+color+type scoring and feature tie-breaks ON TOP of the existing plate+Jaccard path, retaining plate/Jaccard as last-resort fallback when scoring yields zero matches. Pure-port of v1's logic is a separate initiative.",
+    "Adding facial recognition work is NOT this PRD (handled by V2-032 PRD).",
+    "Adding per-camera webhook allowlist or new camera metadata is NOT this PRD.",
+    "Re-architecting the message-dispatch pipeline is NOT this PRD. The TG#2 caption changes are local to telegram_formatter/detail.py:build_detail_message.",
+    "Backfilling historical alerts is NOT this PRD. Only new alerts going forward.",
+    "Internationalization / locale formatting is NOT this PRD. Use the alert['timestamp'] string verbatim.",
+    "TG#1 caption changes are NOT this PRD (unchanged from commit 721bec5).",
+    "Discovery alert suppression / collision handling for ambiguous known_vehicles.json entries is NOT this PRD. The matcher logs an 'ambiguous_match' tag and picks the highest-scoring candidate today; refining that policy is a follow-up."
+  ],
+  "design_principles": [
+    "Mirror v1 EXACTLY. No invented fields. The v1 prompts at /Users/jill/farm-surveillance-refactor/infra/{vehicle,person,animal}_prompt.py are the source of truth. If v1 says the field exists, ask for it; if v1 doesn't, don't ask.",
+    "Render every Qwen-returned key in the TG#2 caption. No curated whitelist. v1's render_qwen_dict_lines walks every key in the response recursively; v2's TG#2 does the same. (The TG#3 caption may subset, since TG#3 is the match verdict, not the detail.)",
+    "Dict-on-its-own-line layout. Each key:value pair on its own line; nested dicts indent +3 spaces per level; lists JSON-inline. Free-text fields wrap at 70 cols.",
+    "No invented safety-or-judgment fields (operator-locked: no threat fields anywhere). The v1 schemas never ask for severity, threat, suspiciousness, or behavioral classification beyond what's observable.",
+    "Stable schema names. The v1 field names are the canonical names (color, body_style_hint, vehicle_features.wheel_style, etc.). Do not rename fields between v1 and v2 to 'modernize'.",
+    "Confidence is always a 0.0-1.0 float, not an enum string. v1 says 'confidence (0.0-1.0)'; v2's current enum (low/medium/high) is dropped.",
+    "One card per file. Stories are atomic + verifiable from a single pytest invocation.",
+    "Story body budget: 2500 chars per story.",
+    "Every assertion of fact in a story body must be verified before dispatch via grep/read_file. The orchestrator skill's 'never trust a worker' rule applies here: if a fact in the body can't be verified by reading code, don't put it in the body."
+  ],
+  "stories": [
+    {
+      "id": "US-034a",
+      "title": "Vehicle prompt: mirror v1 D1 schema (drop invented fields, add vehicle_features block, switch confidence to 0.0-1.0 float)",
+      "story_type": "replace-existing",
+      "acceptance": [
+        "infra/vehicle_prompt.py:SCHEMA_JSON is replaced with v1's schema verbatim from /Users/jill/farm-surveillance-refactor/infra/vehicle_prompt.py:96-128 — top-level {color, body_style_hint, make, model, vehicle_features, description, confidence, notable_details}; vehicle_features contains {wheel_style, wheel_arch, wheel_color, roofline_style, front_grille_style, headlight_signature, rear_lights_signature, tailgate_type, badge_text_readable, window_tint (enum: none/light/dark/factory_privacy), cab_marker_lights (bool), bed_cover (enum: none/tonneau/camper_shell/topper)}.",
+        "infra/vehicle_prompt.py:build_vehicle_prompt() uses v1's system/user prompt text in /Users/jill/farm-surveillance-refactor/infra/vehicle_prompt.py:1-94 — instruct the model to focus ONLY on a single vehicle, never add fields not listed, return null for unobservable fields.",
+        "No reference to license_plate, plate_visible, class_confirmed, or vehicle_class anywhere in infra/vehicle_prompt.py (grep -nE 'license_plate|plate_visible|class_confirmed|vehicle_class' infra/vehicle_prompt.py must return zero matches).",
+        "Confidence field is JSON type 'number' with minimum 0.0 and maximum 1.0 (not an enum string).",
+        "Single commit: 'Vehicle prompt: mirror v1 D1 schema (US-034a)'."
+      ],
+      "files_added": [],
+      "files_modified": ["infra/vehicle_prompt.py"],
+      "depends_on": []
+    },
+    {
+      "id": "US-034b",
+      "title": "Person prompt: mirror v1 D1 schema (attributes object + signature stable/transient split)",
+      "story_type": "replace-existing",
+      "acceptance": [
+        "infra/person_prompt.py:SCHEMA_JSON is replaced with v1's person schema verbatim from /Users/jill/farm-surveillance-refactor/infra/person_prompt.py:88-119 — top-level {better_crop (enum: yes/no/unsure), attributes (clothing_upper, clothing_lower, carrying, action, silhouette, skin_tone, age_range, hair, facial_hair, glasses), signature (stable, transient), confidence (float 0.0-1.0), notable_details (array of strings)}.",
+        "infra/person_prompt.py:build_person_prompt() uses v1's prompt text in /Users/jill/farm-surveillance-refactor/infra/person_prompt.py:1-87 — instruct the model to use clothing vocabulary from a CONTEXT_WARDROBE whitelist (jeans, t-shirt, hoodie, etc.), emit null for unobservable, never invent.",
+        "No reference to license_plate or class_confirmed anywhere in infra/person_prompt.py.",
+        "Single commit: 'Person prompt: mirror v1 D1 schema (US-034b)'."
+      ],
+      "files_added": [],
+      "files_modified": ["infra/person_prompt.py"],
+      "depends_on": []
+    },
+    {
+      "id": "US-034c",
+      "title": "Animal prompt: mirror v1 D1 schema (species / breed / size / color_pattern / action)",
+      "story_type": "replace-existing",
+      "acceptance": [
+        "infra/animal_prompt.py:SCHEMA_JSON is replaced with v1's animal schema verbatim from /Users/jill/farm-surveillance-refactor/infra/animal_prompt.py — top-level {species, breed, size (enum), color_pattern, distinctive_features (array of strings), action, confidence (float 0.0-1.0), notable_details (array of strings)}. Verify by reading both files side-by-side.",
+        "infra/animal_prompt.py:build_animal_prompt() uses v1's prompt text — instruct the model to call out tail-shape / ear-shape / coat-pattern specifics, never invent a breed, return null when uncertain.",
+        "No reference to license_plate or class_confirmed anywhere in infra/animal_prompt.py.",
+        "Single commit: 'Animal prompt: mirror v1 D1 schema (US-034c)'."
+      ],
+      "files_added": [],
+      "files_modified": ["infra/animal_prompt.py"],
+      "depends_on": []
+    },
+    {
+      "id": "US-034d",
+      "title": "TG#2 detail formatter: copy v1 render_qwen_dict_lines recursion (every Qwen key rendered, nested dicts expanded, free-text wrapped at ~70 cols)",
+      "story_type": "replace-existing",
+      "acceptance": [
+        "telegram_formatter/detail.py:build_detail_message no longer references vm2_result['class_confirmed'], vm2_result['license_plate'], or vm2_result['distinctive_features'] (grep -nE 'class_confirmed|license_plate|distinctive_features' telegram_formatter/detail.py must return zero matches).",
+        "A new helper _render_qwen_dict_lines(d, prefix='', indent=0) is added that walks the dict recursively: scalar values emit 'key: value' on one line; nested dicts emit 'key:' then recurse with indent+3; lists of scalars emit 'key: [\"a\",\"b\"]'; lists of dicts emit one item per line indented under 'key:'; free-text strings (>70 chars) wrap at word-boundary with continuation indented +3 spaces.",
+        "build_detail_message(mode='vehicle') renders the v1 schema's full field set: color, body_style_hint, make, model, vehicle_features (expanded), description (wrapped), confidence (one decimal), notable_details (list).",
+        "build_detail_message(mode='person') renders: better_crop, attributes (clothing_upper/lower/carrying/action/silhouette/skin_tone/age_range/hair/facial_hair/glasses), signature.stable/transient, confidence, notable_details.",
+        "build_detail_message(mode='animal') renders: species, breed, size, color_pattern, distinctive_features, action, confidence, notable_details.",
+        "Existing Camera / Alert 2 of 3 / Alert ID / Timestamp header lines from US-033a are preserved. Header lines come first, _render_qwen_dict_lines output follows.",
+        "tests/test_alert_message_caption.py adds tests asserting each of the three mode renderings renders every key v1's schema requires AND that nested dicts (vehicle_features, attributes, signature) are rendered with each sub-field on its own indented line.",
+        "Single commit: 'TG#2 formatter: copy v1 render_qwen_dict_lines recursion (US-034d)'."
+      ],
+      "files_added": [],
+      "files_modified": [
+        "telegram_formatter/detail.py",
+        "tests/test_alert_message_caption.py"
+      ],
+      "depends_on": ["US-034a", "US-034b", "US-034c"]
+    },
+    {
+      "id": "US-034e",
+      "title": "Vehicle matcher upgrade: add make+model+color+type scoring + vehicle_features tie-breaks (per v1 matcher_spec)",
+      "story_type": "feature-new",
+      "acceptance": [
+        "vehicle_matcher/match.py:match_vehicle adds (does not replace) a v1-style scoring path: load known_vehicles.json entries, for each entry compute score per /Users/jill/farm-surveillance-refactor/infra/matcher_spec.py:67-198 (Pass 1: make+model primary +3; Pass 1.7a: wheel_style/wheel_arch/wheel_color/front_grille_style/rear_lights_signature tie-breaks +1 each; Pass 3-5: color+type fallback).",
+        "The existing license_plate match and distinctive_features Jaccard path are retained as last-resort fallback ONLY when the scored path yields no candidate above a minimum score threshold (default 3.0, configurable via env var MATCH_MIN_SCORE if needed; default to 3.0 hardcoded).",
+        "Above threshold, return the highest-scoring candidate's identifier (id/label/owner from known_vehicles.json).",
+        "vehicle_matcher/match.py references NO license_plate field of vm2_result. (grep -nE 'vm2_result\\[[\"\\']license_plate' vehicle_matcher/match.py must return zero matches).",
+        "tests/test_pipeline.py and tests/test_smoke_alert_roundtrip.py add a fixture-based test: given a vm2_result with make='Chevrolet', model='Silverado 1500', color='white', body_style_hint='pickup', and a fixture known_vehicles entry matching those fields, match_vehicle returns the right id. Below threshold fixture: vm2_result with make='Tesla', model='Model Y', color='dark blue', body_style_hint='sedan' (no yellow Tesla entry) returns None.",
+        "No reference to license_plate anywhere in vehicle_matcher/match.py (other than in comments/docs explaining the deprecated v2 path).",
+        "Single commit: 'Vehicle matcher: add v1-style scoring with feature tie-breaks (US-034e)'."
+      ],
+      "files_added": [],
+      "files_modified": [
+        "vehicle_matcher/match.py",
+        "tests/test_pipeline.py",
+        "tests/test_smoke_alert_roundtrip.py"
+      ],
+      "depends_on": ["US-034a"]
+    },
+    {
+      "id": "US-034f",
+      "title": "Update existing tests to remove references to license_plate / class_confirmed / plate_visible across test files",
+      "story_type": "refactor",
+      "acceptance": [
+        "All test files under tests/ are grep-clean for 'license_plate', 'plate_visible', 'class_confirmed' (grep -rnE 'license_plate|plate_visible|class_confirmed' tests/ returns zero matches).",
+        "Existing tests in tests/test_alert_message_caption.py that previously constructed vm2_result={'class_confirmed': 'car'} or 'person' are updated to use the v1 vehicle/person schema with the relevant fields (e.g. vm2_result={'make': 'Ford', 'model': 'F-150', 'color': 'white', 'body_style_hint': 'pickup'}).",
+        "tests/test_pipeline.py scenarios that previously expected 'No license plate captured' messages are updated to expect 'matched' or 'no_match' verdicts based on the new scoring path.",
+        "Pytest suite green: pytest -q exits 0 with no failures. Confirmed by reading pytest output before commit.",
+        "Single commit: 'Tests: drop v2 invented field references (US-034f)'."
+      ],
+      "files_added": [],
+      "files_modified": [
+        "tests/test_alert_message_caption.py",
+        "tests/test_pipeline.py",
+        "tests/test_smoke_alert_roundtrip.py"
+      ],
+      "depends_on": ["US-034a", "US-034b", "US-034c", "US-034d", "US-034e"]
+    },
+    {
+      "id": "US-034g",
+      "title": "Commit V2-034 PRD alongside the code (operator invariant: V2 PRDs MUST be committed with their code)",
+      "story_type": "chore",
+      "acceptance": [
+        "docs/PHASE-V2-034-PRD-vm2-prompts-mirror-v1-d1.json is staged + committed in the SAME commit as the US-034f changes, or in its own commit immediately after if scope prevents co-commit.",
+        "Commit message: 'V2-034 PRD: VM2 prompts mirror v1 D1 (vehicle/person/animal) + TG#2 caption shape from v1 refactor'.",
+        "Pushed to forgejo, NOT public GitHub (operator locked: public push deferred until explicit go).",
+        "git log --oneline -1 main shows the commit. git status is clean.",
+        "Single commit: 'V2-034 PRD (US-034g)'."
+      ],
+      "files_added": [],
+      "files_modified": ["docs/PHASE-V2-034-PRD-vm2-prompts-mirror-v1-d1.json"],
+      "depends_on": ["US-034f"]
+    }
+  ]
+}
