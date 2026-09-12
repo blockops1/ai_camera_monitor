@@ -35,10 +35,10 @@ comments or documentation.
 ### 3. Operator / Helper Handle Strings
 
 **What is private:** First-name forms used as personal handles — for example
-the operator's handle (`Rolf`) and helper handles (`Carson`, `Grant`,
-`Jeremiah`). These identify specific individuals.
+the operator's handle and helper handles. These identify specific individuals.
 
-**Where they belong:** Outside the repo (hermes profile, personal records).
+**Where they belong:** Outside the repo (operator's hermes profile, personal
+records, or `data/private_identifiers.json` at the operator's deployment site).
 In code they should appear only as neutral role-words like "the operator" or
 "[helper-A]".
 
@@ -60,10 +60,15 @@ make check-privacy
 
 The scanner checks tracked files (via `git ls-files`) against three pattern
 categories: production /24 IP literals, chat identifier digits, and operator
-+ helper handle strings. It excludes:
++ helper handle strings. Operator and helper handles are loaded at runtime
+from `data/private_identifiers.json` (gitignored); when that file is missing,
+the scanner's handle pattern set is empty — that is the intended behavior for
+public CI runs where the operator's personal identifiers are not available.
+It excludes:
 
 - `.git/`, `.venv/`, `.pytest_cache/` directories
 - `.env` files (gitignored)
+- `data/private_identifiers.json` (gitignored)
 - `scripts/check_no_private_data.py` itself
 - `docs/PRIVACY.md` (this file, which discusses what to look for)
 
