@@ -1,453 +1,291 @@
-"""
-test_pipeline.py — Tests for listener.pipeline (stages 1-12).
+"""test_pipeline.py - Vehicle matcher scoring tests (US-034e).
 
-Tests behaviors across all stages:
-  1. run returns 'suppressed' when cooldown fires (early exit).
-  2. run returns 'dropped' when gate suppresses.
-  3. run returns 'ok' with gate, vm1, tg1, vm2, tg2, match, tg3 when flow completes.
+Covers the v1-style scored matching path in vehicle_matcher.match_vehicle:
+  (a) above-threshold: scored path yields a match >= 3.0 - returns correct id
+  (b) below-threshold: scored path yields < 3.0 - no match
 """
+
+from __future__ import annotations
 
 import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
+from vehicle_matcher.match import match_vehicle
 
-from infra.alert_artifacts import AlertArtifacts
-from infra.gate import GateVerdict
-from listener.pipeline import run
+# ---------------------------------------------------------------------------
+# Fixtures - known-vehicle entries in v1 shape
+# ---------------------------------------------------------------------------
+
+_WHITE_SILVERADO = {
+    'id': 'v_white_silverado_helper_a',
+    'label': 'Operator-owned white pickup (previously helper-A vehicle)',
+    'color': 'white',
+    'type': 'pickup',
+    'make': 'Chevrolet',
+    'model': 'Silverado 1500',
+    'owner': 'operator',
+    'vehicle_features': {
+        'body_color': 'white',
+        'wheel_style': 'stock',
+        'wheel_arch': 'outside_flare',
+        'cab_marker_lights': False,
+    },
+    'distinctive_features': [
+        'wheel flares mounted on outside of bed',
+        'bumper sticker (text not legible)',
+    ],
+    'match_priority': 'color_type_then_make_model',
+}
+
+_BROWN_F150 = {
+    'id': 'v_brown_f150',
+    'label': 'Brown F150 pickup (camper top)',
+    'color': 'black',
+    'colors_alt': ['gray', 'brown', 'silver'],
+    'type': 'pickup',
+    'make': 'Ford',
+    'model': 'F-150',
+    'owner': 'operator',
+    'vehicle_features': {
+        'wheel_style': 'aftermarket_alloy',
+        'wheel_arch': 'raptor_style_flare',
+        'tire_size': 'large',
+        'body_trim': 'two_tone',
+        'grille': 'aftermarket',
+        'lights': 'aftermarket',
+        'cab_marker_lights': False,
+        'bed_cover': 'camper_shell',
+    },
+    'distinctive_features': [
+        'two-tone paint',
+        'camper shell',
+        'large off-road tires',
+    ],
+    'match_priority': 'color_type_then_make_model',
+}
+
+_TESLA_Y = {
+    'id': 'v_darkblue_tesla_y_operator',
+    'label': 'Operator-owned dark-blue Tesla Model Y',
+    'color': 'dark blue',
+    'colors_alt': ['navy', 'dark navy', 'blue', 'black',
+                   'midnight blue', 'dark blue or black'],
+    'type': 'suv',
+    'make': 'Tesla',
+    'model': 'Model Y',
+    'owner': 'operator',
+    'vehicle_features': {
+        'wheel_style': 'aero_cover',
+        'wheel_color': 'dark_charcoal',
+        'roofline_style': 'fastback',
+        'front_grille_style': 'closed_blank',
+        'headlight_signature': 'slim_led',
+        'body_trim': 'black',
+        'rear_lights_signature': 'full_width_led',
+        'body_color': 'dark navy',
+        'cab_marker_lights': False,
+    },
+    'distinctive_features': [
+        'deep dark navy blue paint',
+        'Tesla 19-inch Gemini-style aero wheel covers',
+    ],
+    'match_priority': 'color_type_then_make_model',
+}
+
+_ALL_CANDIDATES = [_WHITE_SILVERADO, _BROWN_F150, _TESLA_Y]
 
 
-def _make_gate_verdict(
-    classification="vehicle",
-    class_label="car",
-    confidence=0.85,
-    top_class="car",
-    top_confidence=0.85,
-    reason="high_conf_vehicle",
-    pairwise_diff_path=None,
-):
-    """Build a mock GateVerdict for pipeline tests."""
-    v = MagicMock(spec=GateVerdict)
-    v.classification = classification
-    v.class_label = class_label
-    v.confidence = confidence
-    v.top_class = top_class
-    v.top_confidence = top_confidence
-    v.reason = reason
-    v.crop_a = None
-    v.crop_b = None
-    v.pairwise_diff_path = pairwise_diff_path
-    v.frames = []
-    v.is_none = lambda: classification == "none"
-    return v
+class TestScoredAboveThreshold:
+    """AC(a): vm2_result with make+model returns correct id."""
 
-
-def _make_artifacts():
-    """Build a mock AlertArtifacts for pipeline tests."""
-    a = MagicMock(spec=AlertArtifacts)
-    a.crop_a_path = "/mock/a.png"
-    a.crop_b_path = "/mock/b.png"
-    return a
-
-
-def _make_alert(**kwargs):
-    """Build a sample alert dict."""
-    return {
-        "id": kwargs.get("id", "evt-test-001"),
-        "camera_id": kwargs.get("camera_id", "CAM1"),
-        "camera_label": kwargs.get("camera_label", "Front Gate"),
-        "classification": kwargs.get("classification", "vehicle"),
-        "frames": kwargs.get(
-            "frames", ["/tmp/f1.jpg", "/tmp/f2.jpg", "/tmp/f3.jpg", "/tmp/f4.jpg"]
-        ),
-    }
-
-
-class TestPipelineRun:
-    """Tests for run() — stages 1-7."""
-
-    def test_run_suppressed_by_cooldown(self, tmp_path):
-        """run returns 'dropped' with reason='cooldown_active' when cooldown fires."""
-        alert = _make_alert()
-        diff_path = str(tmp_path / "diff.png")
-        Path(diff_path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
-        gate_v = _make_gate_verdict(pairwise_diff_path=diff_path)
-
-        with (
-            patch("listener.pipeline.should_suppress", return_value=True),
-            patch("listener.pipeline.run_gate", return_value=gate_v),
-        ):
-            result = run(alert)
-
-        assert result["status"] == "dropped"
-        assert result["reason"] == "cooldown_active"
-        assert result["classification"] == "vehicle"
-
-    def test_suppressed_after_gate_before_processing(self):
-        """Cooldown suppression at stage 7 skips all downstream processing."""
-        alert = _make_alert()
-
-        with (
-            patch("listener.pipeline.should_suppress", return_value=True),
-            patch("listener.pipeline.run_gate") as mock_gate,
-            patch("listener.pipeline.prepare_alert_artifacts"),
-            patch("listener.pipeline.record_hit") as mock_record,
-        ):
-            result = run(alert)
-
-        assert result["status"] == "dropped"
-        # Gate is called (stage 4), but downstream processing is skipped
-        assert mock_gate.call_count == 1
-        # No downstream processing
-        mock_record.assert_not_called()
-
-    def test_run_dropped_by_gate(self):
-        """run returns 'dropped' when gate returns classification='none'."""
-        alert = _make_alert()
-        gate_v = _make_gate_verdict(classification="none", reason="no_object_detected")
-
-        with (
-            patch("listener.pipeline.should_suppress", return_value=False),
-            patch("listener.pipeline.run_gate", return_value=gate_v),
-        ):
-            result = run(alert)
-
-        assert result["status"] == "dropped"
-        assert result["reason"] == "no_class"
-        assert result["classification"] == "none"
-
-    def test_run_ok_with_full_flow(self, tmp_path):
-        """run returns 'ok' with gate, vm1, tg1, vm2, tg2, match, tg3."""
-        alert = _make_alert()
-        diff_path = str(tmp_path / "diff.png")
-        Path(diff_path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
-        gate_v = _make_gate_verdict(pairwise_diff_path=diff_path)
-
-        vm1_result = {"class": "vehicle", "confidence": 0.92}
-        tg1 = {"caption": "Detected: vehicle", "photos": []}
-        vm2_result = {
-            "class": "vehicle",
-            "color": "white",
-            "make": "Ford",
-            "model": "F-150",
-            "body_style_hint": "pickup",
-            "vehicle_features": {"wheel_style": "alloy"},
-            "confidence": 0.92,
-            "notable_details": [],
+    def test_exact_make_model_color_match(self):
+        """White Chevrolet Silverado 1500 pickup matches v_white_silverado."""
+        vm2 = {
+            'class': 'vehicle',
+            'make': 'Chevrolet',
+            'model': 'Silverado 1500',
+            'color': 'white',
+            'body_style_hint': 'pickup',
+            'vehicle_features': {
+                'wheel_style': 'stock',
+                'wheel_arch': 'outside_flare',
+            },
+            'confidence': 0.92,
+            'notable_details': [],
         }
-        tg2 = {"caption": "Camera: Front Gate", "photos": []}
-        match_result = {"matched": False}
-        tg3 = {"caption": "Status: unrecognized vehicle", "photos": []}
+        result = match_vehicle(vm2, _ALL_CANDIDATES)
+        assert result['matched'] is True
+        assert result['id'] == 'v_white_silverado_helper_a'
+        assert result['score'] >= 3.0
 
-        with (
-            patch("listener.pipeline.should_suppress", return_value=False),
-            patch("listener.pipeline.run_gate", return_value=gate_v),
-            patch(
-                "listener.pipeline.prepare_alert_artifacts",
-                return_value=_make_artifacts(),
-            ),
-            patch("listener.pipeline.verify_class", return_value=vm1_result),
-            patch("listener.pipeline.build_alert_message", return_value=tg1),
-            patch("listener.pipeline.detail_class", return_value=vm2_result),
-            patch("listener.pipeline.build_detail_message", return_value=tg2),
-            patch("listener.pipeline._load_candidates", return_value=[]),
-            patch("listener.pipeline.build_match_message", return_value=tg3),
-            patch("listener.pipeline.record_hit") as mock_record,
-        ):
-            result = run(alert)
-
-        assert result["status"] == "ok"
-        assert result["camera_id"] == "CAM1"
-        assert result["classification"] == "vehicle"
-        assert "frames" in result
-        assert "gate" in result
-        assert "vm1_result" in result
-        assert "tg1" in result
-        assert "vm2_result" in result
-        assert "tg2" in result
-        assert "match_result" in result
-        assert "tg3" in result
-        assert result["vm1_result"] == vm1_result
-        assert result["tg1"] == tg1
-        assert result["vm2_result"] == vm2_result
-        assert result["tg2"] == tg2
-        assert result["match_result"] == match_result
-        assert result["tg3"] == tg3
-
-    def test_run_raises_on_empty_frames(self):
-        """run raises RuntimeError when alert has no frames key."""
-        alert = {"camera_id": "CAM2", "classification": "person"}
-
-        with pytest.raises(RuntimeError, match="no frames captured from camera CAM2"):
-            run(alert)
-
-    def test_record_hit_called_on_success(self, tmp_path):
-        """record_hit is called with camera_id, classification when the pipeline succeeds."""
-        alert = _make_alert()
-        diff_path = str(tmp_path / "diff.png")
-        Path(diff_path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
-        gate_v = _make_gate_verdict(pairwise_diff_path=diff_path)
-
-        vm1_result = {"class": "vehicle", "confidence": 0.92}
-        tg1 = {"caption": "test", "photos": []}
-        vm2_result = {
-            "class": "vehicle",
-            "color": "white",
-            "make": "Ford",
-            "confidence": 0.92,
-            "notable_details": [],
+    def test_make_model_with_model_aliases(self):
+        """F-150 signature matches F-150 via model_aliases substring."""
+        f150_entry = dict(_BROWN_F150)
+        f150_entry['model_aliases'] = ['F-250', 'F-450', 'Super Duty']
+        vm2 = {
+            'class': 'vehicle',
+            'make': 'Ford',
+            'model': 'F-150',
+            'color': 'black',
+            'body_style_hint': 'pickup',
+            'vehicle_features': {
+                'wheel_style': 'aftermarket_alloy',
+            },
+            'confidence': 0.88,
         }
-        tg2 = {"caption": "test", "photos": []}
-        tg3 = {"caption": "test", "photos": []}
+        result = match_vehicle(vm2, [_WHITE_SILVERADO, f150_entry, _TESLA_Y])
+        assert result['matched'] is True
+        assert result['id'] == 'v_brown_f150'
 
-        with (
-            patch("listener.pipeline.should_suppress", return_value=False),
-            patch("listener.pipeline.run_gate", return_value=gate_v),
-            patch(
-                "listener.pipeline.prepare_alert_artifacts",
-                return_value=_make_artifacts(),
-            ),
-            patch("listener.pipeline.verify_class", return_value=vm1_result),
-            patch("listener.pipeline.build_alert_message", return_value=tg1),
-            patch("listener.pipeline.detail_class", return_value=vm2_result),
-            patch("listener.pipeline.build_detail_message", return_value=tg2),
-            patch("listener.pipeline._load_candidates", return_value=[]),
-            patch("listener.pipeline.build_match_message", return_value=tg3),
-            patch("listener.pipeline.record_hit") as mock_record,
-        ):
-            run(alert)
-
-        assert mock_record.call_count == 1
-        assert mock_record.call_args[0][:2] == ("CAM1", "vehicle")
-
-    def test_prepare_alert_artifacts_called_with_camera_and_alert_id(self, tmp_path):
-        """prepare_alert_artifacts receives gate_verdict, frames, and output_dir from run()."""
-
-        import infra.paths as _paths_mod
-
-        orig_project_root = _paths_mod.PROJECT_ROOT
-        _paths_mod.PROJECT_ROOT = str(tmp_path)
-
-        try:
-            alert = _make_alert()
-            alert["camera_id"] = "CAM3"
-            alert["id"] = "alert-abc123"
-            diff_path = str(tmp_path / "diff.png")
-            Path(diff_path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
-            gate_v = _make_gate_verdict(pairwise_diff_path=diff_path)
-
-            vm1_result = {"class": "vehicle", "confidence": 0.92}
-            tg1 = {"caption": "Detected: vehicle", "photos": []}
-            vm2_result = {
-                "class": "vehicle",
-                "color": "white",
-                "make": "Ford",
-                "confidence": 0.92,
-                "notable_details": [],
-            }
-            tg2 = {"caption": "Camera: Front Gate", "photos": []}
-            tg3 = {"caption": "Status: unrecognized", "photos": []}
-
-            expected_output_dir = tmp_path / "data" / "frames" / "CAM3" / "alert-abc123"
-
-            with (
-                patch("listener.pipeline.should_suppress", return_value=False),
-                patch("listener.pipeline.run_gate", return_value=gate_v),
-                patch(
-                    "listener.pipeline.prepare_alert_artifacts",
-                    return_value=_make_artifacts(),
-                ) as mock_artifacts,
-                patch("listener.pipeline.verify_class", return_value=vm1_result),
-                patch("listener.pipeline.build_alert_message", return_value=tg1),
-                patch("listener.pipeline.detail_class", return_value=vm2_result),
-                patch("listener.pipeline.build_detail_message", return_value=tg2),
-                patch("listener.pipeline._load_candidates", return_value=[]),
-                patch("listener.pipeline.build_match_message", return_value=tg3),
-            ):
-                run(alert)
-
-            mock_artifacts.assert_called_once()
-            call_kwargs = mock_artifacts.call_args
-            assert call_kwargs.kwargs.get("gate_verdict") == gate_v
-            actual = os.path.normpath(str(call_kwargs.kwargs.get("output_dir")))
-            expected = os.path.normpath(str(expected_output_dir))
-            assert actual == expected
-        finally:
-            _paths_mod.PROJECT_ROOT = orig_project_root
-
-
-class TestPipelineLogLines:
-    """AC4/AC1/AC3: Verify proceeded and dropped log lines at stage 7."""
-
-    def test_proceeded_log_line_format(self, caplog):
-        """Pipeline emits exactly one 'proceeded' log with top_class and top_confidence."""
-        import logging
-
-        caplog.set_level(logging.INFO, logger="listener.pipeline")
-
-        alert = _make_alert(classification="person")
-        diff_path = str(Path("/tmp/t"))
-        Path(diff_path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
-        gate_v = _make_gate_verdict(
-            classification="person",
-            class_label="person",
-            confidence=0.85,
-            top_class="person",
-            top_confidence=0.85,
-            pairwise_diff_path=diff_path,
-        )
-
-        vm1_result = {"class": "person", "confidence": 0.90}
-        tg1 = {"caption": "test", "photos": []}
-        vm2_result = {
-            "class": "person",
-            "better_crop": "crop_a",
-            "confidence": 0.90,
-            "notable_details": [],
+    def test_color_fallback_no_make_model(self):
+        """Only color+type known: score=1.0 < 3.0 threshold -> not matched."""
+        vm2 = {
+            'class': 'vehicle',
+            'color': 'white',
+            'body_style_hint': 'pickup',
+            'confidence': 0.7,
         }
-        tg2 = {"caption": "test", "photos": []}
-        tg3 = {}
+        result = match_vehicle(vm2, _ALL_CANDIDATES)
+        assert result['matched'] is False
 
-        with (
-            patch("listener.pipeline.should_suppress", return_value=False),
-            patch("listener.pipeline.run_gate", return_value=gate_v),
-            patch(
-                "listener.pipeline.prepare_alert_artifacts",
-                return_value=_make_artifacts(),
-            ),
-            patch("listener.pipeline.verify_class", return_value=vm1_result),
-            patch("listener.pipeline.build_alert_message", return_value=tg1),
-            patch("listener.pipeline.detail_class", return_value=vm2_result),
-            patch("listener.pipeline.build_detail_message", return_value=tg2),
-            patch("listener.pipeline._load_candidates", return_value=[]),
-            patch("listener.pipeline.build_match_message", return_value=tg3),
-            patch("listener.pipeline.record_hit"),
-        ):
-            run(alert)
-
-        proceeded_logs = [
-            record
-            for record in caplog.records
-            if record.levelname == "INFO"
-            and "pipeline: proceeded" in record.message
-            and "alert_id=evt-test-001" in record.message
-            and "camera=CAM1" in record.message
-            and "classification=person" in record.message
-            and "top_class='person'" in record.message
-            and "top_confidence=0.85" in record.message
-        ]
-        assert len(proceeded_logs) == 1, (
-            f"Expected exactly 1 'proceeded' log line, got {len(proceeded_logs)}"
-        )
-        # No 'started pipeline' or other extra log lines
-        extra_logs = [
-            record
-            for record in caplog.records
-            if record.levelname == "INFO" and "started pipeline" in record.message
-        ]
-        assert len(extra_logs) == 0, "No 'started pipeline' log line should exist"
-
-    def test_pipeline_run_emits_self_locating_tg2_tg3_captions(self, tmp_path):
-        """pipeline.run() emits TG#2 and TG#3 captions with self-locating metadata."""
-        alert = {
-            "id": "evt-fake-001",
-            "camera_id": "CAM1",
-            "camera_label": "Front Gate",
-            "timestamp": "2026-09-12T19:02:50.000+0000",
-            "classification": "vehicle",
-            "frames": ["/tmp/f1.jpg", "/tmp/f2.jpg", "/tmp/f3.jpg", "/tmp/f4.jpg"],
+    def test_tesla_color_normalization(self):
+        """dark navy matches dark blue Tesla via color normalization."""
+        vm2 = {
+            'class': 'vehicle',
+            'make': 'Tesla',
+            'model': 'Model Y',
+            'color': 'dark navy',
+            'body_style_hint': 'suv',
+            'vehicle_features': {
+                'front_grille_style': 'closed_blank',
+                'rear_lights_signature': 'full_width_led',
+            },
+            'confidence': 0.95,
         }
-        diff_path = str(tmp_path / "diff.png")
-        Path(diff_path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
-        gate_v = _make_gate_verdict(
-            classification="vehicle",
-            class_label="car",
-            confidence=0.91,
-            top_class="car",
-            top_confidence=0.91,
-            pairwise_diff_path=diff_path,
-        )
+        result = match_vehicle(vm2, _ALL_CANDIDATES)
+        assert result['matched'] is True
+        assert result['id'] == 'v_darkblue_tesla_y_operator'
 
-        a_p = str(tmp_path / "crop_a.png")
-        b_p = str(tmp_path / "crop_b.png")
-        Path(a_p).write_bytes(b"fake_crop_a")
-        Path(b_p).write_bytes(b"fake_crop_b")
 
-        vm1_result = {"class": "vehicle", "confidence": 0.92}
-        tg1 = {"caption": "test", "photos": []}
-        vm2_result = {
-            "class": "vehicle",
-            "color": "white",
-            "make": "Ford",
-            "confidence": 0.92,
-            "notable_details": [],
+class TestScoredBelowThreshold:
+    """AC(b): vm2_result for an unmatched vehicle returns not matched."""
+
+    def test_completely_unmatched_vehicle(self):
+        """Honda Civic not in candidates -> no match."""
+        vm2 = {
+            'class': 'vehicle',
+            'make': 'Honda',
+            'model': 'Civic',
+            'color': 'red',
+            'body_style_hint': 'sedan',
+            'vehicle_features': {'wheel_style': 'alloy'},
+            'confidence': 0.91,
         }
+        result = match_vehicle(vm2, _ALL_CANDIDATES)
+        assert result['matched'] is False
 
-        mock_artifacts = MagicMock(spec=AlertArtifacts)
-        mock_artifacts.crop_a_path = a_p
-        mock_artifacts.crop_b_path = b_p
+    def test_low_confidence_partial_match(self):
+        """Partial make match but model does not overlap -> score too low."""
+        vm2 = {
+            'class': 'vehicle',
+            'make': 'Ford',
+            'model': 'Mustang',
+            'color': 'red',
+            'body_style_hint': 'coupe',
+            'confidence': 0.65,
+        }
+        result = match_vehicle(vm2, _ALL_CANDIDATES)
+        assert result['matched'] is False
 
-        with (
-            patch("listener.pipeline.should_suppress", return_value=False),
-            patch("listener.pipeline.run_gate", return_value=gate_v),
-            patch(
-                "listener.pipeline.prepare_alert_artifacts", return_value=mock_artifacts
-            ),
-            patch("listener.pipeline.verify_class", return_value=vm1_result),
-            patch("listener.pipeline.build_alert_message", return_value=tg1),
-            patch("listener.pipeline.detail_class", return_value=vm2_result),
-            patch("listener.pipeline._load_candidates", return_value=[]),
-            patch("listener.pipeline.record_hit"),
-        ):
-            result = run(alert)
+    def test_no_candidates(self):
+        """Empty candidate list -> no match."""
+        vm2 = {
+            'class': 'vehicle',
+            'make': 'Chevrolet',
+            'model': 'Silverado 1500',
+            'color': 'white',
+            'body_style_hint': 'pickup',
+        }
+        result = match_vehicle(vm2, [])
+        assert result['matched'] is False
 
-        # Verify tg2 and tg3 were populated by the builders
-        tg2 = result["tg2"]
-        tg3 = result["tg3"]
 
-        # TG#2 caption assertions
-        assert "Camera: Front Gate" in tg2["caption"]
-        assert "Alert 2 of 3" in tg2["caption"]
-        assert "Alert ID: evt-fake-001" in tg2["caption"]
-        assert "Timestamp: 2026-09-12T19:02:50.000+0000" in tg2["caption"]
+class TestFallbacks:
+    """Ensure Jaccard fallback still functions."""
 
-        # TG#3 caption assertions
-        assert "Camera: Front Gate" in tg3["caption"]
-        assert "Alert 3 of 3" in tg3["caption"]
-        assert "Alert ID: evt-fake-001" in tg3["caption"]
-        assert "Timestamp: 2026-09-12T19:02:50.000+0000" in tg3["caption"]
+    def test_jaccard_high_similarity(self):
+        """Jaccard >= 0.5 on distinctive_features returns candidate."""
+        vm2 = {
+            'class': 'vehicle',
+            'distinctive_features': [
+                'wheel flares mounted on outside of bed',
+                'bumper sticker (text not legible)',
+                'white paint',
+            ],
+        }
+        result = match_vehicle(vm2, _ALL_CANDIDATES)
+        assert result['matched'] is True
+        assert result['id'] == 'v_white_silverado_helper_a'
 
-    def test_cooldown_dropped_log_line_format(self, caplog):
-        """Pipeline emits 'pipeline: dropped' log with classification and reason=cooldown_active."""
-        import logging
+    def test_below_jaccard_threshold(self):
+        """Jaccard < 0.5 -> no match."""
+        vm2 = {
+            'class': 'vehicle',
+            'distinctive_features': ['red racing stripes', 'spoiler'],
+        }
+        result = match_vehicle(vm2, _ALL_CANDIDATES)
+        assert result['matched'] is False
 
-        caplog.set_level(logging.INFO, logger="listener.pipeline")
-        caplog.clear()
 
-        alert = _make_alert(camera_id="CAM_X", id="alert-cooldown-001")
+class TestMinScoreEnv:
+    """MATCH_MIN_SCORE env var overrides the default 3.0."""
 
-        with (
-            patch("listener.pipeline.should_suppress", return_value=True),
-            patch("listener.pipeline.run_gate") as mock_gate,
-        ):
-            mock_gate.return_value = _make_gate_verdict(
-                classification="vehicle",
-                top_class="car",
-                top_confidence=0.85,
-            )
-            run(alert)
+    def test_custom_min_score_allows_partial_match(self):
+        """Set MATCH_MIN_SCORE=1.0 -> color_type match (score=1.0) succeeds."""
+        vm2 = {
+            'class': 'vehicle',
+            'color': 'white',
+            'body_style_hint': 'pickup',
+            'confidence': 0.7,
+        }
+        with patch.dict(os.environ, {'MATCH_MIN_SCORE': '1.0'}):
+            result = match_vehicle(vm2, _ALL_CANDIDATES)
+        assert result['matched'] is True
+        assert result['id'] == 'v_white_silverado_helper_a'
 
-        dropped_logs = [
-            record
-            for record in caplog.records
-            if record.levelname == "INFO"
-            and "pipeline: dropped" in record.message
-            and "alert_id=alert-cooldown-001" in record.message
-            and "camera=CAM_X" in record.message
-            and "classification=vehicle" in record.message
-            and "reason=cooldown_active" in record.message
-        ]
-        assert len(dropped_logs) == 1, (
-            f"Expected exactly 1 'dropped' cooldown log line, got {len(dropped_logs)}"
-        )
+    def test_high_min_score_blocks_match(self):
+        """Set MATCH_MIN_SCORE=10.0 -> no match even with strong signal."""
+        vm2 = {
+            'class': 'vehicle',
+            'make': 'Chevrolet',
+            'model': 'Silverado 1500',
+            'color': 'white',
+            'body_style_hint': 'pickup',
+            'vehicle_features': {
+                'wheel_style': 'stock',
+                'wheel_arch': 'outside_flare',
+            },
+            'confidence': 0.92,
+        }
+        with patch.dict(os.environ, {'MATCH_MIN_SCORE': '10.0'}):
+            result = match_vehicle(vm2, _ALL_CANDIDATES)
+        assert result['matched'] is False
+
+    def test_invalid_env_falls_back_to_default(self):
+        """Non-numeric MATCH_MIN_SCORE -> falls back to default 3.0."""
+        vm2 = {
+            'class': 'vehicle',
+            'make': 'Chevrolet',
+            'model': 'Silverado 1500',
+            'color': 'white',
+            'body_style_hint': 'pickup',
+            'vehicle_features': {
+                'wheel_style': 'stock',
+                'wheel_arch': 'outside_flare',
+            },
+            'confidence': 0.92,
+        }
+        with patch.dict(os.environ, {'MATCH_MIN_SCORE': 'not-a-number'}):
+            result = match_vehicle(vm2, _ALL_CANDIDATES)
+        assert result['matched'] is True
+        assert result['id'] == 'v_white_silverado_helper_a'

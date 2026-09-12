@@ -332,8 +332,7 @@ class TestTg3CaptionAlertMetadata:
         from telegram_formatter.match_alert import build_match_message
 
         alert = _make_alert(alert_id="evt-ghi-456", timestamp="2026-09-12T09:00:00Z")
-        # match_alert.py still uses vm2_result['license_plate'] and
-        # ['distinctive_features'] — these are TG#3 concerns, not TG#2.
+        # match_alert.py uses vm2_result['distinctive_features'] — TG#3 concern.
         result = build_match_message(
             match_result={"matched": True},
             vm2_result={
