@@ -60,7 +60,7 @@
         "prepare_alert_artifacts(gate_verdict, frame_paths, output_dir) -> AlertArtifacts is importable from infra.alert_artifacts.",
         "It calls render_motion_composite(frames, bbox_a, bbox_b, output_dir) once -- not twice -- and stores the result path.",
         "It saves crop_a.png and crop_b.png as PNG lossless (format='PNG', optimize=True) at native resolution. The source is the gate's pre-built PIL crops (gate_verdict.crop_a, gate_verdict.crop_b are PIL.Image objects). Those PIL crops were produced by the gate by applying motion-diff-derived subject bboxes (subject_bbox_a, subject_bbox_b from infra/frame_diff) to the appropriate frame -- NOT by YOLO. YOLO is downstream and never produces crops or bboxes. If either PIL crop is None (motion-diff returned no subject bbox), the corresponding path is None. PNG is REQUIRED by V2-019 design principle #7 (zero JPEG); the no-JPEG scanner from US-019i will guard this invariant going forward.",
-        "full_frame_path is the path to frame_paths[3] (the best-frame slot) -- the field is required and never None.",
+        "full_frame_path is the path to frame_paths[1] (frame 2, ~4.5s into 6s ring window) -- the field is required and never None.",
         "The function logs once per webhook with structured fields (alert_id, camera_id, output_dir, crop_a=None?, composite_path='...') at INFO -- no spam lines.",
         "tests/test_alert_artifacts.py exists with at least 3 tests: test_prepare_writes_three_files, test_prepare_returns_None_for_missing_bbox, test_prepare_with_no_motion_returns_no_crops. All pass.",
         "Single commit: 'add AlertArtifacts model + prepare_alert_artifacts (US-024b)'."

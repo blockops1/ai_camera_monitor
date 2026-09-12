@@ -91,7 +91,7 @@ def test_prepare_writes_three_files():
         assert artifacts.crop_a_path is not None
         assert artifacts.crop_b_path is not None
         assert artifacts.composite_path is not None
-        assert artifacts.full_frame_path == "/fake/frame_4.jpg"
+        assert artifacts.full_frame_path == "/fake/frame_2.jpg"
 
         # Verify files exist on disk.
         assert Path(artifacts.crop_a_path).is_file()

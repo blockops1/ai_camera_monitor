@@ -14,7 +14,7 @@ LAYER 2: crop_b.png — gate_verdict.crop_b saved as lossless PNG (or
     None when no subject bbox was found).
 LAYER 3: composite.png — render_motion_composite(frames, bbox_a, bbox_b)
     called ONCE, result path stored.
-LAYER 4: full_frame_path — frame_paths[3] (best-frame slot), required,
+LAYER 4: full_frame_path — frame_paths[1] (frame 2 slot), required,
     never None.
 
 INPUTS:
@@ -80,7 +80,7 @@ class AlertArtifacts:
         crop_b_path: Path to crop_b.png (PNG lossless), or None if crop_b
             was None.
         composite_path: Path to composite.png (render_motion_composite).
-        full_frame_path: Path to frame_paths[3] (best frame). Required,
+        full_frame_path: Path to frame_paths[1] (frame 2). Required,
             never None.
     """
 
@@ -125,7 +125,7 @@ def prepare_alert_artifacts(
       2. Save crop_b.png from gate_verdict.crop_b (or None).
       3. Call render_motion_composite(frames, bbox_a, bbox_b, output_dir)
          exactly ONCE and store the result.
-      4. Set full_frame_path = frame_paths[3] (best frame).
+      4. Set full_frame_path = frame_paths[1] (frame 2).
 
     Args:
         gate_verdict: GateVerdict from infra.gate.run — provides
@@ -168,8 +168,8 @@ def prepare_alert_artifacts(
                 f"[{gate_verdict.reason}] composite render returned empty path"
             )
 
-    # 4. Full frame path (best frame slot — required, never None).
-    full_frame_path = frame_paths[3] if len(frame_paths) >= 4 else ""
+    # 4. Full frame path (frame 2 slot — required, never None).
+    full_frame_path = frame_paths[1] if len(frame_paths) >= 2 else ""
 
     # Log once per webhook with structured fields.
     log.info(
