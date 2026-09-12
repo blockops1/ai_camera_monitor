@@ -47,8 +47,8 @@ CALLS INTO:
 
 from __future__ import annotations
 
-import os
 import logging
+import os
 import uuid
 from collections import deque
 from collections.abc import MutableMapping
@@ -57,9 +57,9 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request
 
-from infra import paths as infra_paths
+from infra import paths as infra_paths, tg_upload_cleanup
 from listener import pipeline
-from telegram_formatter import dispatcher
+from telegram_formatter import codec, dispatcher
 from telegram_formatter.dispatcher import ConfigError, DeliveryError
 
 # ---------------------------------------------------------------------------
@@ -217,7 +217,12 @@ def alert():
     alert_dict = normalize_reolink(payload, source_ip)
 
     if alert_dict is None:
-        return jsonify({"status": "error", "reason": "unrecognized payload shape (Reolink nested expected)"}), 400
+        return jsonify(
+            {
+                "status": "error",
+                "reason": "unrecognized payload shape (Reolink nested expected)",
+            }
+        ), 400
 
     camera_id = alert_dict["camera_id"]
     camera_label = alert_dict["camera_label"]
@@ -258,6 +263,7 @@ def alert():
     result = pipeline.run(alert_dict)
 
     # US-022b: dispatch tg1/tg2/tg3 to Telegram.
+    # US-030a: pre-convert photos to JPEG, cache on disk, structured log.
     # Daemon still returns HTTP 200 even if dispatch fails —
     # operator sees the gap in logs/daemon.log, not as a
     # camera-side retry storm.
@@ -268,23 +274,80 @@ def alert():
     ]
     tg_messages = [m for m in tg_messages if m]
     if tg_messages:
+        alert_id = result.get("id", "unknown")
+        chat_id = os.environ.get("TELEGRAM_HOME_CHAT_ID", "")
         try:
+            # Pre-convert all photo paths to cached JPEGs (TG#1+TG#2 only).
+            # TG#3 is text-only (photos=[]), skip conversion.
+            converted: list[tuple[str, int]] = []  # (cache_path, n_sources)
+            converted_photos: list[str] = []
+            source_photo_count = 0
+            for msg in tg_messages:
+                orig_photos = msg.get("photos", []) or []
+                # TG#3 (text-only) has no photos; skip.
+                if not orig_photos:
+                    continue
+                source_photo_count += len(orig_photos)
+                date_str = datetime.now(UTC).strftime("%Y-%m-%d")
+                msg_cache_dir = str(
+                    Path(infra_paths.TG_UPLOADS_DIR) / date_str / alert_id
+                )
+                for src_path in orig_photos:
+                    jpg = codec.encode_jpeg(
+                        src_path, msg_cache_dir, jpeg_quality=88, max_dim=1920
+                    )
+                    if jpg is not None:
+                        converted_photos.append(jpg)
+                        converted.append((jpg, len(orig_photos)))
+                # Replace photos in the message with cached JPEGs.
+                msg["photos"] = converted_photos
+
             responses = dispatcher.dispatch(
                 tg_messages,
                 bot_token=os.environ["TELEGRAM_BOT_TOKEN"],
-                chat_id=os.environ["TELEGRAM_HOME_CHAT_ID"],
+                chat_id=chat_id,
             )
+
+            # Upload size in bytes.
+            upload_bytes = (
+                sum(os.path.getsize(p) for p in converted_photos)
+                if converted_photos
+                else 0
+            )
+
             for i, resp in enumerate(responses, start=1):
                 log.info(
-                    "tg-dispatch: TG#%d ok (HTTP %d)",
-                    i, resp.status_code,
+                    "tg-send: alert_id=%s TG#%d chat=%s method=sendMediaGroup type=photo "
+                    "sources=%d converted=%d cache=%d upload=%d response=HTTP %d",
+                    alert_id,
+                    i,
+                    chat_id,
+                    source_photo_count,
+                    len(converted),
+                    len(converted),
+                    upload_bytes,
+                    resp.status_code,
                 )
+
+            # Sweep old cache dirs (24h retention).
+            tg_upload_cleanup.sweep()
+
         except (ConfigError, DeliveryError) as exc:
-            log.error("tg-dispatch: %s: %s", type(exc).__name__, exc)
-        except Exception as exc:
+            log.error(
+                "tg-send: alert_id=%s error=%s: %s",
+                alert_id,
+                type(exc).__name__,
+                exc,
+            )
+        except Exception as exc:  # noqa: BLE001
             # Catch-all so dispatcher hiccups don't surface as HTTP 5xx to the camera.
             # The alert still reached the pipeline; the operator sees the gap in logs.
-            log.error("tg-dispatch: unexpected %s: %s", type(exc).__name__, exc)
+            log.error(
+                "tg-send: alert_id=%s unexpected %s: %s",
+                alert_id,
+                type(exc).__name__,
+                exc,
+            )
 
     return jsonify(result), 200
 
@@ -381,13 +444,24 @@ def main():
     host = os.environ.get("LISTEN_HOST", "0.0.0.0")
     port = int(os.environ.get("LISTEN_PORT", "8090"))
 
-    from infra.frame_capture import CameraCaptureRegistry
     import infra.camera_creds as _camera_creds
+    from infra.frame_capture import CameraCaptureRegistry
 
     n_cameras = len(_camera_creds.get_all_cameras())
     log.info("Booting RTSP readers for %d camera(s)...", n_cameras)
     CameraCaptureRegistry.start_all()
     log.info("RTSP registry ready.")
+
+    # US-030a: sweep stale tg_uploads dirs on boot (24h retention).
+    try:
+        sweep_result = tg_upload_cleanup.sweep()
+        log.info(
+            "tg_upload_cleanup: boot sweep done — dirs_removed=%d errors=%d",
+            sweep_result["deleted_dirs"],
+            sweep_result["errors"],
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("tg_upload_cleanup: boot sweep failed (non-fatal)")
 
     app.run(host=host, port=port)
 

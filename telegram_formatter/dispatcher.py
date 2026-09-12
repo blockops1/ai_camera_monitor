@@ -8,10 +8,11 @@ No fallback paths (per operator 2026-09-09). Empty bot_token or chat_id
 raises ConfigError at call time. 4xx/5xx from api.telegram.org raises
 DeliveryError. No retries, no silent drops.
 
-Photo delivery uses sendMediaGroup with input_media_document (preserves
-lossless PNG). sendPhoto re-encodes to JPEG server-side and is forbidden
-(operator directive in PRD-V2-019 + US-019f/g/h).
+Photo delivery uses sendMediaGroup with input_media_photo (pre-converted
+JPEGs, q=88, max-dim 1920px cached on disk). type=photo renders inline in
+the Telegram client (not as downloadable files).
 """
+
 from __future__ import annotations
 
 import logging
@@ -84,11 +85,11 @@ def _send_media_group(
     photo_paths: list[str],
     base_url: str,
 ) -> httpx.Response:
-    """sendMediaGroup with input_media_document — lossless PNG (TG#1/TG#2).
+    """sendMediaGroup with input_media_photo — inline JPEG rendering (TG#1/TG#2).
 
-    Telegram re-encodes sendPhoto uploads to JPEG server-side, which
-    violates the zero-JPEG directive (operator 2026-09-09). sendDocument
-    preserves the byte stream, so lossless PNGs arrive unchanged.
+    Uses type=photo so Telegram renders the images inline in the chat
+    (not as downloadable files). Photos are pre-converted to JPEG by
+    the caller (codec.encode_jpeg) before reaching this function.
     """
     url = f"{base_url}/bot{bot_token}/sendMediaGroup"
     media: list[dict[str, str]] = []
@@ -96,9 +97,8 @@ def _send_media_group(
         attach_ref = f"attach://photo_{i}"
         media.append(
             {
-                "type": "document",
+                "type": "photo",
                 "media": attach_ref,
-                "document_attributes": [],
             }
         )
         if i == 0:
@@ -110,7 +110,11 @@ def _send_media_group(
             data = f.read()
         mime, suffix = _sniff_mime(path)
         files.append((f"photo_{i}", (f"photo_{i}{suffix}", data, mime)))
-    return client.post(url, data={"chat_id": chat_id, "media": str(media).replace("'", '"')}, files=files)
+    return client.post(
+        url,
+        data={"chat_id": chat_id, "media": str(media).replace("'", '"')},
+        files=files,
+    )
 
 
 def dispatch(
@@ -149,7 +153,9 @@ def dispatch(
             caption = msg.get("caption", "")
             photo_paths = msg.get("photos", []) or []
             if photo_paths:
-                resp = _send_media_group(client, bot_token, chat_id, caption, photo_paths, base_url)
+                resp = _send_media_group(
+                    client, bot_token, chat_id, caption, photo_paths, base_url
+                )
             else:
                 resp = _send_message(client, bot_token, chat_id, caption, base_url)
             responses.append(resp)
