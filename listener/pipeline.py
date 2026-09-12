@@ -114,6 +114,7 @@ def run(alert: dict) -> dict:
             f"reason=no_class"
         )
         return {
+            "id": alert.get("id", camera_id),
             "status": "dropped",
             "reason": "no_class",
             "classification": "none",
@@ -127,6 +128,7 @@ def run(alert: dict) -> dict:
             f"reason=cooldown_active"
         )
         return {
+            "id": alert.get("id", camera_id),
             "status": "dropped",
             "reason": "cooldown_active",
             "classification": classification,
@@ -188,6 +190,7 @@ def run(alert: dict) -> dict:
     record_hit(camera_id, classification, time.monotonic())
 
     return {
+        "id": alert.get("id", camera_id),
         "status": "ok",
         "camera_id": camera_id,
         "classification": classification,
