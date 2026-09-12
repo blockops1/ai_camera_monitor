@@ -292,15 +292,19 @@ def alert():
                 msg_cache_dir = str(
                     Path(infra_paths.TG_UPLOADS_DIR) / date_str / alert_id
                 )
+                # Per-message list -- do NOT accumulate across messages,
+                # otherwise TG#2 ships TG#1's photos too.
+                msg_converted: list[str] = []
                 for src_path in orig_photos:
                     jpg = codec.encode_jpeg(
                         src_path, msg_cache_dir, jpeg_quality=88, max_dim=1920
                     )
                     if jpg is not None:
-                        converted_photos.append(jpg)
+                        msg_converted.append(jpg)
                         converted.append((jpg, len(orig_photos)))
-                # Replace photos in the message with cached JPEGs.
-                msg["photos"] = converted_photos
+                # Replace photos in THIS message with THIS message's cached JPEGs only.
+                msg["photos"] = msg_converted
+                converted_photos.extend(msg_converted)
 
             responses = dispatcher.dispatch(
                 tg_messages,
