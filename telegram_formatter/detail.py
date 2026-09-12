@@ -44,8 +44,14 @@ def build_detail_message(
     crop_a: Path | None,
     crop_b: Path | None,
     camera_label: str = "Camera",
+    alert: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build a TG#2 Telegram message dict."""
+    """Build a TG#2 Telegram message dict.
+
+    When *alert* is provided, the caption includes 'Alert 2 of 3',
+    'Alert ID: <id>', and 'Timestamp: <timestamp>' in that order,
+    after Camera/Mode/Class lines and before optional plate/feats.
+    """
     if mode not in _MODES:
         raise ValueError(
             f"mode must be one of {_MODES}, got {mode!r}"
@@ -57,6 +63,16 @@ def build_detail_message(
         f"Mode: {mode}",
         f"Class confirmed: {cls}",
     ]
+
+    # Alert metadata (mirrors TG#1 caption layout).
+    if alert:
+        lines.append("Alert 2 of 3")
+        alert_id = alert.get("id")
+        if alert_id:
+            lines.append(f"Alert ID: {alert_id}")
+        timestamp = alert.get("timestamp")
+        if timestamp:
+            lines.append(f"Timestamp: {timestamp}")
 
     plate = vm2_result.get("license_plate")
     if plate:

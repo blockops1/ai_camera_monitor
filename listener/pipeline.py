@@ -172,7 +172,8 @@ def run(alert: dict) -> dict:
 
     # Stage 11: build TG#2 via detail formatter.
     tg2 = build_detail_message(
-        mode, vm2_result, Path(a_p), Path(b_p), camera_label=camera_label
+        mode, vm2_result, Path(a_p), Path(b_p), camera_label=camera_label,
+        alert=alert,
     )
 
     # Stage 12: vehicle match (vehicle only).
