@@ -172,7 +172,11 @@ def run(alert: dict) -> dict:
 
     # Stage 11: build TG#2 via detail formatter.
     tg2 = build_detail_message(
-        mode, vm2_result, Path(a_p), Path(b_p), camera_label=camera_label,
+        mode,
+        vm2_result,
+        Path(a_p),
+        Path(b_p),
+        camera_label=camera_label,
         alert=alert,
     )
 
@@ -185,7 +189,12 @@ def run(alert: dict) -> dict:
     # Stage 13: build TG#3 (vehicle only).
     tg3 = {}
     if mode == "vehicle":
-        tg3 = build_match_message(match_result, vm2_result)
+        tg3 = build_match_message(
+            match_result,
+            vm2_result,
+            camera_label=camera_label,
+            alert=alert,
+        )
 
     # Stage 14: record_hit — only on full pipeline success (TG#1+TG#2+TG#3).
     record_hit(camera_id, classification, time.monotonic())
