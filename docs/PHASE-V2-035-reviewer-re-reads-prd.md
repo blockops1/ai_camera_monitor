@@ -55,18 +55,41 @@ card body". This is BLOCKED by:
 - Direct SQLite UPDATE on the body column would bypass the convention
   but preserve all subscriptions, links, and history.
 
-**Decision:** I did NOT touch the existing V2-034 card bodies. The new
-rule will surface as "missing prd_source_file" the first time those
-cards reach review. The operator can then choose one of:
-- Direct SQL UPDATE on the body column (preserves state, breaks
-  convention).
-- Archive + recreate with field (clean, loses history).
-- Add a convention: `prd_source_file = "docs/PHASE-V2-{NNN}-PRD-*.json"`
-  derived from card title (no body edit needed).
+**Decision (operator, 2026-09-12, option C):** Do NOT mutate the existing
+V2-034 card bodies. Instead, the reviewer derives `prd_source_file` from
+the card title via glob.
 
-Going forward, every NEW card body (V2-035+) MUST include a
-`prd_source_file:` field naming the absolute path to the original PRD
-JSON, or the reviewer will fail it.
+**Convention (option C, locked in 2026-09-12):**
+
+1. Every v2 PRD-shaped document lives at
+   `docs/PHASE-V2-NNN-PRD-<slug>.{json,md}` where `NNN` is a 3-digit
+   zero-padded PRD number and `<slug>` is a hyphenated short
+   description. Most are `.json`; some (like V2-035) are `.md` when the
+   "PRD" is a procedural record rather than a structured spec.
+2. Every card title contains the substring `V2-NNN` where `NNN` matches
+   the document's number.
+3. The reviewer extracts `NNN` from the card title (regex
+   `V2-(\d{3})`), then runs:
+   ```
+   ls docs/PHASE-V2-NNN-PRD-*.{json,md}   # confirm exactly one match
+   cat docs/PHASE-V2-NNN-PRD-*.{json,md}  # the PRD ground truth
+   ```
+   In practice: `ls docs/PHASE-V2-NNN-PRD-*` (no extension filter)
+   because the operator always names the slug uniquely.
+4. If glob returns 0 matches → FAIL with "PRD not found for V2-NNN in
+   docs/ — operator must file the PRD before dispatch".
+5. If glob returns >1 matches → FAIL with "ambiguous PRD: <list>" — the
+   title number should be unique per PRD.
+6. If `prd_source_file:` IS present in the card body, prefer it over
+   the glob (lets a card reference a non-v2 PRD or an archived PRD).
+
+Going forward, every NEW card body (V2-035+) SHOULD still include
+`prd_source_file:` for explicitness, but it is not required: the glob
+fallback is sufficient.
+
+The first V2-034 card to reach review will pass without mutation.
+This satisfies the operator invariant without breaking the
+"body immutable post-create" rule.
 
 ## Verification
 
