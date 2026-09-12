@@ -271,9 +271,9 @@ class TestSchemaContract:
             f"{forbidden & set(VEHICLE_SCHEMA['properties'].keys())}"
         )
 
-    def test_person_schema_distinctive_features_key_present(self):
-        """person SCHEMA_JSON declares 'distinctive_features' (downstream reads this)."""
-        assert "distinctive_features" in PERSON_SCHEMA["properties"]
+    def test_person_schema_signature_key_present(self):
+        """person SCHEMA_JSON declares 'signature' (v1 D1 mirror — US-034b)."""
+        assert "signature" in PERSON_SCHEMA["properties"]
 
     def test_person_schema_no_threat_fields(self):
         """person SCHEMA_JSON has NO threat-level fields."""
