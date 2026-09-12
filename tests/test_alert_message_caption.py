@@ -105,7 +105,7 @@ class TestCaptionWithBbox:
         assert "0.87" in result["caption"]
 
     def test_caption_includes_4_frame_positions(self):
-        """Caption includes 4-frame position line when bbox exists."""
+        """Caption includes bbox position when bbox exists."""
         verdict = _make_verdict_with_bbox(bbox=(100, 200, 50, 80))
         result = build_alert_message(
             verdict=verdict,
@@ -115,10 +115,13 @@ class TestCaptionWithBbox:
             alert=_make_alert(),
         )
         caption = result["caption"]
-        assert "frames[t-3]: (100,200,50,80)" in caption
-        assert "frames[t-2]: (100,200,50,80)" in caption
-        assert "frames[t-1]: (100,200,50,80)" in caption
-        assert "frames[t0]: (100,200,50,80)" in caption
+        # Position is in composite viz (TG#1 photo), not caption.
+        # Caption should NOT spam the same bbox 4 times.
+        assert "frames[t-3]:" not in caption
+        assert "frames[t0]:" not in caption
+        # YOLO + Vision lines should both be present.
+        assert "YOLO:" in caption
+        assert "Vision:" in caption
 
     def test_caption_includes_alert_id(self):
         """Caption includes alert_id when provided in alert dict."""
@@ -152,12 +155,13 @@ class TestCaptionWithBbox:
             alert=None,
         )
         caption = result["caption"]
-        assert "Frames[t" not in caption  # position line still present
-        assert "no subject" not in caption  # not the no-bbox path
-        # Verify position line is present
-        assert "frames[t-3]:" in caption
-        assert "frames[t0]:" in caption
-        # Verify id/timestamp lines absent
+        # No bbox-spam from old position line.
+        assert "frames[t" not in caption
+        assert "no subject" not in caption
+        # Position line is gone; YOLO/Vision lines remain.
+        assert "YOLO:" in caption
+        assert "Vision:" in caption
+        # id/timestamp lines absent (no alert dict)
         assert "Alert ID:" not in caption
         assert "Timestamp:" not in caption
 
@@ -166,7 +170,11 @@ class TestCaptionNoBbox:
     """AC(b): no bbox -> caption says 'no subject bbox detected'."""
 
     def test_caption_says_no_bbox_when_crop_bbox_a_is_none(self):
-        """Caption contains 'no subject bbox detected' when bbox is None."""
+        """Caption is rendered without bbox spam when bbox is None.
+
+        Old behavior said 'no subject bbox detected'; the position line
+        is gone entirely, so we just assert no frames[t-3] spam.
+        """
         verdict = _make_verdict_no_bbox()
         result = build_alert_message(
             verdict=verdict,
@@ -175,9 +183,10 @@ class TestCaptionNoBbox:
             camera_label="Back Yard",
             alert=_make_alert(),
         )
-        assert "no subject bbox detected" in result["caption"]
-        # Position line should NOT contain frame coordinates
         assert "frames[t-3]:" not in result["caption"]
+        # Caption still has YOLO + Vision lines.
+        assert "YOLO:" in result["caption"]
+        assert "Vision:" in result["caption"]
 
 
 class TestCaptionTruncation:
