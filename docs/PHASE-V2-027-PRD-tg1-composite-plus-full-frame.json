@@ -7,7 +7,7 @@
   "plan_section": "v2-telegram-alert-1",
   "trigger": "operator directive 2026-09-09 ~12:32: 'Well, I don't see a pairwise differential composite at all, and the crops don't look like they're being done well. Period. We have a perfectly working example in the refactor version 1 of how they're supposed to be.' Follow-up directive 2026-09-09 ~12:45: 'This is when Telegram alert 1 should go out with one of the full images, and the pairwise differential image, along with the positions in the four images'. The motivation: today's TG#1 attaches 5 photos (best_frame + diff_image + 4 frame paths) which (a) overwhelms the operator's chat, (b) repeats what's already on camera 4 times, (c) has a known MIME bug where dispatcher forces 'image/png' on JPEG bytes. The refactor version 1's TG#1 sends ONE composite (median + red motion + green bbox) at native resolution as a single PNG via sendPhoto. v2 needs the same.",
   "background": "telegram_formatter/alert.py:65-70 currently builds photos = [best_frame] + [diff_image] + frame_paths -- a 5-element list of paths. Of those 5: (1) is best_frame (frame_paths[3], now frame_paths[1] per V2-036), (2) is the gate's diff_image (which doesn't exist on disk for the current pipeline because GATE_KEEP_DISK_ARTIFACTS=false), (3-6) are the 4 raw frames. telegram_formatter/dispatcher.py:88 forces `mime='image/png'` + filename=`photo_i.png` on every attachment regardless of file content -- this is the source of the Telegram MIME bug. PRD-V2-027 has three jobs: (1) alert.py emits a 2-photo list `[composite_path, full_frame_path]` from artifacts (PRD-V2-024 produces these), (2) dispatcher.py sniffs file bytes to determine the real MIME type, (3) caption text on TG#1 lists the 4-frame positions (operator's directive 'along with the positions in the four images').",
-  "shipping_definition": "All US-027 stories marked done; pytest 150/150 (or higher) green; tree clean; alert.py build_alert_message returns photos = [composite_path, full_frame_path]; dispatcher.py MIME type is sniffed from file bytes (`image/png` for PNGs, `image/jpeg` for JPEGs, fallback `application/octet-stream` only for genuinely unknown types with a logged warning); caption text on TG#1 mentions the 4 frame positions; manual smoke test against the real Telegram group -5264050975 produces a 2-photo TG#1 with the composite and the full frame visible side-by-side in the chat; no MIME error in Telegram's response.",
+  "shipping_definition": "All US-027 stories marked done; pytest 150/150 (or higher) green; tree clean; alert.py build_alert_message returns photos = [composite_path, full_frame_path]; dispatcher.py MIME type is sniffed from file bytes (`image/png` for PNGs, `image/jpeg` for JPEGs, fallback `application/octet-stream` only for genuinely unknown types with a logged warning); caption text on TG#1 mentions the 4 frame positions; manual smoke test against the real Telegram home group <HOME_CHAT_ID> produces a 2-photo TG#1 with the composite and the full frame visible side-by-side in the chat; no MIME error in Telegram's response.",
   "scope_exclusions": [
     "Editing telegram_formatter/detail.py is NOT this PRD -- TG#2 already sends the right two crops. Verified by reading detail.py:71-74 already returns [crop_a_path, crop_b_path] which is correct per the operator.",
     "Editing telegram_formatter/match_alert.py is NOT this PRD -- TG#3 is text-only and that is correct.",
@@ -83,15 +83,15 @@
     },
     {
       "id": "US-027d",
-      "title": "live smoke to -5264050975 group verifies 2-photo TG#1",
+      "title": "live smoke to <HOME_CHAT_ID> group verifies 2-photo TG#1",
       "story_type": "verification",
       "acceptance": [
         "Operator confirms via ask: 'set up a synthetic webhook and tell me when TG#1 lands'.",
-        "Assistant: (1) reader frame is touched to bypass mtime cutoff, (2) synthetic Reolink-shaped webhook is sent to localhost:8090 with the camera_id matching a real channel that motion-diff can detect motion in (so motion-diff produces bbox_a + bbox_b and the pipeline has crops to feed into VM1/VM2), (3) the daemon returns alert_id, (4) the pipeline runs to completion, (5) the TG#1 message lands in chat -5264050975 with 2 visible photos.",
+        "Assistant: (1) reader frame is touched to bypass mtime cutoff, (2) synthetic Reolink-shaped webhook is sent to localhost:8090 with the camera_id matching a real channel that motion-diff can detect motion in (so motion-diff produces bbox_a + bbox_b and the pipeline has crops to feed into VM1/VM2), (3) the daemon returns alert_id, (4) the pipeline runs to completion, (5) the TG#1 message lands in chat <HOME_CHAT_ID> with 2 visible photos.",
         "Manual or screenshot verification: TG#1 message has composite.png + frame_004.jpg visible at native resolution, caption present, no 'image/png' error from Telegram's API.",
         "If TG#1 fails to send, the failure is logged but does NOT block this PRD -- that's a debugging session, not a PRD gate.",
         "Single commit OR no commit (this is verification, code may not change) -- captured in logs/daemon.log.",
-        "Output to operator: 'TG#1 confirmed in -5264050975 with 2 photos and correct MIME.'"
+        "Output to operator: 'TG#1 confirmed in <HOME_CHAT_ID> with 2 photos and correct MIME.'"
       ],
       "files_modified": [],
       "depends_on": ["US-027a", "US-027b", "US-027c"]
