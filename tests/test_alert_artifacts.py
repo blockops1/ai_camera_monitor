@@ -37,8 +37,6 @@ class FakeGateVerdict:
     bbox_b: tuple | None = None
     crop_bbox_a: tuple | None = None
     crop_bbox_b: tuple | None = None
-    subject_bbox_a: tuple | None = None
-    subject_bbox_b: tuple | None = None
     frame_paths: list = field(default_factory=list)
     crop_a_path: str | None = None
     crop_b_path: str | None = None
@@ -127,7 +125,7 @@ def test_prepare_returns_None_for_missing_bbox():
             confidence=0.85,
             frames=[f1, f2, f3, f4],
             crop_a=_make_cropped_frame(64, 48),  # crop_a present
-            crop_b=None,  # crop_b missing — no subject_bbox_b
+            crop_b=None,  # crop_b missing — diff(3,4) had no motion
             bbox_a=(10, 10, 50, 40),
             bbox_b=None,  # no bbox for crop_b
             reason="high_conf_vehicle",
@@ -162,8 +160,8 @@ def test_prepare_with_no_motion_returns_no_crops():
             class_label="car",
             confidence=0.85,
             frames=[f1, f2, f3, f4],
-            crop_a=None,  # no subject_bbox_a
-            crop_b=None,  # no subject_bbox_b
+            crop_a=None,  # no diff motion at all
+            crop_b=None,  # no diff motion at all
             bbox_a=None,
             bbox_b=None,
             reason="high_conf_vehicle",

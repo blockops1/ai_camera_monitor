@@ -5,11 +5,12 @@ STATUS: provisional (Phase 6B.107 §11.37, 2026-08-23; Phase 6B.109 §11.39 v2 f
         Phase 6B.144 §11.66 YOLO-tighten revert + pairwise diff image 2026-08-27;
         Phase 6B.169 §11.93 crop source-frame fix 2026-08-31;
         Phase 6B.170 vision-confidence floor 2026-09-01;
-        Phase 6B.171 subject_bbox_from_mask 2026-09-01;
-        Phase 6B.172 STRICT commit — no fallbacks 2026-09-01;
-        Phase 6B.173 two-mask intersection anchor 2026-09-01;
         Phase 6B.174 gatekeeper offset shift +4s 2026-09-01;
-        Phase 6B.175 two per-frame subject bboxes (independent ANDs) 2026-09-01)
+        Phase 6B.175 (reverted 2026-09-13): single-bbox invariant restored;
+        Phase 6B.181 (2026-09-13): crop uses diff bbox — 10% per-side pad +
+        round UP to mult of 32 — so YOLO's internal pad-to-mult-32 is a
+        no-op (zero black bars). Green box on composite = exact region
+        sent to Qwen.)
 THREAD SAFETY: single-threaded (one alert at a time, no shared state)
 INPUTS:
   - 4 frame paths (from persistent RTSP buffer via listener.py)
@@ -46,12 +47,11 @@ DOES NOT DO:
   - Does NOT fall back to the diff bbox when subject detection fails
     (Phase 6B.172 STRICT — caller suppresses the alert instead).
     Honest detection beats plausible-looking crops.
-  - Does NOT compute per-crop subject bboxes (Phase 6B.175 — two
-    independent subject bboxes, one per crop frame: subject_bbox_a =
-    AND(diff(1,2), diff(2,3)) applied to frame_2; subject_bbox_b =
-    AND(diff(2,3), diff(3,4)) applied to frame_3. Replaces 6B.173's
-    single bbox applied to both frames, which misaligned frame_2 crops
-    when the subject moved during the trail window).
+  - Does NOT compute per-crop subject bboxes (Phase 6B.175 reverted
+    2026-09-13). One bbox per slot: the diff bbox (10% pct + mult-32)
+    drawn as a green box on the composite AND used directly for crop.
+    The crop = the green box, no separate "subject" bbox, no AND,
+    no fallback.
 CALLED BY: listener/listener.py (webhook handler, when MOTION_GATE_ENABLED=1)
 CALLS INTO:
   - infra/frame_diff.py (pairwise diff + bbox extraction + crop)
@@ -137,8 +137,6 @@ from infra.frame_diff import (
     DEFAULT_DIFF_THRESHOLD,
     DEFAULT_MIN_AREA_PX,
     diff_pair_with_bbox,
-    pairwise_diff,
-    subject_bbox_from_two_masks,
 )
 from infra.quick_classifier import KEEP_CLASSES_DEFAULT, QuickClassifier, QuickVerdict
 
@@ -394,17 +392,10 @@ class GateVerdict:
       crop_b: PIL.Image crop from frames[2] using bbox_b (or None)
       bbox_a: (x, y, w, h) from diff(2,3) — None if no motion
       bbox_b: (x, y, w, h) from diff(3,4) — None if no motion
-      crop_bbox_a: (x, y, w, h) ACTUALLY used for crop_a — Phase 6B.175:
-        equals subject_bbox_a (logical AND of diff(1,2) and diff(2,3)).
-        None if no motion OR if subject detection failed.
-      crop_bbox_b: (x, y, w, h) ACTUALLY used for crop_b — Phase 6B.175:
-        equals subject_bbox_b (logical AND of diff(2,3) and diff(3,4)).
-      subject_bbox_a: (x, y, w, h) at the logical AND of diff(1,2)
-        and diff(2,3) — the subject's footprint in frame_2. Applied
-        to frame_2 for crop_a. None when no CC above 500 px.
-      subject_bbox_b: (x, y, w, h) at the logical AND of diff(2,3)
-        and diff(3,4) — the subject's footprint in frame_3. Applied
-        to frame_3 for crop_b. None when no CC above 500 px.
+      crop_bbox_a: (x, y, w, h) ACTUALLY used for crop_a — bbox_a from
+        diff(2,3), 10% pct-padded and rounded UP to mult of 32.
+      crop_bbox_b: (x, y, w, h) ACTUALLY used for crop_b — bbox_b from
+        diff(3,4), 10% pct-padded and rounded UP to mult of 32.
       frame_paths: 4 disk paths; present when GATE_KEEP_DISK_ARTIFACTS=true
         (for postmortem / debugging). Empty list when env var is off.
       crop_a_path: disk path to frame_2 crop (None when env var off)
@@ -430,13 +421,6 @@ class GateVerdict:
     bbox_b: tuple[int, int, int, int] | None = None
     crop_bbox_a: tuple[int, int, int, int] | None = None
     crop_bbox_b: tuple[int, int, int, int] | None = None
-    # Phase 6B.175: two per-frame subject bboxes, each from the logical
-    # AND of the diff pair that brackets that frame.
-    #   subject_bbox_a = AND(diff(1,2), diff(2,3)) — applies to frame_2
-    #   subject_bbox_b = AND(diff(2,3), diff(3,4)) — applies to frame_3
-    # None when the intersection has no CC above min_cc_area_px (default 500).
-    subject_bbox_a: tuple[int, int, int, int] | None = None
-    subject_bbox_b: tuple[int, int, int, int] | None = None
     frame_paths: list[str] = field(default_factory=list)
     crop_a_path: str | None = None
     crop_b_path: str | None = None
@@ -818,15 +802,20 @@ def run(
       and (when GATE_KEEP_DISK_ARTIFACTS=true) disk paths for postmortem.
 
     Per §11.37 LOCKED architecture + §11.93 (Phase 6B.169) crop fix +
-    Phase 6B.175 per-frame AND bboxes:
-      - diff(frame_1, frame_2) + diff(frame_2, frame_3) → AND → subject_bbox_a
-        → crop_a = frame_2.crop(subject_bbox_a)
-      - diff(frame_2, frame_3) + diff(frame_3, frame_4) → AND → subject_bbox_b
-        → crop_b = frame_3.crop(subject_bbox_b)
-        (Each bbox is applied to the frame it was computed for. See
-         Phase 6B.175 PLAN entry: replaces 6B.173's single-subject-bbox
-         which applied the AND of diff(2,3)∩diff(3,4) to BOTH crops,
-         misaligning crop_a when the subject moved during the trail.)
+    Phase 6B.175 (reverted 2026-09-13, single-bbox invariant):
+      - bbox_a = diff(frame_2, frame_3), 10% pct-padded and rounded UP
+        to mult of 32 → drawn as green box on composite → crop_a =
+        frame_2.crop(bbox_a)
+      - bbox_b = diff(frame_3, frame_4), 10% pct-padded and rounded UP
+        to mult of 32 → drawn as green box on composite → crop_b =
+        frame_3.crop(bbox_b)
+      - The green box on the composite is the EXACT region sent to
+        Qwen vision — no separate "subject" bbox, no AND intersection,
+        no fallback. Phase 6B.171 STRICT commit: if BOTH diff bboxes
+        are None, suppress with reason="no_server_motion". If only
+        one is None (e.g. one diff pair saw motion and the other
+        didn't), pass the other through — gate has historically never
+        suppressed on a single empty diff.
       - classify both crops, apply thresholds, route to vehicle/person/suppress
 
     Per §11.46.6 (Phase 6B.115): the gate loads all 4 frames once at start
@@ -921,131 +910,50 @@ def run(
         f"[{alert_id}] motion_gate: diff(3,4) changed_pixels={count_b} bbox_b={bbox_b}"
     )
 
-    # ---- Phase 6B.175: TWO per-frame subject bboxes ----
-    # Operator 2026-09-01 (fe3f88c6 walk-test): "the AND of 1→2 and 2→3 should
-    # be applied to frame_2; the AND of 2→3 and 3→4 should be applied to
-    # frame_3."
-    #
-    # Math: with consecutive diffs sharing a frame,
-    #   diff(1,2) = (trail in frame_1) ∪ (subject in frame_2)
-    #   diff(2,3) = (subject in frame_2) ∪ (subject in frame_3)
-    #   diff(3,4) = (subject in frame_3) ∪ (trail in frame_4)
-    # The only region present in BOTH diff(1,2) AND diff(2,3) is the
-    # subject's position in frame_2. The only region present in BOTH
-    # diff(2,3) AND diff(3,4) is the subject's position in frame_3.
-    #
-    # STRICT commit (carried from 6B.172): no fallback, no size floor.
-    # Either AND bbox None → suppress with reason="no_subject_detected".
-    subject_bbox_a: tuple[int, int, int, int] | None = None
-    subject_bbox_b: tuple[int, int, int, int] | None = None
-    frame_1_gray = cv2.imread(frame_1_path, cv2.IMREAD_GRAYSCALE)
-    frame_2_gray = cv2.imread(frame_2_path, cv2.IMREAD_GRAYSCALE)
-    frame_3_gray = cv2.imread(frame_3_path, cv2.IMREAD_GRAYSCALE)
-    frame_4_gray = cv2.imread(frame_4_path, cv2.IMREAD_GRAYSCALE)
-    if (
-        frame_1_gray is not None
-        and frame_2_gray is not None
-        and frame_3_gray is not None
-        and frame_4_gray is not None
-    ):
-        mask_1to2 = pairwise_diff(frame_1_gray, frame_2_gray, threshold=diff_threshold)
-        mask_2to3 = pairwise_diff(frame_2_gray, frame_3_gray, threshold=diff_threshold)
-        mask_3to4 = pairwise_diff(frame_3_gray, frame_4_gray, threshold=diff_threshold)
-        subject_bbox_a = subject_bbox_from_two_masks(mask_1to2, mask_2to3)
-        subject_bbox_b = subject_bbox_from_two_masks(mask_2to3, mask_3to4)
-        del frame_1_gray, frame_2_gray, frame_3_gray, frame_4_gray
-    log.debug(
-        f"[{alert_id}] motion_gate: subject_bbox_a={subject_bbox_a} "
-        f"subject_bbox_b={subject_bbox_b}"
-    )
-
-    # Phase 6B.175: each crop uses its own AND-bbox on the frame it was
-    # computed for. crop_a = subject_bbox_a on frame_2 (subject WAS here);
-    # crop_b = subject_bbox_b on frame_3 (subject IS here).
-    crop_bbox_a = subject_bbox_a
-    crop_bbox_b = subject_bbox_b
+    # Phase 6B.175 (reverted 2026-09-13): crop uses the SAME bbox that's
+    # drawn on the composite. One bbox per crop slot — no AND, no fallback.
+    # crop_a = bbox_a applied to frame_2 (subject WAS here);
+    # crop_b = bbox_b applied to frame_3 (subject IS here).
+    crop_bbox_a = bbox_a
+    crop_bbox_b = bbox_b
     log.info(
-        f"[{alert_id}] motion_gate: Phase 6B.175 per-frame logical-AND bbox — "
+        f"[{alert_id}] motion_gate: per-frame diff bbox (10% pct + round-mult-32) — "
         f"crop_bbox_a={crop_bbox_a} crop_bbox_b={crop_bbox_b}"
     )
 
-    # ---- edge case: no subject detected by either crop ----
-    # Phase 6B.171 STRICT commit. Two failure modes collapse here:
-    # 1. No motion at all (both diff bboxes None) → diff_suppress
-    # 2. Motion detected but subject detection failed (subject too
-    #    small, subject exited frame, sensor noise) → subject_suppress
-    # Both suppress the alert. No partial alerts, no fallback crops.
-    # No V2 carve-out — if diff is empty, suppress. Operator 2026-09-01:
-    # "I don't want a V2 mode fall back if the differential boxes show
-    # that there's no actual differential motion." Same code path for
-    # V1 and V2.
-    #
-    # §walkby-fix 2026-09-05: when EITHER subject_bbox AND is empty
-    # but the underlying diff DOES have motion (subject moved fast and
-    # the two consecutive diffs only overlap on tiny body parts),
-    # fall back to the raw diff bbox for the empty AND slot instead
-    # of suppressing. This keeps single-frame motion (walking past a
-    # static camera, waving, etc.) flowing into the pipeline rather
-    # than being dropped at the gate. min_cc_area_px was also lowered
-    # 500→100 so small subjects aren't filtered as noise.
-    if subject_bbox_a is None or subject_bbox_b is None:
-        # Try fallback: borrow the raw diff bbox for any empty AND slot.
-        fallback_used = []
-        if subject_bbox_a is None and bbox_a is not None:
-            subject_bbox_a = bbox_a
-            fallback_used.append("a")
-        if subject_bbox_b is None and bbox_b is not None:
-            subject_bbox_b = bbox_b
-            fallback_used.append("b")
-        if subject_bbox_a is not None and subject_bbox_b is not None:
-            log.info(
-                f"[{alert_id}] motion_gate: AND intersection empty for "
-                f"slot(s) {fallback_used} — falling back to raw diff bbox "
-                f"(walk-by / fast-moving subject)"
-            )
-        else:
-            # Did diff see motion? If yes, it's a subject-detection failure.
-            # If no, it's a no-motion case. Log the distinction.
-            if bbox_a is None and bbox_b is None:
-                log.info(
-                    f"[{alert_id}] motion_gate: no motion detected by either diff — suppressing"
-                )
-                reason = "no_server_motion"
-            else:
-                log.info(
-                    f"[{alert_id}] motion_gate: motion detected but no subject "
-                    f"found (intersection empty — vehicle stationary across frame_2/3/4 "
-                    f"or motion too sparse for AND) — suppressing"
-                )
-                reason = "no_subject_detected"
-            return GateVerdict(
-                classification="none",
-                class_label=None,
-                confidence=0.0,
-                top_class="",
-                top_confidence=0.0,
-                frames=pil_frames,
-                bbox_a=None,
-                bbox_b=None,
-                crop_bbox_a=None,
-                crop_bbox_b=None,
-                subject_bbox_a=None,
-                subject_bbox_b=None,
-                reason=reason,
-            )
+    # ---- edge case: no motion detected by either diff ----
+    # Phase 6B.171 STRICT commit (still in force): if there's no diff
+    # motion at all (both diff bboxes None), suppress. No V2 carve-out.
+    # Operator 2026-09-01: "I don't want a V2 mode fall back if the
+    # differential boxes show that there's no actual differential motion."
+    if bbox_a is None and bbox_b is None:
+        log.info(
+            f"[{alert_id}] motion_gate: no motion detected by either diff — suppressing"
+        )
+        return GateVerdict(
+            classification="none",
+            class_label=None,
+            confidence=0.0,
+            top_class="",
+            top_confidence=0.0,
+            frames=pil_frames,
+            bbox_a=None,
+            bbox_b=None,
+            crop_bbox_a=None,
+            crop_bbox_b=None,
+            reason="no_server_motion",
+        )
 
     # ---- crop frames (in-memory + optional disk write) ----
     # In-memory PIL crops: always built (verdict.crop_a/b are the
     # authoritative copy on the hot path).
-    # Phase 6B.169 §11.93: bbox_a/b describe the diff TRAIL between two
-    # frames. Apply each bbox to the EARLIER of the two frames it was
-    # computed from — the moving subject is still inside the bbox at
-    # the earlier frame.
-    # Phase 6B.175: crop_bbox_a = subject_bbox_a (applied to frame_2),
-    # crop_bbox_b = subject_bbox_b (applied to frame_3). If either
-    # subject detection failed, that bbox is None and we don't crop —
-    # but we already checked above and suppressed the whole alert if
-    # either was None. So here, both bboxes are non-None.
+    # Phase 6B.169 §11.93: bbox_a/b describe the diff bbox (10% pct + mult-32
+    # padded) between two frames. Apply each bbox to the EARLIER of the
+    # two frames it was computed from — the moving subject is still
+    # inside the bbox at the earlier frame.
+    # Phase 6B.175 (reverted 2026-09-13): crop_bbox_a = bbox_a (applied to
+    # frame_2), crop_bbox_b = bbox_b (applied to frame_3). If either is
+    # None (one diff pair missed motion), still pass the other through.
     crop_a_pil = _pil_crop(frame_2_pil, crop_bbox_a) if crop_bbox_a else None
     crop_b_pil = _pil_crop(frame_3_pil, crop_bbox_b) if crop_bbox_b else None
 
@@ -1112,8 +1020,6 @@ def run(
         bbox_b=bbox_b,
         crop_bbox_a=crop_bbox_a,
         crop_bbox_b=crop_bbox_b,
-        subject_bbox_a=subject_bbox_a,
-        subject_bbox_b=subject_bbox_b,
         frame_paths=frame_paths if keep_disk else [],
         crop_a_path=None,  # §11.176 (2026-09-06): gate no longer writes crops.
         crop_b_path=None,  # Canonical crop emitter is infra.alert_artifacts.prepare_alert_artifacts (PRD-V2-024 US-024c).
