@@ -315,6 +315,68 @@ class TestPipelineLogLines:
         ]
         assert len(extra_logs) == 0, "No 'started pipeline' log line should exist"
 
+    def test_pipeline_run_emits_self_locating_tg2_tg3_captions(self, tmp_path):
+        """pipeline.run() emits TG#2 and TG#3 captions with self-locating metadata."""
+        alert = {
+            "id": "evt-fake-001",
+            "camera_id": "CAM1",
+            "camera_label": "Front Gate",
+            "timestamp": "2026-09-12T19:02:50.000+0000",
+            "classification": "vehicle",
+            "frames": ["/tmp/f1.jpg", "/tmp/f2.jpg", "/tmp/f3.jpg", "/tmp/f4.jpg"],
+        }
+        diff_path = str(tmp_path / "diff.png")
+        Path(diff_path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
+        gate_v = _make_gate_verdict(
+            classification="vehicle",
+            class_label="car",
+            confidence=0.91,
+            top_class="car",
+            top_confidence=0.91,
+            pairwise_diff_path=diff_path,
+        )
+
+        a_p = str(tmp_path / "crop_a.png")
+        b_p = str(tmp_path / "crop_b.png")
+        Path(a_p).write_bytes(b"fake_crop_a")
+        Path(b_p).write_bytes(b"fake_crop_b")
+
+        vm1_result = {"class": "vehicle", "confidence": 0.92}
+        tg1 = {"caption": "test", "photos": []}
+        vm2_result = {"class_confirmed": "vehicle", "distinctive_features": []}
+
+        mock_artifacts = MagicMock(spec=AlertArtifacts)
+        mock_artifacts.crop_a_path = a_p
+        mock_artifacts.crop_b_path = b_p
+
+        with (
+            patch("listener.pipeline.should_suppress", return_value=False),
+            patch("listener.pipeline.run_gate", return_value=gate_v),
+            patch("listener.pipeline.prepare_alert_artifacts", return_value=mock_artifacts),
+            patch("listener.pipeline.verify_class", return_value=vm1_result),
+            patch("listener.pipeline.build_alert_message", return_value=tg1),
+            patch("listener.pipeline.detail_class", return_value=vm2_result),
+            patch("listener.pipeline._load_candidates", return_value=[]),
+            patch("listener.pipeline.record_hit"),
+        ):
+            result = run(alert)
+
+        # Verify tg2 and tg3 were populated by the builders
+        tg2 = result["tg2"]
+        tg3 = result["tg3"]
+
+        # TG#2 caption assertions
+        assert "Camera: Front Gate" in tg2["caption"]
+        assert "Alert 2 of 3" in tg2["caption"]
+        assert "Alert ID: evt-fake-001" in tg2["caption"]
+        assert "Timestamp: 2026-09-12T19:02:50.000+0000" in tg2["caption"]
+
+        # TG#3 caption assertions
+        assert "Camera: Front Gate" in tg3["caption"]
+        assert "Alert 3 of 3" in tg3["caption"]
+        assert "Alert ID: evt-fake-001" in tg3["caption"]
+        assert "Timestamp: 2026-09-12T19:02:50.000+0000" in tg3["caption"]
+
     def test_cooldown_dropped_log_line_format(self, caplog):
         """Pipeline emits 'pipeline: dropped' log with classification and reason=cooldown_active."""
         import logging
