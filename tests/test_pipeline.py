@@ -126,7 +126,16 @@ class TestPipelineRun:
 
         vm1_result = {"class": "vehicle", "confidence": 0.92}
         tg1 = {"caption": "Detected: vehicle", "photos": []}
-        vm2_result = {"class_confirmed": "vehicle", "distinctive_features": []}
+        vm2_result = {
+            "class": "vehicle",
+            "color": "white",
+            "make": "Ford",
+            "model": "F-150",
+            "body_style_hint": "pickup",
+            "vehicle_features": {"wheel_style": "alloy"},
+            "confidence": 0.92,
+            "notable_details": [],
+        }
         tg2 = {"caption": "Camera: Front Gate", "photos": []}
         match_result = {"matched": False}
         tg3 = {"caption": "Status: unrecognized vehicle", "photos": []}
@@ -134,7 +143,10 @@ class TestPipelineRun:
         with (
             patch("listener.pipeline.should_suppress", return_value=False),
             patch("listener.pipeline.run_gate", return_value=gate_v),
-            patch("listener.pipeline.prepare_alert_artifacts", return_value=_make_artifacts()),
+            patch(
+                "listener.pipeline.prepare_alert_artifacts",
+                return_value=_make_artifacts(),
+            ),
             patch("listener.pipeline.verify_class", return_value=vm1_result),
             patch("listener.pipeline.build_alert_message", return_value=tg1),
             patch("listener.pipeline.detail_class", return_value=vm2_result),
@@ -179,14 +191,23 @@ class TestPipelineRun:
 
         vm1_result = {"class": "vehicle", "confidence": 0.92}
         tg1 = {"caption": "test", "photos": []}
-        vm2_result = {"class_confirmed": "vehicle", "distinctive_features": []}
+        vm2_result = {
+            "class": "vehicle",
+            "color": "white",
+            "make": "Ford",
+            "confidence": 0.92,
+            "notable_details": [],
+        }
         tg2 = {"caption": "test", "photos": []}
         tg3 = {"caption": "test", "photos": []}
 
         with (
             patch("listener.pipeline.should_suppress", return_value=False),
             patch("listener.pipeline.run_gate", return_value=gate_v),
-            patch("listener.pipeline.prepare_alert_artifacts", return_value=_make_artifacts()),
+            patch(
+                "listener.pipeline.prepare_alert_artifacts",
+                return_value=_make_artifacts(),
+            ),
             patch("listener.pipeline.verify_class", return_value=vm1_result),
             patch("listener.pipeline.build_alert_message", return_value=tg1),
             patch("listener.pipeline.detail_class", return_value=vm2_result),
@@ -202,7 +223,6 @@ class TestPipelineRun:
 
     def test_prepare_alert_artifacts_called_with_camera_and_alert_id(self, tmp_path):
         """prepare_alert_artifacts receives gate_verdict, frames, and output_dir from run()."""
-        from unittest.mock import MagicMock
 
         import infra.paths as _paths_mod
 
@@ -219,11 +239,17 @@ class TestPipelineRun:
 
             vm1_result = {"class": "vehicle", "confidence": 0.92}
             tg1 = {"caption": "Detected: vehicle", "photos": []}
-            vm2_result = {"class_confirmed": "vehicle", "distinctive_features": []}
+            vm2_result = {
+                "class": "vehicle",
+                "color": "white",
+                "make": "Ford",
+                "confidence": 0.92,
+                "notable_details": [],
+            }
             tg2 = {"caption": "Camera: Front Gate", "photos": []}
             tg3 = {"caption": "Status: unrecognized", "photos": []}
 
-            expected_output_dir = (tmp_path / "data" / "frames" / "CAM3" / "alert-abc123")
+            expected_output_dir = tmp_path / "data" / "frames" / "CAM3" / "alert-abc123"
 
             with (
                 patch("listener.pipeline.should_suppress", return_value=False),
@@ -274,14 +300,22 @@ class TestPipelineLogLines:
 
         vm1_result = {"class": "person", "confidence": 0.90}
         tg1 = {"caption": "test", "photos": []}
-        vm2_result = {"class_confirmed": "person", "distinctive_features": []}
+        vm2_result = {
+            "class": "person",
+            "better_crop": "crop_a",
+            "confidence": 0.90,
+            "notable_details": [],
+        }
         tg2 = {"caption": "test", "photos": []}
         tg3 = {}
 
         with (
             patch("listener.pipeline.should_suppress", return_value=False),
             patch("listener.pipeline.run_gate", return_value=gate_v),
-            patch("listener.pipeline.prepare_alert_artifacts", return_value=_make_artifacts()),
+            patch(
+                "listener.pipeline.prepare_alert_artifacts",
+                return_value=_make_artifacts(),
+            ),
             patch("listener.pipeline.verify_class", return_value=vm1_result),
             patch("listener.pipeline.build_alert_message", return_value=tg1),
             patch("listener.pipeline.detail_class", return_value=vm2_result),
@@ -310,8 +344,7 @@ class TestPipelineLogLines:
         extra_logs = [
             record
             for record in caplog.records
-            if record.levelname == "INFO"
-            and "started pipeline" in record.message
+            if record.levelname == "INFO" and "started pipeline" in record.message
         ]
         assert len(extra_logs) == 0, "No 'started pipeline' log line should exist"
 
@@ -343,7 +376,13 @@ class TestPipelineLogLines:
 
         vm1_result = {"class": "vehicle", "confidence": 0.92}
         tg1 = {"caption": "test", "photos": []}
-        vm2_result = {"class_confirmed": "vehicle", "distinctive_features": []}
+        vm2_result = {
+            "class": "vehicle",
+            "color": "white",
+            "make": "Ford",
+            "confidence": 0.92,
+            "notable_details": [],
+        }
 
         mock_artifacts = MagicMock(spec=AlertArtifacts)
         mock_artifacts.crop_a_path = a_p
@@ -352,7 +391,9 @@ class TestPipelineLogLines:
         with (
             patch("listener.pipeline.should_suppress", return_value=False),
             patch("listener.pipeline.run_gate", return_value=gate_v),
-            patch("listener.pipeline.prepare_alert_artifacts", return_value=mock_artifacts),
+            patch(
+                "listener.pipeline.prepare_alert_artifacts", return_value=mock_artifacts
+            ),
             patch("listener.pipeline.verify_class", return_value=vm1_result),
             patch("listener.pipeline.build_alert_message", return_value=tg1),
             patch("listener.pipeline.detail_class", return_value=vm2_result),
