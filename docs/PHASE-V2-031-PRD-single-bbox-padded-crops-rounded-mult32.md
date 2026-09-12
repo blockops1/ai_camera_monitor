@@ -113,7 +113,7 @@ On 2026-09-13, the operator identified two coupled bugs in the v2 pipeline:
 
 - **Branch:** `code/v2-031a-single-bbox-rounded-pad`
 - **Owner:** coder
-- **Workspace:** `worktree:/Users/jill/farm-surveillance-v2` (explicit absolute path; `default` board has no `default_workdir`)
+- **Workspace:** `worktree:<v2-repo>` (operator sets absolute path at dispatch time; `default` board has no `default_workdir`)
 - **Depends on:** V2-030 (so the dispatch order is: V2-030 → V2-031, no concurrent dispatcher traffic on `infra/frame_diff.py` and `telegram_formatter/dispatcher.py`)
 
 **Acceptance criteria:**
