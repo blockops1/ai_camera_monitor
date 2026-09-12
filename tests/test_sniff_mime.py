@@ -8,15 +8,13 @@ Covers:
   (e) PNG file passed through dispatch -> correct MIME + .png suffix in multipart
   (f) JPEG file passed through dispatch -> correct MIME + .jpg suffix in multipart
 """
+
 from __future__ import annotations
 
 import logging
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from telegram_formatter.dispatcher import _sniff_mime
-
 
 # PNG magic bytes (8 bytes: IHDR start)
 PNG_BYTES = b"\x89PNG\r\n\x1a\n"
@@ -38,6 +36,7 @@ def _write_tmp(tmp_path, name, data):
 # ---------------------------------------------------------------------------
 # Direct _sniff_mime tests
 # ---------------------------------------------------------------------------
+
 
 def test_sniff_mime_png(tmp_path):
     """(a) PNG bytes -> ('image/png', '.png')."""
@@ -78,6 +77,7 @@ def test_sniff_mime_empty(tmp_path, caplog):
 # ---------------------------------------------------------------------------
 # Integration: dispatch with real MIME sniffing
 # ---------------------------------------------------------------------------
+
 
 def test_dispatch_png_file_uses_png_mime(mock_llama_server, tmp_path):
     """(e) PNG file sent via dispatch gets correct MIME and .png suffix."""
