@@ -1,0 +1,46 @@
+{
+    "_comment": "Per-camera overrides for the motion gate pipeline. Keys are camera IDs that must match the IDs you set in camera-creds.env (e.g. CAMERA_A, CAMERA_B, ...). Consumed by infra/gate.py:load_thresholds() and infra/gate_cooldown.py:get_gate_cooldown_seconds(). Tunable per camera: per-class (vehicle/person/animal) confidence thresholds, gate_cooldown window in seconds (0 = no cooldown), gate_enabled event-type toggle. Defaults below are starting points — operators tighten/loosen per camera based on local noise level. The example below shows six cameras at varied noise levels. Replace the IDs with your own.",
+    "_default_thresholds_reference": "infra/gate.py:THRESHOLDS_BY_CLASS",
+    "CAMERA_A": {
+        "_note": "Primary entry — high-traffic, no relaxation",
+        "vehicle": 0.50,
+        "person": 0.35,
+        "gate_cooldown": {"vehicle": 60, "person": 30, "default": 45},
+        "gate_enabled": {"vehicle": true, "person": true, "motion": true}
+    },
+    "CAMERA_B": {
+        "_note": "Secondary entry",
+        "vehicle": 0.50,
+        "person": 0.35,
+        "gate_cooldown": {"vehicle": 60, "person": 30, "default": 45},
+        "gate_enabled": {"vehicle": true, "person": true, "motion": true}
+    },
+    "CAMERA_C": {
+        "_note": "Driveway / vehicle-priority area",
+        "vehicle": 0.50,
+        "person": 0.40,
+        "gate_cooldown": {"vehicle": 90, "person": 45, "default": 60},
+        "gate_enabled": {"vehicle": true, "person": true, "motion": true}
+    },
+    "CAMERA_D": {
+        "_note": "Perimeter — vehicles only, person alerts suppressed",
+        "vehicle": 0.55,
+        "person": 0.45,
+        "gate_cooldown": {"vehicle": 90, "person": 45, "default": 60},
+        "gate_enabled": {"vehicle": true, "person": false, "motion": true}
+    },
+    "CAMERA_E": {
+        "_note": "Noisy perimeter — high threshold",
+        "vehicle": 0.55,
+        "person": 0.50,
+        "gate_cooldown": {"vehicle": 120, "person": 60, "default": 90},
+        "gate_enabled": {"vehicle": true, "person": false, "motion": true}
+    },
+    "CAMERA_F": {
+        "_note": "Rear perimeter",
+        "vehicle": 0.55,
+        "person": 0.45,
+        "gate_cooldown": {"vehicle": 90, "person": 45, "default": 60},
+        "gate_enabled": {"vehicle": true, "person": false, "motion": true}
+    }
+}

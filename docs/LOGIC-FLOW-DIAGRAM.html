@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>v2 Farm Surveillance — Logic Flow Diagram</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      background: #0d1117;
+      min-height: 100vh;
+      padding: 2rem 1.5rem 3rem;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .wrap { max-width: 1280px; margin: 0 auto; }
+    .hdr { margin-bottom: 1.75rem; }
+    .hdr h1 {
+      font-size: 1.35rem; font-weight: 700; color: #f0f6fc;
+      letter-spacing: -0.015em; margin-bottom: 0.35rem;
+    }
+    .hdr .sub { color: #8b949e; font-size: 0.85rem; margin-bottom: 0.25rem; }
+    .hdr .meta { color: #6e7681; font-size: 0.75rem; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .pulse-dot {
+      display: inline-block; width: 10px; height: 10px;
+      background: #58a6ff; border-radius: 50%; margin-right: 0.6rem;
+      vertical-align: middle; animation: pulse 2.4s infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+    .diagram-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 1.25rem;
+      margin-bottom: 2rem;
+    }
+    .diagram-card h2 {
+      font-size: 1rem; font-weight: 600; color: #f0f6fc;
+      margin-bottom: 0.15rem;
+    }
+    .diagram-card .caption {
+      color: #8b949e; font-size: 0.78rem;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      margin-bottom: 1rem;
+    }
+    .svg-wrap { width: 100%; }
+    .svg-wrap svg { width: 100%; height: auto; display: block; }
+
+    .legend-strip {
+      display: flex; flex-wrap: wrap; gap: 0.6rem 1.1rem;
+      margin-top: 0.85rem; padding-top: 0.85rem;
+      border-top: 1px solid #21262d;
+      font-size: 0.72rem; color: #8b949e;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    .legend-strip .sw {
+      display: inline-block; width: 12px; height: 12px;
+      border-radius: 3px; margin-right: 0.35rem;
+      vertical-align: middle; border: 1px solid currentColor;
+    }
+
+    .footer {
+      text-align: center; margin-top: 2rem;
+      color: #6e7681; font-size: 0.72rem;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hdr">
+    <h1><span class="pulse-dot"></span>v2 Farm Surveillance — Logic Flow</h1>
+    <div class="sub">Single-host camera webhook pipeline · Flask :8090 → 11-stage pipeline → Telegram Home</div>
+    <div class="meta">PROJECT_ROOT=~/farm-surveillance-v2  ·  LaunchAgent com.farm.surveillance.v2.plist  ·  KeepAlive=true  ·  daemon PID 87987 (post-bounce 22:02 Sep 8)</div>
+  </div>
+
+  <!-- ====================================================== -->
+  <!-- DIAGRAM 1: SYSTEM OVERVIEW (top-down flow)              -->
+  <!-- ====================================================== -->
+  <div class="diagram-card">
+    <h2>v2 Farm Surveillance — System Overview</h2>
+    <div class="caption">commit 4daabf3  ·  all 8 US-014 stories committed  ·  POST /alert (Reolink default payload)</div>
+
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1100 1180" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+
+        <defs>
+          <!-- Arrow marker -->
+          <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#8b949e"/>
+          </marker>
+          <marker id="arrow-red" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#f97583"/>
+          </marker>
+          <marker id="arrow-tg" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#79c0ff"/>
+          </marker>
+
+          <!-- Subtle grid -->
+          <pattern id="grid1" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1c2128" stroke-width="0.6"/>
+          </pattern>
+
+          <!-- Reusable styles -->
+          <style><![CDATA[
+            .label  { fill: #f0f6fc; font-size: 12px; font-weight: 600; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+            .sub    { fill: #8b949e; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .file   { fill: #6e7681; font-size: 9.5px; font-style: italic; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .anno   { fill: #8b949e; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .stage-num { fill: #ffffff; font-size: 11px; font-weight: 700; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+            .small  { fill: #8b949e; font-size: 9px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .title  { fill: #f0f6fc; font-size: 13px; font-weight: 700; }
+            .edge   { fill: none; stroke: #8b949e; stroke-width: 1.5; }
+            .edge-red { fill: none; stroke: #f97583; stroke-width: 1.5; stroke-dasharray: 5,4; }
+            .edge-tg  { fill: none; stroke: #79c0ff; stroke-width: 1.5; }
+            .edge-sup { fill: none; stroke: #ffa657; stroke-width: 1.5; stroke-dasharray: 4,3; }
+          ]]></style>
+        </defs>
+
+        <rect width="1100" height="1180" fill="#0d1117"/>
+        <rect width="1100" height="1180" fill="url(#grid1)"/>
+
+        <!-- ===== Row 1: External Reolink cameras ===== -->
+        <g>
+          <rect x="380" y="30" width="340" height="64" rx="6" fill="#161b22" stroke="#8b949e" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="550" y="55" class="title" text-anchor="middle">External: Reolink Cameras</text>
+          <text x="550" y="73" class="anno" text-anchor="middle">6 cameras · 192.168.1.{39,73,85,103,108,113}</text>
+          <text x="550" y="86" class="small" text-anchor="middle">webhooks → POST /alert</text>
+        </g>
+        <line x1="550" y1="94" x2="550" y2="120" class="edge" marker-end="url(#arrow)"/>
+        <text x="558" y="110" class="anno">HTTPS webhook</text>
+
+        <!-- ===== Row 2: HTTP entry (Flask) ===== -->
+        <g>
+          <rect x="380" y="122" width="340" height="60" rx="6" fill="rgba(88,166,255,0.12)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="550" y="145" class="label" text-anchor="middle">Flask HTTP Entry</text>
+          <text x="550" y="162" class="anno" text-anchor="middle">0.0.0.0:8090 · launchd KeepAlive</text>
+          <text x="550" y="176" class="file" text-anchor="middle">listener/daemon.py</text>
+        </g>
+
+        <!-- ===== Row 3: Route branching ===== -->
+        <line x1="550" y1="182" x2="550" y2="200" class="edge" marker-end="url(#arrow)"/>
+
+        <!-- Single /alert route -->
+        <g>
+          <rect x="380" y="202" width="340" height="60" rx="6" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.8"/>
+          <text x="550" y="225" class="label" text-anchor="middle">POST /alert</text>
+          <text x="550" y="242" class="anno" text-anchor="middle">daemon.alert()  →  normalize → IP → frames</text>
+          <text x="550" y="256" class="small" text-anchor="middle">Reolink default payload</text>
+
+          <line x1="550" y1="262" x2="550" y2="288" class="edge" marker-end="url(#arrow)"/>
+        </g>
+
+        <!-- ===== Row 4: /alert path — three sequential boxes ===== -->
+        <g>
+          <!-- Normalize -->
+          <rect x="280" y="290" width="340" height="58" rx="6" fill="rgba(210,168,255,0.10)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="450" y="313" class="label" text-anchor="middle">Normalize</text>
+          <text x="450" y="328" class="anno" text-anchor="middle">normalize_reolink()</text>
+          <text x="450" y="342" class="small" text-anchor="middle">→ {id, camera_id, classification, frames, timestamp}  |  None → 400</text>
+
+          <!-- arrow -->
+          <line x1="450" y1="348" x2="450" y2="368" class="edge" marker-end="url(#arrow)"/>
+
+          <!-- Anti-spoof IP -->
+          <rect x="280" y="370" width="340" height="58" rx="6" fill="rgba(249,117,131,0.12)" stroke="#f97583" stroke-width="1.5"/>
+          <text x="450" y="393" class="label" text-anchor="middle">Anti-Spoof IP Validation</text>
+          <text x="450" y="408" class="anno" text-anchor="middle">infra/camera_creds.validate_source_ip(camera_id, src_ip)</text>
+          <text x="450" y="422" class="small" text-anchor="middle">fallback: _LearnedCameraMap(maxlen=32) → get_all_cameras()</text>
+
+          <!-- arrow -->
+          <line x1="450" y1="428" x2="450" y2="448" class="edge" marker-end="url(#arrow)"/>
+
+          <!-- Frame pull -->
+          <rect x="280" y="450" width="340" height="58" rx="6" fill="rgba(210,168,255,0.10)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="450" y="473" class="label" text-anchor="middle">Frame Pull</text>
+          <text x="450" y="488" class="anno" text-anchor="middle">infra/frame_capture.get_recent_frames(camera_id, n=4, offset_seconds=6)</text>
+          <text x="450" y="502" class="small" text-anchor="middle">CameraCaptureRegistry · PersistentRTSPReader · 180-frame deque · &gt;10s reconnect</text>
+        </g>
+
+        <!-- error branch (4xx) -->
+        <line x1="622" y1="450" x2="720" y2="450" class="edge-red"/>
+        <line x1="720" y1="450" x2="720" y2="408" class="edge-red"/>
+        <line x1="622" y1="370" x2="700" y2="370" class="edge-red"/>
+        <line x1="700" y1="370" x2="700" y2="408" class="edge-red"/>
+
+        <!-- error diamond -->
+        <g>
+          <polygon points="700,418 740,438 700,458 660,438" fill="rgba(249,117,131,0.18)" stroke="#f97583" stroke-width="2"/>
+          <text x="700" y="436" class="label" text-anchor="middle">err?</text>
+          <text x="700" y="450" class="small" text-anchor="middle">→ 4xx</text>
+        </g>
+
+        <!-- ===== Row 5: Pipeline convergent ===== -->
+        <line x1="450" y1="508" x2="450" y2="538" class="edge" marker-end="url(#arrow)"/>
+
+        <g>
+          <rect x="280" y="540" width="340" height="68" rx="6" fill="rgba(126,231,135,0.12)" stroke="#7ee787" stroke-width="2"/>
+          <text x="450" y="566" class="title" text-anchor="middle">Pipeline.run(alert)</text>
+          <text x="450" y="583" class="anno" text-anchor="middle">11 stages · single-threaded (sync)</text>
+          <text x="450" y="598" class="file" text-anchor="middle">listener/pipeline.py</text>
+        </g>
+
+        <!-- ===== Row 6: 11-stage fan-out ===== -->
+        <line x1="450" y1="608" x2="450" y2="630" class="edge" marker-end="url(#arrow)"/>
+
+        <!-- Stage circles + boxes -->
+        <!-- Row of 5 stages -->
+        <g>
+          <!-- Stage 2: Cooldown -->
+          <circle cx="160" cy="660" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="160" y="664" class="stage-num" text-anchor="middle">2</text>
+          <rect x="60" y="690" width="200" height="50" rx="6" fill="rgba(255,166,87,0.12)" stroke="#ffa657" stroke-width="1.5"/>
+          <text x="160" y="710" class="label" text-anchor="middle">Cooldown check</text>
+          <text x="160" y="725" class="anno" text-anchor="middle">pipeline_cooldown.should_suppress()</text>
+          <text x="160" y="737" class="small" text-anchor="middle">→ {status:suppressed}?</text>
+
+          <!-- Stage 4: Gate -->
+          <circle cx="370" cy="660" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="370" y="664" class="stage-num" text-anchor="middle">4</text>
+          <rect x="270" y="690" width="200" height="50" rx="6" fill="rgba(126,231,135,0.10)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="370" y="710" class="label" text-anchor="middle">Gate (YOLO motion)</text>
+          <text x="370" y="725" class="anno" text-anchor="middle">gate.run → GateVerdict</text>
+          <text x="370" y="737" class="small" text-anchor="middle">diff(1,2)∩(2,3) → bbox_a → COCO</text>
+
+          <!-- Stage 7: VM1 -->
+          <circle cx="580" cy="660" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="580" y="664" class="stage-num" text-anchor="middle">7</text>
+          <rect x="480" y="690" width="200" height="50" rx="6" fill="rgba(126,231,135,0.16)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="580" y="710" class="label" text-anchor="middle">VM1 verify_class</text>
+          <text x="580" y="725" class="anno" text-anchor="middle">vision_analyzer → llama-server :8080</text>
+          <text x="580" y="737" class="small" text-anchor="middle">model "vm1_classify" + vm1_prompt</text>
+
+          <!-- Stage 8: VM2 -->
+          <circle cx="790" cy="660" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="790" y="664" class="stage-num" text-anchor="middle">8</text>
+          <rect x="690" y="690" width="200" height="50" rx="6" fill="rgba(126,231,135,0.16)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="790" y="710" class="label" text-anchor="middle">VM2 detail_class</text>
+          <text x="790" y="725" class="anno" text-anchor="middle">DISPATCH[mode from vm1.class]</text>
+          <text x="790" y="737" class="small" text-anchor="middle">vehicle | person | animal</text>
+
+          <!-- Stage 10: Vehicle match -->
+          <circle cx="1000" cy="660" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="1000" y="664" class="stage-num" text-anchor="middle">10</text>
+          <rect x="900" y="690" width="200" height="50" rx="6" fill="rgba(210,168,255,0.12)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="1000" y="710" class="label" text-anchor="middle">Vehicle match</text>
+          <text x="1000" y="725" class="anno" text-anchor="middle">vehicle_matcher.match()</text>
+          <text x="1000" y="737" class="small" text-anchor="middle">data/vehicles/known_vehicles.json (12)</text>
+        </g>
+
+        <!-- Pipeline fan-out arrows -->
+        <line x1="450" y1="630" x2="160" y2="644" class="edge" marker-end="url(#arrow)"/>
+        <line x1="450" y1="630" x2="370" y2="644" class="edge" marker-end="url(#arrow)"/>
+        <line x1="450" y1="630" x2="580" y2="644" class="edge" marker-end="url(#arrow)"/>
+        <line x1="450" y1="630" x2="790" y2="644" class="edge" marker-end="url(#arrow)"/>
+        <line x1="450" y1="630" x2="1000" y2="644" class="edge" marker-end="url(#arrow)"/>
+
+        <!-- Decision diamonds: cooldown suppression / gate suppression -->
+        <g>
+          <polygon points="160,780 200,808 160,836 120,808" fill="rgba(249,117,131,0.18)" stroke="#f97583" stroke-width="2"/>
+          <text x="160" y="805" class="small" text-anchor="middle">cooldown</text>
+          <text x="160" y="818" class="small" text-anchor="middle">suppressed?</text>
+          <text x="160" y="830" class="small" fill="#f97583" text-anchor="middle">→ return {status:suppressed}</text>
+
+          <polygon points="370,780 410,808 370,836 330,808" fill="rgba(249,117,131,0.18)" stroke="#f97583" stroke-width="2"/>
+          <text x="370" y="805" class="small" text-anchor="middle">gate</text>
+          <text x="370" y="818" class="small" text-anchor="middle">decision=="suppress"?</text>
+          <text x="370" y="830" class="small" fill="#f97583" text-anchor="middle">→ return {status:dropped}</text>
+        </g>
+
+        <!-- arrows to decision diamonds -->
+        <line x1="160" y1="740" x2="160" y2="780" class="edge" marker-end="url(#arrow)"/>
+        <line x1="370" y1="740" x2="370" y2="780" class="edge" marker-end="url(#arrow)"/>
+
+        <!-- ===== Row 7: Three Telegram messages ===== -->
+        <g>
+          <!-- tg1 alert -->
+          <rect x="430" y="780" width="220" height="56" rx="6" fill="rgba(121,192,255,0.14)" stroke="#79c0ff" stroke-width="1.5"/>
+          <text x="540" y="803" class="label" text-anchor="middle">tg1 · alert</text>
+          <text x="540" y="818" class="anno" text-anchor="middle">build_alert_message (VM1)</text>
+          <text x="540" y="830" class="small" text-anchor="middle">telegram_formatter/alert.py</text>
+
+          <!-- tg2 detail -->
+          <rect x="430" y="850" width="220" height="56" rx="6" fill="rgba(121,192,255,0.14)" stroke="#79c0ff" stroke-width="1.5"/>
+          <text x="540" y="873" class="label" text-anchor="middle">tg2 · detail</text>
+          <text x="540" y="888" class="anno" text-anchor="middle">build_detail_message (VM2)</text>
+          <text x="540" y="900" class="small" text-anchor="middle">telegram_formatter/detail.py</text>
+
+          <!-- tg3 match -->
+          <rect x="430" y="920" width="220" height="56" rx="6" fill="rgba(121,192,255,0.14)" stroke="#79c0ff" stroke-width="1.5"/>
+          <text x="540" y="943" class="label" text-anchor="middle">tg3 · match</text>
+          <text x="540" y="958" class="anno" text-anchor="middle">build_match_message (match)</text>
+          <text x="540" y="970" class="small" text-anchor="middle">telegram_formatter/match_alert.py</text>
+        </g>
+
+        <!-- arrows from VM1/tg1, VM2/tg2, match/tg3 -->
+        <line x1="580" y1="740" x2="540" y2="780" class="edge" marker-end="url(#arrow)"/>
+        <line x1="790" y1="740" x2="700" y2="906" class="edge" marker-end="url(#arrow)"/>
+        <line x1="790" y1="740" x2="640" y2="850" class="edge" marker-end="url(#arrow)"/>
+        <line x1="1000" y1="740" x2="660" y2="948" class="edge" marker-end="url(#arrow)"/>
+
+        <!-- ===== Row 8: External Telegram ===== -->
+        <line x1="540" y1="978" x2="540" y2="1010" class="edge-tg" marker-end="url(#arrow-tg)"/>
+        <text x="555" y="1000" class="anno" fill="#79c0ff">3× send_message / send_photo</text>
+
+        <g>
+          <rect x="360" y="1014" width="360" height="60" rx="6" fill="#161b22" stroke="#79c0ff" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="540" y="1037" class="title" text-anchor="middle">External: Telegram Home Chat</text>
+          <text x="540" y="1053" class="anno" text-anchor="middle">chat_id &lt;HOME_CHAT_ID&gt;  (operator's home channel)</text>
+          <text x="540" y="1067" class="small" text-anchor="middle">listener/listener.py  →  Bot.send_message / send_photo</text>
+        </g>
+
+        <!-- ===== Legend ===== -->
+        <g transform="translate(40, 1100)">
+          <text x="0" y="0" class="label">Legend</text>
+          <g transform="translate(0,12)">
+            <rect x="0" y="0" width="14" height="10" rx="2" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1"/>
+            <text x="22" y="9" class="small">HTTP / transport</text>
+            <rect x="150" y="0" width="14" height="10" rx="2" fill="rgba(249,117,131,0.18)" stroke="#f97583" stroke-width="1"/>
+            <text x="172" y="9" class="small">auth / validation / error</text>
+            <rect x="330" y="0" width="14" height="10" rx="2" fill="rgba(126,231,135,0.16)" stroke="#7ee787" stroke-width="1"/>
+            <text x="352" y="9" class="small">vision / AI</text>
+            <rect x="470" y="0" width="14" height="10" rx="2" fill="rgba(210,168,255,0.16)" stroke="#d2a8ff" stroke-width="1"/>
+            <text x="492" y="9" class="small">I/O / frames / data</text>
+            <rect x="620" y="0" width="14" height="10" rx="2" fill="rgba(255,166,87,0.16)" stroke="#ffa657" stroke-width="1"/>
+            <text x="642" y="9" class="small">storage / cooldown</text>
+            <rect x="780" y="0" width="14" height="10" rx="2" fill="rgba(121,192,255,0.18)" stroke="#79c0ff" stroke-width="1"/>
+            <text x="802" y="9" class="small">telegram</text>
+          </g>
+          <g transform="translate(0,32)">
+            <polygon points="6,5 14,0 14,10" fill="none" stroke="#8b949e" stroke-width="1.2"/>
+            <text x="22" y="9" class="small">arrow</text>
+            <polygon points="156,5 164,0 164,10" fill="rgba(249,117,131,0.18)" stroke="#f97583" stroke-width="1.5"/>
+            <text x="172" y="9" class="small">decision diamond</text>
+            <circle cx="335" cy="5" r="6" fill="#58a6ff"/>
+            <text x="335" y="8" fill="#fff" font-size="8" font-weight="700" text-anchor="middle">N</text>
+            <text x="346" y="9" class="small">stage number</text>
+          </g>
+        </g>
+
+      </svg>
+    </div>
+
+    <div class="legend-strip">
+      <span><span class="sw" style="color:#58a6ff"></span>HTTP / transport</span>
+      <span><span class="sw" style="color:#f97583"></span>auth / validation / error</span>
+      <span><span class="sw" style="color:#7ee787"></span>vision / AI</span>
+      <span><span class="sw" style="color:#d2a8ff"></span>I/O / frames / data</span>
+      <span><span class="sw" style="color:#ffa657"></span>storage / cooldown</span>
+      <span><span class="sw" style="color:#79c0ff"></span>telegram</span>
+    </div>
+  </div>
+
+  <!-- ====================================================== -->
+  <!-- DIAGRAM 2: 11-STAGE PIPELINE SWIMLANE                   -->
+  <!-- ====================================================== -->
+  <div class="diagram-card">
+    <h2>v2 Farm Surveillance — 11-Stage Alert Pipeline (Swimlane View)</h2>
+    <div class="caption">single-threaded (sync)  ·  listener/pipeline.run(alert)  ·  left → right with lanes A–H</div>
+
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1500 1100" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+
+        <defs>
+          <marker id="arrow2" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#8b949e"/>
+          </marker>
+          <marker id="arrow2-tg" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#79c0ff"/>
+          </marker>
+          <marker id="arrow2-red" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#f97583"/>
+          </marker>
+
+          <pattern id="grid2" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1c2128" stroke-width="0.6"/>
+          </pattern>
+
+          <style><![CDATA[
+            .lane-label  { fill: #f0f6fc; font-size: 11px; font-weight: 700; }
+            .lane-sub    { fill: #8b949e; font-size: 9px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .stage-num2  { fill: #ffffff; font-size: 11px; font-weight: 700; }
+            .stage-title { fill: #f0f6fc; font-size: 11px; font-weight: 600; }
+            .stage-sub   { fill: #8b949e; font-size: 9px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .file2       { fill: #6e7681; font-size: 8.5px; font-style: italic; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .edge2       { fill: none; stroke: #8b949e; stroke-width: 1.5; }
+            .edge2-tg    { fill: none; stroke: #79c0ff; stroke-width: 1.5; }
+            .edge2-red   { fill: none; stroke: #f97583; stroke-width: 1.5; stroke-dasharray: 4,3; }
+          ]]></style>
+        </defs>
+
+        <rect width="1500" height="1100" fill="#0d1117"/>
+        <rect width="1500" height="1100" fill="url(#grid2)"/>
+
+        <!-- Lane backgrounds. 8 lanes × 110px tall + label header -->
+        <!-- Each lane: y = 60 + i*120, height = 110 -->
+        <!-- Lane fill: very faint tint per category -->
+
+        <!-- LANE A: HTTP Entry  (y 60)  -- color #58a6ff -->
+        <rect x="0" y="60" width="1500" height="110" fill="rgba(88,166,255,0.04)"/>
+        <rect x="0" y="60" width="1500" height="110" fill="none" stroke="#1f2937" stroke-width="0.5"/>
+        <line x1="200" y1="60" x2="200" y2="170" stroke="#58a6ff" stroke-width="0.8" opacity="0.5"/>
+        <text x="20" y="95" class="lane-label" fill="#58a6ff">LANE A</text>
+        <text x="20" y="110" class="lane-label">HTTP Entry</text>
+        <text x="20" y="125" class="lane-sub">listener/daemon.py</text>
+        <text x="20" y="137" class="lane-sub">Flask :8090</text>
+
+        <!-- LANE B: Pipeline Cooldown  (y 170)  -- color #ffa657 -->
+        <rect x="0" y="170" width="1500" height="110" fill="rgba(255,166,87,0.04)"/>
+        <rect x="0" y="170" width="1500" height="110" fill="none" stroke="#1f2937" stroke-width="0.5"/>
+        <line x1="200" y1="170" x2="200" y2="280" stroke="#ffa657" stroke-width="0.8" opacity="0.5"/>
+        <text x="20" y="205" class="lane-label" fill="#ffa657">LANE B</text>
+        <text x="20" y="220" class="lane-label">Pipeline Cooldown</text>
+        <text x="20" y="235" class="lane-sub">infra/pipeline_cooldown.py</text>
+        <text x="20" y="247" class="lane-sub">per-(cam,class) sliding window</text>
+
+        <!-- LANE C: Frame Source  (y 280)  -- color #d2a8ff -->
+        <rect x="0" y="280" width="1500" height="110" fill="rgba(210,168,255,0.04)"/>
+        <rect x="0" y="280" width="1500" height="110" fill="none" stroke="#1f2937" stroke-width="0.5"/>
+        <line x1="200" y1="280" x2="200" y2="390" stroke="#d2a8ff" stroke-width="0.8" opacity="0.5"/>
+        <text x="20" y="315" class="lane-label" fill="#d2a8ff">LANE C</text>
+        <text x="20" y="330" class="lane-label">Frame Source</text>
+        <text x="20" y="345" class="lane-sub">infra/frame_capture.py</text>
+        <text x="20" y="357" class="lane-sub">PersistentRTSPReader · 180-frame deque</text>
+
+        <!-- LANE D: Motion Gate  (y 390)  -- color #7ee787 -->
+        <rect x="0" y="390" width="1500" height="110" fill="rgba(126,231,135,0.04)"/>
+        <rect x="0" y="390" width="1500" height="110" fill="none" stroke="#1f2937" stroke-width="0.5"/>
+        <line x1="200" y1="390" x2="200" y2="500" stroke="#7ee787" stroke-width="0.8" opacity="0.5"/>
+        <text x="20" y="425" class="lane-label" fill="#7ee787">LANE D</text>
+        <text x="20" y="440" class="lane-label">Motion Gate</text>
+        <text x="20" y="455" class="lane-sub">infra/gate.py · YOLO</text>
+        <text x="20" y="467" class="lane-sub">diff(1,2)∩(2,3)→bbox_a → COCO</text>
+
+        <!-- LANE E: Vision Inference  (y 500)  -- color #7ee787 -->
+        <rect x="0" y="500" width="1500" height="110" fill="rgba(126,231,135,0.04)"/>
+        <rect x="0" y="500" width="1500" height="110" fill="none" stroke="#1f2937" stroke-width="0.5"/>
+        <line x1="200" y1="500" x2="200" y2="610" stroke="#7ee787" stroke-width="0.8" opacity="0.5"/>
+        <text x="20" y="535" class="lane-label" fill="#7ee787">LANE E</text>
+        <text x="20" y="550" class="lane-label">Vision Inference</text>
+        <text x="20" y="565" class="lane-sub">infra/vision_analyzer.py</text>
+        <text x="20" y="577" class="lane-sub">→ llama-server :8080  (Qwen3-VL)</text>
+
+        <!-- LANE F: Telegram Formatters  (y 610)  -- color #79c0ff -->
+        <rect x="0" y="610" width="1500" height="110" fill="rgba(121,192,255,0.04)"/>
+        <rect x="0" y="610" width="1500" height="110" fill="none" stroke="#1f2937" stroke-width="0.5"/>
+        <line x1="200" y1="610" x2="200" y2="720" stroke="#79c0ff" stroke-width="0.8" opacity="0.5"/>
+        <text x="20" y="645" class="lane-label" fill="#79c0ff">LANE F</text>
+        <text x="20" y="660" class="lane-label">Telegram Formatters</text>
+        <text x="20" y="675" class="lane-sub">telegram_formatter/</text>
+        <text x="20" y="687" class="lane-sub">alert.py · detail.py · match_alert.py</text>
+
+        <!-- LANE G: Vehicle Matching  (y 720)  -- color #d2a8ff -->
+        <rect x="0" y="720" width="1500" height="110" fill="rgba(210,168,255,0.04)"/>
+        <rect x="0" y="720" width="1500" height="110" fill="none" stroke="#1f2937" stroke-width="0.5"/>
+        <line x1="200" y1="720" x2="200" y2="830" stroke="#d2a8ff" stroke-width="0.8" opacity="0.5"/>
+        <text x="20" y="755" class="lane-label" fill="#d2a8ff">LANE G</text>
+        <text x="20" y="770" class="lane-label">Vehicle Matching</text>
+        <text x="20" y="785" class="lane-sub">vehicle_matcher/match.py</text>
+        <text x="20" y="797" class="lane-sub">data/vehicles/known_vehicles.json (12)</text>
+
+        <!-- LANE H: Telegram Transport  (y 830)  -- color #79c0ff -->
+        <rect x="0" y="830" width="1500" height="110" fill="rgba(121,192,255,0.04)"/>
+        <rect x="0" y="830" width="1500" height="110" fill="none" stroke="#1f2937" stroke-width="0.5"/>
+        <line x1="200" y1="830" x2="200" y2="940" stroke="#79c0ff" stroke-width="0.8" opacity="0.5"/>
+        <text x="20" y="865" class="lane-label" fill="#79c0ff">LANE H</text>
+        <text x="20" y="880" class="lane-label">Telegram Transport</text>
+        <text x="20" y="895" class="lane-sub">listener/listener.py</text>
+        <text x="20" y="907" class="lane-sub">Bot.send_message + send_photo</text>
+
+        <!-- ====== Stages (numbered circles + boxes), flowing left→right ====== -->
+
+        <!-- Stage 1: extract  → LANE A, x ~ 250 -->
+        <circle cx="250" cy="115" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="250" y="119" class="stage-num2" text-anchor="middle">1</text>
+        <rect x="220" y="135" width="180" height="32" rx="4" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="310" y="148" class="stage-title" text-anchor="middle">extract(alert)</text>
+        <text x="310" y="160" class="stage-sub" text-anchor="middle">normalize → alert</text>
+
+        <!-- Stage 2: cooldown  → LANE B, x ~ 430 -->
+        <circle cx="430" cy="225" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="430" y="229" class="stage-num2" text-anchor="middle">2</text>
+        <rect x="395" y="245" width="180" height="32" rx="4" fill="rgba(255,166,87,0.18)" stroke="#ffa657" stroke-width="1.5"/>
+        <text x="485" y="258" class="stage-title" text-anchor="middle">cooldown.should_suppress()</text>
+        <text x="485" y="270" class="stage-sub" text-anchor="middle">→ {status:suppressed}?</text>
+
+        <!-- Stage 3: frames  → LANE C (data flows from C) -->
+        <circle cx="610" cy="335" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="610" y="339" class="stage-num2" text-anchor="middle">3</text>
+        <rect x="575" y="355" width="180" height="32" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+        <text x="665" y="368" class="stage-title" text-anchor="middle">frames (already loaded)</text>
+        <text x="665" y="380" class="stage-sub" text-anchor="middle">n=4, offset_seconds=6</text>
+
+        <!-- Stage 4: gate.run  → LANE D -->
+        <circle cx="790" cy="445" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="790" y="449" class="stage-num2" text-anchor="middle">4</text>
+        <rect x="755" y="465" width="180" height="32" rx="4" fill="rgba(126,231,135,0.18)" stroke="#7ee787" stroke-width="1.5"/>
+        <text x="845" y="478" class="stage-title" text-anchor="middle">gate.run → GateVerdict</text>
+        <text x="845" y="490" class="stage-sub" text-anchor="middle">YOLO motion + COCO crops</text>
+
+        <!-- Stage 5: gate suppress check  → LANE D (decision branch) -->
+        <circle cx="970" cy="445" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="970" y="449" class="stage-num2" text-anchor="middle">5</text>
+        <polygon points="970,468 1006,488 970,508 934,488" fill="rgba(249,117,131,0.18)" stroke="#f97583" stroke-width="2"/>
+        <text x="970" y="486" class="stage-title" text-anchor="middle">decision=="suppress"?</text>
+        <text x="970" y="500" class="stage-sub" fill="#f97583" text-anchor="middle">→ {status:dropped}</text>
+
+        <!-- Stage 6: record_hit  → LANE B -->
+        <circle cx="1110" cy="225" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="1110" y="229" class="stage-num2" text-anchor="middle">6</text>
+        <rect x="1075" y="245" width="180" height="32" rx="4" fill="rgba(255,166,87,0.18)" stroke="#ffa657" stroke-width="1.5"/>
+        <text x="1165" y="258" class="stage-title" text-anchor="middle">cooldown.record_hit</text>
+        <text x="1165" y="270" class="stage-sub" text-anchor="middle">first non-suppressed entry</text>
+
+        <!-- Stage 7: verify_class + build_alert_message  → LANE E (VM1) then LANE F (tg1) -->
+        <!-- VM1 box in LANE E -->
+        <circle cx="720" cy="555" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="720" y="559" class="stage-num2" text-anchor="middle">7</text>
+        <rect x="610" y="575" width="230" height="32" rx="4" fill="rgba(126,231,135,0.22)" stroke="#7ee787" stroke-width="1.5"/>
+        <text x="725" y="588" class="stage-title" text-anchor="middle">verify_class (VM1)</text>
+        <text x="725" y="600" class="stage-sub" text-anchor="middle">infra/vision_analyzer · "vm1_classify"</text>
+
+        <!-- tg1 box in LANE F (slightly to the right, below VM1) -->
+        <rect x="870" y="630" width="180" height="40" rx="6" fill="rgba(121,192,255,0.20)" stroke="#79c0ff" stroke-width="1.5"/>
+        <text x="960" y="648" class="stage-title" text-anchor="middle">build_alert_message → tg1</text>
+        <text x="960" y="662" class="stage-sub" text-anchor="middle">telegram_formatter/alert.py</text>
+        <text x="960" y="850" class="file2" text-anchor="middle" fill="#79c0ff">[tg1]</text>
+
+        <!-- Stage 8: detail_class  → LANE E (VM2) -->
+        <circle cx="950" cy="555" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="950" y="559" class="stage-num2" text-anchor="middle">8</text>
+        <rect x="880" y="575" width="180" height="32" rx="4" fill="rgba(126,231,135,0.22)" stroke="#7ee787" stroke-width="1.5"/>
+        <text x="970" y="588" class="stage-title" text-anchor="middle">detail_class (VM2)</text>
+        <text x="970" y="600" class="stage-sub" text-anchor="middle">DISPATCH[mode] · "vm2"</text>
+
+        <!-- Stage 9: build_detail_message  → LANE F (tg2) -->
+        <circle cx="1110" cy="665" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="1110" y="669" class="stage-num2" text-anchor="middle">9</text>
+        <rect x="1075" y="630" width="180" height="40" rx="6" fill="rgba(121,192,255,0.20)" stroke="#79c0ff" stroke-width="1.5"/>
+        <text x="1165" y="648" class="stage-title" text-anchor="middle">build_detail_message → tg2</text>
+        <text x="1165" y="662" class="stage-sub" text-anchor="middle">telegram_formatter/detail.py</text>
+
+        <!-- Stage 10: match_vehicle  → LANE G -->
+        <circle cx="1280" cy="775" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="1280" y="779" class="stage-num2" text-anchor="middle">10</text>
+        <rect x="1240" y="795" width="200" height="32" rx="4" fill="rgba(210,168,255,0.22)" stroke="#d2a8ff" stroke-width="1.5"/>
+        <text x="1340" y="808" class="stage-title" text-anchor="middle">match_vehicle(vm2, candidates)</text>
+        <text x="1340" y="820" class="stage-sub" text-anchor="middle">→ match_result</text>
+
+        <!-- Stage 11: build_match_message  → LANE F (tg3) -->
+        <circle cx="1110" cy="665" r="16" fill="#58a6ff" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="1110" y="699" class="stage-num2" text-anchor="middle">11</text>
+        <rect x="1075" y="680" width="180" height="32" rx="4" fill="rgba(121,192,255,0.20)" stroke="#79c0ff" stroke-width="1.5"/>
+        <text x="1165" y="693" class="stage-title" text-anchor="middle">build_match_message → tg3</text>
+        <text x="1165" y="705" class="stage-sub" text-anchor="middle">telegram_formatter/match_alert.py</text>
+
+        <!-- ====== Connecting arrows (left → right sequence) ====== -->
+
+        <!-- 1 → 2 (A → B) -->
+        <line x1="400" y1="148" x2="430" y2="209" class="edge2" marker-end="url(#arrow2)"/>
+
+        <!-- 2 → 3 (B → C) -->
+        <line x1="575" y1="261" x2="610" y2="319" class="edge2" marker-end="url(#arrow2)"/>
+
+        <!-- 3 → 4 (C → D) -->
+        <line x1="755" y1="371" x2="790" y2="429" class="edge2" marker-end="url(#arrow2)"/>
+
+        <!-- 4 → 5 (D → D same lane, horizontal) -->
+        <line x1="935" y1="461" x2="970" y2="429" class="edge2" marker-end="url(#arrow2)"/>
+
+        <!-- 5 → 6 (D → B) decision-yes continues; branch path (right side up to LANE B) -->
+        <line x1="970" y1="508" x2="970" y2="595" class="edge2-red" stroke-dasharray="5,4"/>
+        <line x1="970" y1="595" x2="1300" y2="595" class="edge2-red"/>
+        <line x1="1300" y1="595" x2="1300" y2="455" class="edge2-red"/>
+        <line x1="1300" y1="455" x2="1255" y2="241" class="edge2-red" marker-end="url(#arrow2-red)"/>
+        <text x="1305" y="588" class="stage-sub" fill="#f97583">if not dropped → continue</text>
+
+        <!-- 6 → 7 (B → E, jump down) -->
+        <line x1="1165" y1="245" x2="725" y2="539" class="edge2" marker-end="url(#arrow2)"/>
+
+        <!-- 7 → 8 (E → E horizontal) -->
+        <line x1="840" y1="591" x2="950" y2="591" class="edge2" marker-end="url(#arrow2)"/>
+
+        <!-- 7 → tg1 (E → F, drop down) -->
+        <line x1="840" y1="607" x2="960" y2="630" class="edge2" marker-end="url(#arrow2)"/>
+
+        <!-- 8 → 9 (E → F drop down) -->
+        <line x1="1060" y1="591" x2="1165" y2="630" class="edge2" marker-end="url(#arrow2)"/>
+
+        <!-- 9 → 10 (F → G drop down) -->
+        <line x1="1240" y1="660" x2="1320" y2="795" class="edge2" marker-end="url(#arrow2)"/>
+
+        <!-- 10 → 11 (G → F rise up) -->
+        <line x1="1240" y1="811" x2="1255" y2="712" class="edge2" marker-end="url(#arrow2)"/>
+
+        <!-- ====== Convergence: tg1/tg2/tg3 → LANE H (Telegram Transport) ====== -->
+
+        <!-- 3 telegram msgs merging into listener._send_telegram -->
+        <line x1="960" y1="670" x2="1380" y2="885" class="edge2-tg" marker-end="url(#arrow2-tg)"/>
+        <line x1="1165" y1="670" x2="1390" y2="885" class="edge2-tg" marker-end="url(#arrow2-tg)"/>
+        <line x1="1255" y1="712" x2="1400" y2="885" class="edge2-tg" marker-end="url(#arrow2-tg)"/>
+
+        <!-- LANE H: Telegram transport box -->
+        <rect x="1230" y="850" width="220" height="60" rx="6" fill="rgba(121,192,255,0.20)" stroke="#79c0ff" stroke-width="1.5"/>
+        <text x="1340" y="873" class="stage-title" text-anchor="middle">listener._send_telegram</text>
+        <text x="1340" y="888" class="stage-sub" text-anchor="middle">for stage_key in (tg1, tg2, tg3):</text>
+        <text x="1340" y="900" class="stage-sub" text-anchor="middle">msg → send_message · photos → send_photo</text>
+
+        <!-- External: Telegram Home -->
+        <line x1="1340" y1="910" x2="1340" y2="965" class="edge2-tg" marker-end="url(#arrow2-tg)"/>
+        <rect x="1200" y="970" width="280" height="50" rx="6" fill="#161b22" stroke="#79c0ff" stroke-width="1.5" stroke-dasharray="6,4"/>
+        <text x="1340" y="990" class="stage-title" text-anchor="middle">External: Telegram Home Chat</text>
+        <text x="1340" y="1006" class="stage-sub" text-anchor="middle">chat_id <HOME_CHAT_ID></text>
+        <text x="1340" y="1018" class="file2" text-anchor="middle">3× send_message / send_photo</text>
+
+        <!-- ===== Legend ===== -->
+        <g transform="translate(20, 1040)">
+          <text x="0" y="0" class="lane-label">Legend (lane color = subsystem)</text>
+          <g transform="translate(0,14)">
+            <rect x="0" y="0" width="14" height="10" rx="2" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1"/>
+            <text x="22" y="9" class="file2">HTTP entry</text>
+            <rect x="110" y="0" width="14" height="10" rx="2" fill="rgba(255,166,87,0.18)" stroke="#ffa657" stroke-width="1"/>
+            <text x="132" y="9" class="file2">cooldown</text>
+            <rect x="220" y="0" width="14" height="10" rx="2" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+            <text x="242" y="9" class="file2">frames / data</text>
+            <rect x="360" y="0" width="14" height="10" rx="2" fill="rgba(126,231,135,0.20)" stroke="#7ee787" stroke-width="1"/>
+            <text x="382" y="9" class="file2">gate / vision</text>
+            <rect x="500" y="0" width="14" height="10" rx="2" fill="rgba(121,192,255,0.20)" stroke="#79c0ff" stroke-width="1"/>
+            <text x="522" y="9" class="file2">telegram formatter / transport</text>
+            <circle cx="780" cy="5" r="6" fill="#58a6ff"/>
+            <text x="780" y="8" fill="#fff" font-size="8" font-weight="700" text-anchor="middle">N</text>
+            <text x="792" y="9" class="file2">stage number</text>
+            <polygon points="880,0 892,5 880,10" fill="rgba(249,117,131,0.18)" stroke="#f97583" stroke-width="1.5"/>
+            <text x="898" y="9" class="file2">decision</text>
+          </g>
+        </g>
+
+      </svg>
+    </div>
+
+    <div class="legend-strip">
+      <span><span class="sw" style="color:#58a6ff"></span>LANE A — HTTP Entry</span>
+      <span><span class="sw" style="color:#ffa657"></span>LANE B — Cooldown</span>
+      <span><span class="sw" style="color:#d2a8ff"></span>LANE C — Frame Source · LANE G — Vehicle Match</span>
+      <span><span class="sw" style="color:#7ee787"></span>LANE D — Motion Gate · LANE E — Vision Inference</span>
+      <span><span class="sw" style="color:#79c0ff"></span>LANE F — Formatters · LANE H — Transport</span>
+    </div>
+  </div>
+
+  <div class="footer">
+    v2 farm-surveillance  ·  ~/farm-surveillance-v2  ·  POST /alert (Reolink default payload)  ·  11-stage → 3-telegram pipeline
+  </div>
+</div>
+</body>
+</html>
