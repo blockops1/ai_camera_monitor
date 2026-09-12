@@ -26,6 +26,8 @@ htmlcov/
 # alerts / frames / logs
 data/frames/*
 !data/frames/.gitkeep
+data/tg_uploads/*
+!data/tg_uploads/.gitkeep
 logs/*.log
 !logs/.gitkeep
 

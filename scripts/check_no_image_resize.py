@@ -20,6 +20,9 @@ Exclusions:
   - .venv/
   - .git/
 
+Known false positives (intentional resize/encode operations):
+  - telegram_formatter/codec.py:86 — US-030a: img.resize() for JPEG downscale
+
 Usage:
     python scripts/check_no_image_resize.py
     python scripts/check_no_image_resize.py infra/
@@ -37,16 +40,14 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 _RESIZE_PATTERNS: list[str] = [
-    r"\.(resize|thumbnail)\s*\(",       # .resize() .thumbnail(
-    r"cv2\.resize",                    # cv2.resize(...)
-    r"\bletterbox\b",                  # letterbox (standalone word)
-    r"Image\.Resampling\.LANCZOS",     # PIL LANCZOS constant
+    r"\.(resize|thumbnail)\s*\(",  # .resize() .thumbnail(
+    r"cv2\.resize",  # cv2.resize(...)
+    r"\bletterbox\b",  # letterbox (standalone word)
+    r"Image\.Resampling\.LANCZOS",  # PIL LANCZOS constant
 ]
 
 # Pre-compile once at module level.
-_COMPILED: list[tuple[re.Pattern, str]] = [
-    (re.compile(p), p) for p in _RESIZE_PATTERNS
-]
+_COMPILED: list[tuple[re.Pattern, str]] = [(re.compile(p), p) for p in _RESIZE_PATTERNS]
 
 # Production source directories (relative to repo root).
 _PROD_DIRS: list[str] = [
@@ -69,13 +70,18 @@ _SKIP_PARTS: tuple[str, ...] = (
     "__pycache__",
 )
 
+# Known false positives: (relative_path, line_number) — intentional ops.
+_KNOWN_FP: set[tuple[str, int]] = {
+    ("telegram_formatter/codec.py", 86),  # US-030a: img.resize() for JPEG downscale
+}
+
 
 def _should_skip_dir(dirpath: str) -> bool:
     """Return True if any component of the path is in the skip set."""
     return any(part in _SKIP_PARTS for part in dirpath.split("/"))
 
 
-def scan_file(filepath: Path) -> list[str]:
+def scan_file(filepath: Path, repo_root: Path) -> list[str]:
     """Scan a single file for resize patterns outside comments.
 
     Returns a list of ``file:line: match`` strings for every hit.
@@ -85,6 +91,11 @@ def scan_file(filepath: Path) -> list[str]:
         text = filepath.read_text(errors="replace")
     except OSError:
         return hits
+
+    try:
+        rel = str(filepath.relative_to(repo_root))
+    except ValueError:
+        rel = filepath.name
 
     lines = text.splitlines()
 
@@ -124,9 +135,13 @@ def scan_file(filepath: Path) -> list[str]:
         if active_only and (line_no - 1) not in active_lines:
             continue
 
+        # Check known false positives.
+        if (rel, line_no) in _KNOWN_FP:
+            continue
+
         for pattern, pattern_name in _COMPILED:
             if pattern.search(line):
-                hits.append(f"{filepath}:{line_no}: {pattern_name!r} matched")
+                hits.append(f"{rel}:{line_no}: {pattern_name!r} matched")
 
     return hits
 
@@ -170,7 +185,7 @@ def main() -> int:
 
     all_hits: list[str] = []
     for filepath in files_to_check:
-        all_hits.extend(scan_file(filepath))
+        all_hits.extend(scan_file(filepath, repo_root))
 
     if all_hits:
         print(f"Image resize references found ({len(all_hits)} hit(s)):\n")

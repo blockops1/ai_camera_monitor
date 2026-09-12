@@ -39,6 +39,9 @@ exclude = ["data/vehicles/*.json"]
 # Data files (JSON, etc.) are not Python — ignore ruff lint rules on them.
 "*.json" = ["ALL"]
 
+[tool.setuptools.packages.find]
+include = ["infra*", "listener*", "telegram_formatter*", "vehicle_matcher*"]
+
 [tool.pyright]
 include = ["infra", "listener", "telegram_formatter", "vehicle_matcher", "tests"]
 exclude = ["**/__pycache__", ".venv", ".desloppify", ".qa", "data"]

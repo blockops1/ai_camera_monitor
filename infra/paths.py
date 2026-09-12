@@ -99,18 +99,14 @@ LOCAL_TZ = ZoneInfo("America/New_York")
 # FARMSURV_PROJECT_ROOT. There is NO FARMSURV_PROJECT_ROOT pointing at
 # the old repo — that would defeat the two-system isolation contract.
 _DEFAULT_PROJECT_ROOT = os.path.expanduser("~/farm-surveillance-v2")
-PROJECT_ROOT = os.environ.get(
-    "FARMSURV_PROJECT_ROOT", _DEFAULT_PROJECT_ROOT
-)
+PROJECT_ROOT = os.environ.get("FARMSURV_PROJECT_ROOT", _DEFAULT_PROJECT_ROOT)
 
 # DATA_DIR can be overridden via FARMSURV_DATA_DIR (used by tests)
 # In production this is PROJECT_ROOT/data; in tests it's a tmp_path
 # copy of tests/sandbox/data/ copied by conftest.py sandbox_data fixture.
 _DATA_DIR_OVERRIDE = os.environ.get("FARMSURV_DATA_DIR")
 DATA_DIR = (
-    _DATA_DIR_OVERRIDE
-    if _DATA_DIR_OVERRIDE
-    else os.path.join(PROJECT_ROOT, "data")
+    _DATA_DIR_OVERRIDE if _DATA_DIR_OVERRIDE else os.path.join(PROJECT_ROOT, "data")
 )
 
 # Source code
@@ -169,6 +165,11 @@ VEHICLE_STATE_FILE = os.path.join(VEHICLES_DIR, "on_property.json")
 VEHICLE_UNKNOWN_STATE_FILE = os.path.join(VEHICLES_DIR, "unknown_state.json")
 VEHICLE_IDENTITY_FILE = os.path.join(VEHICLES_DIR, "identity.json")
 
+# Telegram upload cache — pre-converted JPEGs sent via sendMediaGroup.
+#   data/tg_uploads/<YYYY-MM-DD>/<alert_id>/<n>.jpg
+# Cleaned up by infra.tg_upload_cleanup on boot and hourly via watchdog.
+TG_UPLOADS_DIR = os.path.join(DATA_DIR, "tg_uploads")
+
 # Animal state (Phase 6B.165 §11.86.5, 2026-08-30).
 #   known_animals.json — animals Operator recognizes (species, features, label).
 #                         Empty until first enrollment via
@@ -184,6 +185,7 @@ ANIMAL_KNOWN_FILE = os.path.join(ANIMALS_DIR, "known_animals.json")
 # focused_classify (second-pass) output. Exempt from the 12h frame
 # cleanup. Disable with FARM_VEHICLE_ARTIFACTS=0 in the env.
 VEHICLE_ARTIFACTS_DIR = os.path.join(DATA_DIR, "vehicle_artifacts")
+
 
 # Channel retirement — vehicle_tracker is the only Telegram source for
 # vehicle events (project plan §"Phase 6B.9 vehicle-first two-message
@@ -205,6 +207,7 @@ def _env_flag(name: str) -> bool:
     """
     val = os.environ.get(name, "").strip().lower()
     return val in ("1", "true", "yes")
+
 
 VEHICLE_ARRIVING_ENABLED = _env_flag("FARM_VEHICLE_ARRIVING_ENABLED")
 VEHICLE_ESCALATION_ENABLED = _env_flag("FARM_VEHICLE_ESCALATION_ENABLED")
@@ -277,6 +280,9 @@ AUDIT_RETENTION_DAYS = 90
 
 # Cleanup cadence — daemon thread runs every N seconds
 CLEANUP_INTERVAL_S = 60 * 60  # 1 hour
+
+# Telegram upload cache retention (hours)
+TG_UPLOADS_RETENTION_HOURS = 24
 
 # Log filenames
 LISTENER_LOG = os.path.join(LOGS_DIR, "listener.log")

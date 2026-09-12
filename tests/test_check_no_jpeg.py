@@ -72,15 +72,25 @@ class TestScannerOnProductionTree:
             for fp in sorted(dir_path.rglob("*.py")):
                 total += 1
                 findings = _scan_file(fp, repo_root)
-                assert findings == [], f"Unexpected finding in {fp.relative_to(repo_root)}: {findings}"
+                assert findings == [], (
+                    f"Unexpected finding in {fp.relative_to(repo_root)}: {findings}"
+                )
         assert total > 0, "Expected at least one .py file in production dirs"
 
     def test_known_fp_excluded(self, repo_root: Path):
-        """Known false-positive lines (vision_analyzer mime fallback + dispatcher _sniff_mime) must be excluded."""
+        """Known false-positive lines must all be excluded from scanner output."""
         assert _KNOWN_FP == {
             ("infra/vision_analyzer.py", 111),  # mime fallback, not JPEG producer
-            ("telegram_formatter/dispatcher.py", 38),  # _sniff_mime docstring mentions .jpg
-            ("telegram_formatter/dispatcher.py", 49),  # _sniff_mime returns image/jpeg, .jpg
+            ("telegram_formatter/dispatcher.py", 39),  # _sniff_mime docstring mentions .jpg
+            ("telegram_formatter/dispatcher.py", 50),  # _sniff_mime returns image/jpeg, .jpg
+            (
+                "telegram_formatter/codec.py",
+                93,
+            ),  # US-030a: intentional JPEG encoding for Telegram photo
+            (
+                "telegram_formatter/codec.py",
+                94,
+            ),  # US-030a: format="JPEG" for Telegram photo delivery
         }
 
     def test_main_exits_zero(self, repo_root: Path):
@@ -92,7 +102,9 @@ class TestScannerOnProductionTree:
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 0, f"Scanner exited non-zero: {result.stdout}\n{result.stderr}"
+        assert result.returncode == 0, (
+            f"Scanner exited non-zero: {result.stdout}\n{result.stderr}"
+        )
 
 
 class TestScannerDetectsLeak:
