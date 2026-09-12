@@ -254,7 +254,19 @@ class TestTg2CaptionAlertMetadata:
         alert = _make_alert(alert_id="evt-xyz-789", timestamp="2026-09-12T08:00:00Z")
         result = build_detail_message(
             mode="vehicle",
-            vm2_result={"class_confirmed": "car"},
+            vm2_result={
+                "class": "vehicle",
+                "color": "white",
+                "make": "Ford",
+                "model": "F-150",
+                "body_style_hint": "pickup",
+                "vehicle_features": {
+                    "wheel_style": "alloy",
+                    "headlight_signature": "LED",
+                },
+                "confidence": 0.92,
+                "notable_details": [],
+            },
             crop_a=Path("/mock/crop_a.png"),
             crop_b=Path("/mock/crop_b.png"),
             camera_label="Front Gate",
@@ -264,7 +276,7 @@ class TestTg2CaptionAlertMetadata:
         assert "Alert 2 of 3" in caption
         assert "Alert ID: evt-xyz-789" in caption
         assert "Timestamp: 2026-09-12T08:00:00Z" in caption
-        # Verify order: Camera -> Mode -> Class -> Alert lines -> plate/feats
+        # Verify order: Camera -> Mode -> Class -> Alert lines
         parts = caption.split("\n")
         idx_alert2 = parts.index("Alert 2 of 3")
         idx_alert_id = parts.index("Alert ID: evt-xyz-789")
@@ -272,6 +284,9 @@ class TestTg2CaptionAlertMetadata:
         assert idx_alert2 < idx_alert_id < idx_ts
         # Camera line comes first
         assert parts[0] == "Camera: Front Gate"
+        # Nested vehicle_features expanded on own lines (indent +3 per level)
+        assert "vehicle_features:" in caption
+        assert "   headlight_signature: LED" in caption
 
     def test_tg2_caption_omits_alert_metadata_when_alert_none(self):
         """TG#2 caption omits Alert lines when alert is None."""
@@ -279,7 +294,16 @@ class TestTg2CaptionAlertMetadata:
 
         result = build_detail_message(
             mode="person",
-            vm2_result={"class_confirmed": "person"},
+            vm2_result={
+                "class": "person",
+                "better_crop": "crop_a",
+                "attributes": {
+                    "clothing_upper": "black hoodie",
+                    "clothing_lower": "blue jeans",
+                },
+                "confidence": 0.88,
+                "notable_details": [],
+            },
             crop_a=Path("/mock/crop_a.png"),
             crop_b=Path("/mock/crop_b.png"),
             camera_label="Back Yard",
@@ -293,3 +317,177 @@ class TestTg2CaptionAlertMetadata:
         assert "Camera: Back Yard" in caption
         assert "Mode: person" in caption
         assert "Class confirmed: person" in caption
+
+
+# ---------------------------------------------------------------------------
+# TG#3 caption alert metadata tests (US-033b)
+# ---------------------------------------------------------------------------
+
+
+class TestTg3CaptionAlertMetadata:
+    """US-033b: TG#3 caption includes/excludes alert metadata."""
+
+    def test_tg3_caption_includes_alert_metadata_when_alert_provided(self):
+        """TG#3 caption includes Alert 3 of 3 / Alert ID / Timestamp."""
+        from telegram_formatter.match_alert import build_match_message
+
+        alert = _make_alert(alert_id="evt-ghi-456", timestamp="2026-09-12T09:00:00Z")
+        # match_alert.py still uses vm2_result['license_plate'] and
+        # ['distinctive_features'] — these are TG#3 concerns, not TG#2.
+        result = build_match_message(
+            match_result={"matched": True},
+            vm2_result={
+                "make": "Ford",
+                "model": "F-150",
+                "color": "white",
+                "distinctive_features": ["white"],
+            },
+            camera_label="Front Gate",
+            alert=alert,
+        )
+        caption = result["caption"]
+        assert "Alert 3 of 3" in caption
+        assert "Alert ID: evt-ghi-456" in caption
+        assert "Timestamp: 2026-09-12T09:00:00Z" in caption
+        # Verify order: Camera -> Status -> Alert lines
+        parts = caption.split("\n")
+        idx_camera = parts.index("Camera: Front Gate")
+        idx_status = next(i for i, p in enumerate(parts) if p.startswith("Status:"))
+        idx_alert3 = parts.index("Alert 3 of 3")
+        idx_alert_id = parts.index("Alert ID: evt-ghi-456")
+        idx_ts = parts.index("Timestamp: 2026-09-12T09:00:00Z")
+        assert idx_camera < idx_status < idx_alert3 < idx_alert_id < idx_ts
+
+    def test_tg3_caption_camera_line_is_first(self):
+        """Camera: is the FIRST line of the caption (before Status)."""
+        from telegram_formatter.match_alert import build_match_message
+
+        result = build_match_message(
+            match_result={"matched": False},
+            vm2_result={"distinctive_features": []},
+            camera_label="Back Yard",
+            alert=None,
+        )
+        caption = result["caption"]
+        first_line = caption.split("\n")[0]
+        assert first_line == "Camera: Back Yard"
+
+    def test_tg3_caption_no_alert_metadata_when_alert_none(self):
+        """TG#3 caption omits Alert lines when alert is None."""
+        from telegram_formatter.match_alert import build_match_message
+
+        result = build_match_message(
+            match_result={"matched": True},
+            vm2_result={"make": "Ford", "model": "F-150", "distinctive_features": []},
+            camera_label="Gate A",
+            alert=None,
+        )
+        caption = result["caption"]
+        assert "Alert 3 of 3" not in caption
+        assert "Alert ID:" not in caption
+        assert "Timestamp:" not in caption
+        assert "Camera: Gate A" in caption
+
+
+# ---------------------------------------------------------------------------
+# TG#2 nested-dict expansion tests (US-034d)
+# ---------------------------------------------------------------------------
+
+
+class TestTg2NestedDictExpansion:
+    """US-034d: nested dicts expand onto indented sub-lines."""
+
+    def test_vehicle_mode_expands_vehicle_features(self):
+        """vehicle mode: vehicle_features sub-fields each on their own line."""
+        from telegram_formatter.detail import build_detail_message
+
+        result = build_detail_message(
+            mode="vehicle",
+            vm2_result={
+                "class": "vehicle",
+                "color": "white",
+                "make": "Ford",
+                "model": "F-150",
+                "body_style_hint": "pickup",
+                "vehicle_features": {
+                    "wheel_style": "alloy",
+                    "headlight_signature": "LED",
+                    "rear_lights_signature": "strip",
+                },
+                "description": "white Ford F-150 pickup",
+                "confidence": 0.92,
+                "notable_details": [],
+            },
+            crop_a=Path("/mock/crop_a.png"),
+            crop_b=Path("/mock/crop_b.png"),
+            camera_label="Front Gate",
+        )
+        caption = result["caption"]
+        assert "vehicle_features:" in caption
+        assert "   wheel_style: alloy" in caption
+        assert "   headlight_signature: LED" in caption
+        assert "   rear_lights_signature: strip" in caption
+        # vehicle_features lines come AFTER top-level fields
+        assert caption.index("body_style_hint:") < caption.index("vehicle_features:")
+
+    def test_person_mode_expands_attributes_and_signature(self):
+        """person mode: attributes + signature.stable/transient each on own line."""
+        from telegram_formatter.detail import build_detail_message
+
+        result = build_detail_message(
+            mode="person",
+            vm2_result={
+                "class": "person",
+                "better_crop": "crop_a",
+                "attributes": {
+                    "clothing_upper": "black hoodie",
+                    "clothing_lower": "blue jeans",
+                    "carrying": ["backpack", "umbrella"],
+                    "action": "walking",
+                },
+                "signature": {
+                    "stable": ["tattoo on right forearm"],
+                    "transient": ["carrying a backpack"],
+                },
+                "confidence": 0.88,
+                "notable_details": ["approaching the gate"],
+            },
+            crop_a=Path("/mock/crop_a.png"),
+            crop_b=Path("/mock/crop_b.png"),
+            camera_label="Back Yard",
+        )
+        caption = result["caption"]
+        assert "attributes:" in caption
+        assert "   clothing_upper: black hoodie" in caption
+        assert "   carrying: [backpack, umbrella]" in caption
+        assert "signature:" in caption
+        assert "   stable: [tattoo on right forearm]" in caption
+        assert "   transient: [carrying a backpack]" in caption
+
+    def test_animal_mode_expands_distinctive_features_as_inline_list(self):
+        """animal mode: distinctive_features rendered as inline list."""
+        from telegram_formatter.detail import build_detail_message
+
+        result = build_detail_message(
+            mode="animal",
+            vm2_result={
+                "class": "animal",
+                "species": "dog",
+                "breed": "labrador",
+                "size": "large",
+                "color_pattern": "golden",
+                "distinctive_features": ["blue collar", "tag with name"],
+                "action": "walking",
+                "confidence": 0.95,
+                "notable_details": ["wagging tail"],
+            },
+            crop_a=Path("/mock/crop_a.png"),
+            crop_b=Path("/mock/crop_b.png"),
+            camera_label="Farm Entrance",
+        )
+        caption = result["caption"]
+        assert "species: dog" in caption
+        assert "breed: labrador" in caption
+        assert "distinctive_features: [blue collar, tag with name]" in caption
+        assert "action: walking" in caption
+        assert "confidence: 0.95" in caption
