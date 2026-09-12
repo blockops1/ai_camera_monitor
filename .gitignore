@@ -28,6 +28,7 @@ data/frames/*
 !data/frames/.gitkeep
 data/tg_uploads/*
 !data/tg_uploads/.gitkeep
+data/debug/
 logs/*.log
 !logs/.gitkeep
 
@@ -42,3 +43,6 @@ logs/*.log
 *.onnx
 *.weights
 yolo*.pt
+
+# git worktrees (moved to ~/archive/v2-worktrees-YYYY-MM-DD when done)
+.worktrees/

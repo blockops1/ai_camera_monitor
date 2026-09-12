@@ -235,15 +235,14 @@ pipeline.run(alert) -> dict
 | Step | Operation |
 |------|-----------|
 | 1 | Load all 4 paths → PIL.Image (cached in `verdict.frames` — no TOCTOU) |
-| 2 | `diff(1,2) ∧ diff(2,3)` → connected-component bbox → `subject_bbox_a` (≥500 px) |
-| 3 | `crop_a = frame_2.crop(subject_bbox_a)` |
-| 4 | `diff(2,3) ∧ diff(3,4)` → connected-component bbox → `subject_bbox_b` |
-| 5 | `crop_b = frame_3.crop(subject_bbox_b)` |
-| 6 | Classify `crop_a` and `crop_b` against COCO. Confidence per crop. |
-| 7 | `max(conf_a, conf_b)` → verdict.decision ∈ {"vehicle", "person", "suppress"} |
-| 8 | Optionally write `frame_001..004.jpg`, `crop_a.jpg`, `crop_b.jpg`, `pairwise_diff.jpg` to `/tmp` if `GATE_KEEP_DISK_ARTIFACTS=true` (default off). |
-| 9 | Per-camera thresholds: `camera_name` is looked up to override `diff_threshold` / `min_area_px`. |
-| 10 | Night-suppression heuristic via `is_night_at_edt(timestamp)` (Phase 6B.116). Safe default: don't suppress on missing timestamp. |
+| 2 | `bbox_a = diff_pair_with_bbox(frame_2, frame_3)` — 10% per-side pad + round UP to mult of 32 → drawn as green box on composite AND used directly for `crop_a = frame_2.crop(bbox_a)` |
+| 3 | `bbox_b = diff_pair_with_bbox(frame_3, frame_4)` — same rule → drawn as green box on composite AND used directly for `crop_b = frame_3.crop(bbox_b)` |
+| 4 | Single bbox per slot. Green box region = exact crop region. No AND intersection, no separate "subject" bbox, no fallback. If both diff bboxes are None, suppress with `reason="no_server_motion"`. |
+| 5 | Classify `crop_a` and `crop_b` against COCO. Confidence per crop. |
+| 6 | `max(conf_a, conf_b)` → verdict.decision ∈ {"vehicle", "person", "suppress"} |
+| 7 | Optionally write `frame_001..004.png`, `crop_a.png`, `crop_b.png`, `pairwise_diff.png` to `data/frames/<camera>/<alert_id>/` if `GATE_KEEP_DISK_ARTIFACTS=true` (default off). |
+| 8 | Per-camera thresholds: `camera_name` is looked up to override `diff_threshold` / `min_area_px`. |
+| 9 | Night-suppression heuristic via `is_night_at_edt(timestamp)` (Phase 6B.116). Safe default: don't suppress on missing timestamp. |
 
 ---
 
