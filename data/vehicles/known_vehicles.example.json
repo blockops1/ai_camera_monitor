@@ -1,0 +1,28 @@
+{
+    "_doc": "Public example file for vehicle matcher schema. This file documents the format expected by vehicle_matcher/match.py. Each entry is a known vehicle profile that the matcher scores against incoming alert signatures. The real deployment replaces this with data/vehicles/known_vehicles.json (gitignored) containing operator-specific profiles.",
+    "_see_also": "docs/PRIVACY.md for why the real data file is not committed.",
+    "_schema_version": 1,
+    "entries": [
+        {
+            "id": "v_blue_sedan_demo",
+            "label": "Demo: blue four-door sedan",
+            "color": "blue",
+            "type": "sedan",
+            "make": "Toyota",
+            "model": "Camry",
+            "owner": "household",
+            "vehicle_features": {
+                "body_color": "blue",
+                "wheel_style": "stock",
+                "wheel_arch": "standard",
+                "cab_marker_lights": false
+            },
+            "distinctive_features": [
+                "paint is metallic, not flat"
+            ],
+            "verified": true,
+            "verify_note": "Demo entry only. Replace with real enrollments in data/vehicles/known_vehicles.json.",
+            "match_priority": "color_type_then_make_model"
+        }
+    ]
+}

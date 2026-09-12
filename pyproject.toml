@@ -1,0 +1,51 @@
+[project]
+name = "ai-camera-monitor"
+version = "0.5.0"
+description = "Self-hosted IP-camera motion-alert pipeline with on-device YOLO gate and local vision-LLM classification. Webhook -> Telegram delivery with vehicle/person/animal matchers."
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0",
+    "python-telegram-bot>=21.0",
+    "opencv-python-headless>=4.8",
+    "numpy>=1.24",
+    "Pillow>=10.0",
+    "onnxruntime>=1.16",
+    "av>=11.0",
+    "httpx>=0.25",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "ruff", "pyright"]
+
+[tool.ruff]
+# Top-level ruff config for the public subset.
+# Engine code is in infra/, listener/, telegram_formatter/, vehicle_matcher/.
+line-length = 100
+target-version = "py311"
+exclude = []
+
+[tool.ruff.lint]
+extend-select = [
+    "I",   # isort
+    "B",   # bugbear
+    "UP",  # pyupgrade
+]
+
+[tool.setuptools.packages.find]
+include = ["infra", "listener", "telegram_formatter", "vehicle_matcher"]
+
+[tool.pyright]
+include = ["infra", "listener", "telegram_formatter", "vehicle_matcher", "tests"]
+exclude = [
+    "**/__pycache__",
+    ".venv",
+    ".desloppify",
+    ".qa",
+    "data",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra --strict-markers"

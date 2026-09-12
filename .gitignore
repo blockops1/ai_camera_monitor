@@ -1,0 +1,51 @@
+# diagnostic output (tool-generated, not source)
+.desloppify/
+.qa/
+quality_status.json
+_ac1_verify.py
+
+# secrets
+.env
+*.env
+!camera-creds.env.example
+!telegram-creds.env.example
+!llm-creds.env.example
+
+# privacy scanner config (operator-local identifier list)
+data/private_identifiers.json
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# alerts / frames / logs
+data/frames/*
+!data/frames/.gitkeep
+data/tg_uploads/*
+!data/tg_uploads/.gitkeep
+data/debug/
+logs/*.log
+!logs/.gitkeep
+
+# archives / copy-targets
+/public/
+/scratch/
+.kanban-bodies/
+
+# ML model weights (large binaries; release via artifacts, not source)
+/models/
+*.pt
+*.onnx
+*.weights
+yolo*.pt
+
+# git worktrees (moved to ~/archive/v2-worktrees-YYYY-MM-DD when done)
+.worktrees/
