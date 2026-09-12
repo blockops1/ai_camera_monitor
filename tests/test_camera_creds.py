@@ -31,8 +31,8 @@ class TestExtractIpFromRtsp:
 
     def test_ipv4_with_port(self):
         """Extract IP when port is present."""
-        url = "rtsp://admin:pass@10.0.0.1:554/"
-        assert _extract_ip_from_rtsp(url) == "10.0.0.1"
+        url = "rtsp://admin:pass@192.0.2.1:554/"  # RFC 5737 TEST-NET-1
+        assert _extract_ip_from_rtsp(url) == "192.0.2.1"
 
     def test_password_with_at_sign(self):
         """Extract IP when password contains @ (encoded as %40)."""
