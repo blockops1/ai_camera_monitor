@@ -239,17 +239,29 @@ class TestSchemaContract:
     `distinctive_features`. The pipeline crashed at the key lookup.
     """
 
-    def test_vehicle_schema_license_plate_key_present(self):
-        """vehicle SCHEMA_JSON declares 'license_plate' (downstream reads this)."""
-        assert "license_plate" in VEHICLE_SCHEMA["properties"]
+    def test_vehicle_schema_vehicle_features_key_present(self):
+        """vehicle SCHEMA_JSON declares 'vehicle_features' (downstream reads this)."""
+        assert "vehicle_features" in VEHICLE_SCHEMA["properties"]
 
-    def test_vehicle_schema_distinctive_features_key_present(self):
-        """vehicle SCHEMA_JSON declares 'distinctive_features' (downstream reads this)."""
-        assert "distinctive_features" in VEHICLE_SCHEMA["properties"]
+    def test_vehicle_schema_confidence_is_number(self):
+        """vehicle SCHEMA_JSON 'confidence' is type number with 0-1 bounds."""
+        conf = VEHICLE_SCHEMA["properties"]["confidence"]
+        assert conf["type"] == "number"
+        assert conf.get("minimum") == 0.0
+        assert conf.get("maximum") == 1.0
 
-    def test_vehicle_schema_class_confirmed_key_present(self):
-        """vehicle SCHEMA_JSON declares 'class_confirmed' (downstream reads this)."""
-        assert "class_confirmed" in VEHICLE_SCHEMA["properties"]
+    def test_vehicle_schema_no_invented_fields(self):
+        """vehicle SCHEMA_JSON has no invented PII fields (v1 D1 parity)."""
+        allowed = {
+            "color", "body_style_hint", "make", "model",
+            "vehicle_features", "description", "confidence", "notable_details",
+        }
+        found = set(VEHICLE_SCHEMA["properties"].keys())
+        extra = found - allowed
+        assert not extra, (
+            f"Vehicle schema must not have extra fields beyond v1 shape. "
+            f"Found: {extra}"
+        )
 
     def test_vehicle_schema_no_threat_fields(self):
         """vehicle SCHEMA_JSON has NO threat-level fields (operator-locked)."""
