@@ -44,26 +44,6 @@ from infra.gate import GateVerdict
 _CAPTION_MAX_LENGTH = 1024  # Telegram caption limit
 
 
-def _build_position_line(verdict: GateVerdict) -> str:
-    """Build the 4-frame position line for the caption.
-
-    Returns 'frames[t-3]: (x,y,w,h), frames[t-2]: (x,y,w,h),
-    frames[t-1]: (x,y,w,h), frames[t0]: (x,y,w,h)' when crop_bbox_a
-    is not None.  Returns 'no subject bbox detected' when
-    crop_bbox_a is None.
-    """
-    bbox_a = verdict.crop_bbox_a
-    if bbox_a is None:
-        return "no subject bbox detected"
-    x, y, w, h = bbox_a
-    return (
-        f"frames[t-3]: ({x},{y},{w},{h}), "
-        f"frames[t-2]: ({x},{y},{w},{h}), "
-        f"frames[t-1]: ({x},{y},{w},{h}), "
-        f"frames[t0]: ({x},{y},{w},{h})"
-    )
-
-
 def _truncate_caption(caption: str) -> str:
     """Truncate caption to 1024 chars, adding ellipsis if needed."""
     if len(caption) <= _CAPTION_MAX_LENGTH:
@@ -98,15 +78,13 @@ def build_alert_message(
     lines = [
         f"Camera: {camera_label}",
         f"Classification: {verdict.classification}",
-        f"Top class: {verdict.top_class} ({verdict.top_confidence:.2f})",
-        f"Detected: {cls}",
-        f"Confidence: {conf}",
+        f"YOLO: {verdict.top_class} ({verdict.top_confidence:.2f})",
+        f"Vision: {cls} ({conf})",
     ]
     if alert_id:
         lines.append(f"Alert ID: {alert_id}")
     if timestamp:
         lines.append(f"Timestamp: {timestamp}")
-    lines.append(_build_position_line(verdict))
     if notes:
         lines.append(notes)
 
