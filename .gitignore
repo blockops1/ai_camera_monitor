@@ -11,6 +11,9 @@ _ac1_verify.py
 !telegram-creds.env.example
 !llm-creds.env.example
 
+# privacy scanner config (operator-local identifier list)
+data/private_identifiers.json
+
 # python
 __pycache__/
 *.py[cod]

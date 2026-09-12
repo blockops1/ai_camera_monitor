@@ -9,6 +9,11 @@ Scan categories (see docs/PRIVACY.md for conventions):
   3. Operator personal-handle strings (first-name forms used as a handle).
   4. Helper personal-handle strings (third-party helpers' names).
 
+Operator and helper handle patterns are loaded at runtime from a private
+JSON config file (`data/private_identifiers.json`). This keeps the scanner
+itself safe to publish on a public GitHub repository without leaking the
+operator's personal name.
+
 Exclusions (whitelist):
   - .git/ directories
   - .venv/ directories
@@ -24,6 +29,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -50,20 +56,23 @@ PRODUCTION_IP_PATTERNS: list[str] = [
 CHAT_ID_PATTERN: str = ""  # filled at runtime from env
 
 # Category 3: Operator personal handle — first-name form used as a handle.
-# Updated per PR review cycle; see US-018f for the canonical set.
-# NOTE: These are literal strings that should NOT appear in tracked files
-# after sanitization (US-018e/018f).
-OPERATOR_HANDLES: list[str] = [
-    "Rolf",
-]
-
-# Category 4: Helper personal handles — third-party helpers whose names
-# were previously stored in vehicle enrollments (US-018e).
-HELPER_HANDLES: list[str] = [
-    "Carson",
-    "Grant",
-    "Jeremiah",
-]
+# Category 4: Helper personal handle — third-party helpers whose names
+# were previously stored in vehicle enrollments.
+#
+# These patterns are NOT hardcoded here. Operators list them in a private
+# config file at `data/private_identifiers.json` (gitignored). This keeps
+# the scanner source safe to publish on a public GitHub repo — the scanner
+# defaults to empty lists when the config is missing, which means:
+#   - Public CI runs (no config present) → no false positives
+#   - Private deployments (config present) → full leak detection
+#
+# Config schema (data/private_identifiers.json, gitignored):
+#   {
+#     "operator_handles": ["first-name", ...],
+#     "helper_handles": ["first-name", ...]
+#   }
+OPERATOR_HANDLES: list[str] = []
+HELPER_HANDLES: list[str] = []
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -114,6 +123,10 @@ def _should_exclude(filepath: str, repo_root: Path) -> bool:
         if part in (".git", ".venv", ".pytest_cache"):
             return True
 
+    # Exclude operator-local private identifier config
+    if str(rel) == "data/private_identifiers.json":
+        return True
+
     # Exclude the scanner itself
     if str(rel) == "scripts/check_no_private_data.py":
         return True
@@ -123,6 +136,31 @@ def _should_exclude(filepath: str, repo_root: Path) -> bool:
         return True
 
     return False
+
+
+def _load_private_identifiers(repo_root: Path) -> None:
+    """Load operator/helper handles from data/private_identifiers.json (gitignored).
+
+    Mutates the module-level OPERATOR_HANDLES and HELPER_HANDLES lists.
+    Silently does nothing if the config file is missing — that is the
+    intended behavior for public-CI runs where the scanner ships with
+    empty defaults. Operators who want full leak detection create the
+    config file at their deployment site.
+    """
+    global OPERATOR_HANDLES, HELPER_HANDLES
+    config_path = repo_root / "data" / "private_identifiers.json"
+    if not config_path.is_file():
+        return
+    try:
+        cfg = json.loads(config_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        print(
+            f"WARNING: could not load {config_path}: {exc}",
+            file=sys.stderr,
+        )
+        return
+    OPERATOR_HANDLES = list(cfg.get("operator_handles", []) or [])
+    HELPER_HANDLES = list(cfg.get("helper_handles", []) or [])
 
 
 def _compile_patterns():
@@ -170,6 +208,7 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = _get_repo_root()
+    _load_private_identifiers(repo_root)
     patterns = _compile_patterns()
 
     if not patterns:

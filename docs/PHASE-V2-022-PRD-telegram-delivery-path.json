@@ -11,7 +11,7 @@
     "TG#1/TG#2/TG#3 dispatch order: TG#1 first (the 'first seen' alert with the diff image), then TG#2 (the detail with crops), then TG#3 (match result). Match each to a separate sendMessage/sendDocument call so Telegram displays them as a sequence in the chat.",
     "Empty photos list -> sendMessage with caption only (TG#3 always, TG#2 when no crops). One or more photos -> sendDocument (with first photo as the file, rest as attachments in a media group). For simplicity, this PRD uses sendMediaGroup for multi-photo and single-message sendMessage for text-only.",
     "Dispatcher is sync (httpx.Client, not async) — daemon/Flask is sync, pipeline.run() is sync, no benefit to async and adds complexity. httpx is already in venv (0.28.1).",
-    "Env var name is TELEGRAM_HOME_CHAT_ID, not TELEGRAM_CHAT_ID. Operator's ~/.env currently has TELEGRAM_CHAT_ID=374999219 which is ignored by listener/daemon.py:266 (reads TELEGRAM_HOME_CHAT_ID). US-022d's smoke test fails loudly with the exact rename step in the error message."
+    "Env var name is TELEGRAM_HOME_CHAT_ID, not TELEGRAM_CHAT_ID. Operator's ~/.env currently has TELEGRAM_CHAT_ID=<HOME_CHAT_ID> which is ignored by listener/daemon.py:266 (reads TELEGRAM_HOME_CHAT_ID). US-022d's smoke test fails loudly with the exact rename step in the error message."
   ],
   "scope_exclusions": [
     "Migrating away from python-telegram-bot, switching to a different bot library, or building a polling endpoint for incoming commands. v2 is webhook-driven.",
@@ -35,7 +35,7 @@
       "ac": [
         "AC1: telegram_formatter/dispatcher.py exists with `def dispatch(messages: list[dict], *, bot_token: str, chat_id: str, base_url: str = 'https://api.telegram.org') -> list[httpx.Response]`.",
         "AC2: pytest tests/test_dispatcher.py collects 6 tests, all pass.",
-        "AC3: `grep -nE 'TELEGRAM_BOT_TOKEN|TELEGRAM_HOME_CHAT_ID|374999219|AAHHQ6uIn' telegram_formatter/dispatcher.py` returns zero hits.",
+        "AC3: `grep -nE 'TELEGRAM_BOT_TOKEN|TELEGRAM_HOME_CHAT_ID|<HOME_CHAT_ID>|<TELEGRAM_BOT_TOKEN_PREFIX>' telegram_formatter/dispatcher.py` returns zero hits.",
         "AC4: `grep -nE 'sendPhoto|sendMessage' telegram_formatter/dispatcher.py` returns one hit (sendMessage for text-only case). sendPhoto is forbidden.",
         "AC5: `grep -nE 'sendMediaGroup' telegram_formatter/dispatcher.py` returns one hit (multi-photo path).",
         "AC6: `grep -nE 'input_media_document|input_media_photo' telegram_formatter/dispatcher.py` returns one hit for input_media_document, zero for input_media_photo.",
@@ -56,7 +56,7 @@
         "AC2: `grep -nE 'TELEGRAM_BOT_TOKEN|TELEGRAM_HOME_CHAT_ID' listener/daemon.py` returns at least one hit each (reads from env).",
         "AC3: pytest tests/test_daemon_dispatch.py collects 3 tests, all pass.",
         "AC4: daemon.py never imports python-telegram-bot (forbidden; we use httpx directly).",
-        "AC5: daemon.py never imports the literal chat_id 374999219 or token prefix. All values from os.environ.",
+        "AC5: daemon.py never imports the literal chat_id <HOME_CHAT_ID> or token prefix. All values from os.environ.",
         "AC6: When dispatcher raises, /alert still returns HTTP 200 with the original pipeline result. Camera does not retry."
       ]
     },
@@ -65,7 +65,7 @@
       "title": "env-var-name consistency check — confirm telegram-creds.env.example, tests/test_home_env.py, README.md, PRIVACY.md all reference TELEGRAM_HOME_CHAT_ID (operator's ~/.env currently has TELEGRAM_CHAT_ID which is silently ignored)",
       "status": "todo",
       "depends_on": [],
-      "card_body_fallback": "**Story.** Today the canonical env var name everywhere in v2 is `TELEGRAM_HOME_CHAT_ID` (telegram-creds.env.example line 5, tests/test_home_env.py:27, README.md line 71, docs/PRIVACY.md line 25, docs/V2-LOGIC-FLOW.md line 313, docs/PHASE-V2-016-PRD-diagnostic-visibility-and-boot-hardening.json line 35). But the operator's actual `~/.env` has `TELEGRAM_CHAT_ID=374999219` which daemon.py:266 reads as empty string. The dispatcher's ConfigError will surface this gap (US-022a), but operator-facing docs should make the name unambiguous. **Behavior.** Run `grep -nrE 'TELEGRAM_CHAT_ID' docs/ README.md telegram-creds.env.example tests/` and verify ZERO hits for `TELEGRAM_CHAT_ID=` (with = sign, the env var form). Hits for `<TELEGRAM_CHAT_ID>` (with angle brackets, the template form in PRD prose) are OK and stay. Add a one-line note to README.md under 'Configuration' explaining: 'The home chat ID env var is TELEGRAM_HOME_CHAT_ID, not TELEGRAM_CHAT_ID. The dispatcher will fail with ConfigError if the wrong var is set.' Verify by running `python3 -c 'from dotenv import dotenv_values; from pathlib import Path; print(dotenv_values(Path.home() / \".env\").get(\"TELEGRAM_HOME_CHAT_ID\", \"<MISSING>\"))'` and asserting it equals the operator's chat id (not '<MISSING>'). **Why standalone.** Documentation + a one-shot verification command. No code change in this story; the dispatcher error path (US-022a) catches the runtime gap. **LOC:** ~5.",
+      "card_body_fallback": "**Story.** Today the canonical env var name everywhere in v2 is `TELEGRAM_HOME_CHAT_ID` (telegram-creds.env.example line 5, tests/test_home_env.py:27, README.md line 71, docs/PRIVACY.md line 25, docs/V2-LOGIC-FLOW.md line 313, docs/PHASE-V2-016-PRD-diagnostic-visibility-and-boot-hardening.json line 35). But the operator's actual `~/.env` has `TELEGRAM_CHAT_ID=<HOME_CHAT_ID>` which daemon.py:266 reads as empty string. The dispatcher's ConfigError will surface this gap (US-022a), but operator-facing docs should make the name unambiguous. **Behavior.** Run `grep -nrE 'TELEGRAM_CHAT_ID' docs/ README.md telegram-creds.env.example tests/` and verify ZERO hits for `TELEGRAM_CHAT_ID=` (with = sign, the env var form). Hits for `<TELEGRAM_CHAT_ID>` (with angle brackets, the template form in PRD prose) are OK and stay. Add a one-line note to README.md under 'Configuration' explaining: 'The home chat ID env var is TELEGRAM_HOME_CHAT_ID, not TELEGRAM_CHAT_ID. The dispatcher will fail with ConfigError if the wrong var is set.' Verify by running `python3 -c 'from dotenv import dotenv_values; from pathlib import Path; print(dotenv_values(Path.home() / \".env\").get(\"TELEGRAM_HOME_CHAT_ID\", \"<MISSING>\"))'` and asserting it equals the operator's chat id (not '<MISSING>'). **Why standalone.** Documentation + a one-shot verification command. No code change in this story; the dispatcher error path (US-022a) catches the runtime gap. **LOC:** ~5.",
       "scope_loc_estimate": 5,
       "ac": [
         "AC1: `grep -nrE '^TELEGRAM_CHAT_ID=|^\\s*TELEGRAM_CHAT_ID=' docs/ README.md telegram-creds.env.example tests/` returns zero hits (env var form, not template form).",
