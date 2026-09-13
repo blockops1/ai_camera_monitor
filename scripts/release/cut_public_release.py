@@ -161,8 +161,11 @@ def _install_signal_handlers(logger: logging.Logger) -> None:
 # --- Subprocess helpers (small, reusable) ---
 
 def _run(cmd: list[str], logger: logging.Logger, check: bool = True,
-         capture: bool = True) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess, log it, return result. Raise on non-zero if check=True."""
+         capture: bool = True, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess, log it, return result. Raise on non-zero if check=True.
+
+    `stdin` lets callers pipe content to the subprocess (e.g. xargs < strip.txt).
+    """
     logger.info(f"exec: {' '.join(shlex.quote(c) for c in cmd)}")
     proc = subprocess.run(
         cmd,
@@ -170,6 +173,7 @@ def _run(cmd: list[str], logger: logging.Logger, check: bool = True,
         check=False,
         capture_output=capture,
         text=True,
+        input=stdin,
     )
     if check and proc.returncode != 0:
         logger.error(f"command failed (rc={proc.returncode})")
@@ -328,15 +332,16 @@ def stage_strip(cfg: dict[str, Any], logger: logging.Logger) -> list[str]:
     # de-dup, sort for determinism
     matches = sorted(set(matches))
     logger.info(f"  total {len(matches)} files to remove from public cut")
-    # write to .tmp/ for the xargs redirection (rule 5: no /tmp)
+    # write to .tmp/ for the xargs stdin (rule 5: no /tmp)
     run_id = f"{SCRIPT_NAME}-{os.getpid()}"
     run_tmp = TEMP_DIR / run_id
     run_tmp.mkdir(parents=True, exist_ok=True)
     try:
         strip_list = run_tmp / "strip.txt"
-        strip_list.write_text("\n".join(matches) + "\n")
-        # xargs with < redirection (POSIX-portable; macOS xargs lacks -a)
-        _run(["xargs", "git", "rm", "-q", "--"], logger)
+        strip_list_text = "\n".join(matches) + "\n"
+        strip_list.write_text(strip_list_text)
+        # xargs via stdin (POSIX-portable; macOS xargs lacks GNU -a)
+        _run(["xargs", "git", "rm", "-q", "--"], logger, stdin=strip_list_text)
     finally:
         # clean project-local temp
         for f in run_tmp.iterdir():
@@ -404,10 +409,16 @@ def stage_commit(version: str, source_sha: str, logger: logging.Logger) -> str:
     """Commit the strip + add of LICENSE/README. Returns new commit SHA."""
     logger.info("stage: commit")
     # check there's something to commit
-    rc = _run(["git", "status", "--short"], logger, check=False, capture=False)
+    rc = subprocess.run(
+        ["git", "status", "--short"],
+        cwd=PROJECT_ROOT, capture_output=True, text=True, check=True,
+    )
     if not rc.stdout.strip():
         logger.warning("nothing to commit — branch already matches public cut?")
-        rc2 = _run(["git", "rev-parse", "HEAD"], logger, capture=False)
+        rc2 = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, check=True,
+        )
         return rc2.stdout.strip()
     msg = (
         f"{version}: public release cut\n\n"
@@ -419,7 +430,10 @@ def stage_commit(version: str, source_sha: str, logger: logging.Logger) -> str:
         f"  - required files present (LICENSE, README)"
     )
     _run(["git", "commit", "-q", "-m", msg], logger)
-    rc = _run(["git", "rev-parse", "HEAD"], logger, capture=False)
+    rc = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=PROJECT_ROOT, capture_output=True, text=True, check=True,
+    )
     return rc.stdout.strip()
 
 
