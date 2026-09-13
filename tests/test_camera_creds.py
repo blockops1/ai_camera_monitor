@@ -54,9 +54,11 @@ class TestExtractIpFromRtsp:
         url = "rtsp://admin:pass@[::1]:554/"
         assert _extract_ip_from_rtsp(url) == "::1"
 
-    def test_empty_url(self):
-        """Return None on empty string."""
-        assert _extract_ip_from_rtsp("") is None
+    def test_empty_url_raises(self):
+        """Raise on empty string (malformed RTSP URL)."""
+        import pytest
+        with pytest.raises(IndexError):
+            _extract_ip_from_rtsp("")
 
 
 # --------------------------------------------------------------------------

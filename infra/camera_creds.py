@@ -45,6 +45,7 @@ CALLS INTO:
     - os.path.exists, open — file I/O
 """
 
+import logging
 import os
 
 from infra.paths import CAMERA_CREDS_FILE
@@ -66,7 +67,7 @@ def _extract_ip_from_rtsp(url: str) -> str | None:
     """Extract the IP host from an RTSP URL.
 
     Handles passwords with @ (URL-encoded %40 or literal).
-    Returns None if the URL is malformed.
+    Raises if the URL is malformed.
     """
     try:
         after_scheme = url.split("://", 1)[1]
@@ -83,7 +84,10 @@ def _extract_ip_from_rtsp(url: str) -> str | None:
         colon = host_port.rfind(":")
         return host_port[:colon] if colon > 0 else host_port
     except (IndexError, ValueError):
-        return None
+        logging.getLogger(__name__).exception(
+            "malformed RTSP URL — check camera-creds.env"
+        )
+        raise
 
 
 def _parse_env(env_path: str) -> dict:
