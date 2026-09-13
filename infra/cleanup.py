@@ -123,8 +123,8 @@ def run() -> dict:
                 if not any(camera_dir.iterdir()):
                     try:
                         camera_dir.rmdir()
-                    except OSError:
-                        pass
+                    except OSError as e:
+                        log.exception("cleanup: failed to remove empty camera dir %s", camera_dir)
                 continue
 
             # Age-based eviction
@@ -137,10 +137,10 @@ def run() -> dict:
                     if not any(camera_dir.iterdir()):
                         try:
                             camera_dir.rmdir()
-                        except OSError:
-                            pass
+                        except OSError as e:
+                            log.exception("cleanup: failed to remove empty camera dir %s", camera_dir)
                 except OSError as e:
-                    log.error("cleanup: failed to remove %s: %s", alert_dir, e)
+                    log.exception("cleanup: failed to remove alert dir %s: %s", alert_dir, e)
                     stats["errors"] += 1
 
     # ------------------------------------------------------------------
@@ -206,8 +206,8 @@ def _evict_by_oldest(
         try:
             _remove_tree(alert_dir)
             freed += size
-        except OSError:
-            pass
+        except OSError as e:
+            log.exception("cleanup: failed to evict alert dir %s", alert_dir)
 
     return freed
 
