@@ -630,7 +630,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** A malformed alarm (missing type) gets classified as "unknown" — this propagates into the alert classification, potentially affecting cooldown tracking and gate decisions with the wrong event type.
 - **recommended-fix:** Require `type` in the alarm schema; raise ValueError when missing.
 - **assigned-to:** US-026a (V2-026: .get() fallback for alarm type — defaults to 'unknown')
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-026e
+- **removed_on:** 2026-09-13
 - **pattern:** P03
 
 ### ### daemon.py:171
@@ -641,7 +643,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Empty string is falsy, so L172's `if outer_type and outer_type != event_type` short-circuits and the "unknown" from L170 stands. This is a controlled fallback but masks the fact that the outer payload was malformed.
 - **recommended-fix:** Same as L170 — require `type` at the payload level.
 - **assigned-to:** US-026a (V2-026: .get() fallback for outer payload type — empty string)
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-026e
+- **removed_on:** 2026-09-13
 - **pattern:** P03
 
 ### ### daemon.py:174
@@ -652,7 +656,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Union-type coercion: if the alarm type is not a string (schema drift), it silently becomes "unknown" instead of raising. This masks downstream schema mismatches.
 - **recommended-fix:** Raise TypeError when event_type is not a string; log the actual value for diagnostics.
 - **assigned-to:** US-026a (V2-026: union-type coercion for event_type — defaults to 'unknown')
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-026e
+- **removed_on:** 2026-09-13
 - **pattern:** P06
 
 ### ### daemon.py:177
@@ -663,7 +669,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** If both timestamp keys are missing from the alarm, the alert gets a "now" timestamp instead of the actual alarm time — the operator sees a fake timestamp and cannot correlate with camera-side logs.
 - **recommended-fix:** Prefer `datetime.now(UTC)` as a last resort but log a warning; or require at least one timestamp key.
 - **assigned-to:** US-026a (V2-026: .get() fallback for alarm timestamp — defaults to now())
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-026e
+- **removed_on:** 2026-09-13
 - **pattern:** P03
 
 ### ### daemon.py:206
