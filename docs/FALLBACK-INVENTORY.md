@@ -268,8 +268,10 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Cleanup failures (disk full, permission denied) are hidden — frames accumulate and fill the disk.
 - **recommended-fix:** Log the error.
 - **assigned-to:** US-024a (V2-024: frame cleanup OSError silent except)
-- **status:** IDENTIFIED
+- **status:** REMOVED
 - **pattern:** P01
+- **removed_by:** t_c50cd12e (US-024g)
+- **removed_on:** 2026-09-13
 
 ### ### cleanup.py:140
 
@@ -279,8 +281,10 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Same issue.
 - **recommended-fix:** Log the error.
 - **assigned-to:** US-024a (V2-024: frame cleanup OSError silent except)
-- **status:** IDENTIFIED
+- **status:** REMOVED
 - **pattern:** P01
+- **removed_by:** t_c50cd12e (US-024g)
+- **removed_on:** 2026-09-13
 
 ### ### cleanup.py:142
 
@@ -290,8 +294,10 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Same as above — the exception is caught but not re-raised or logged.
 - **recommended-fix:** Log the error.
 - **assigned-to:** US-024a (V2-024: frame cleanup OSError silent except)
-- **status:** IDENTIFIED
+- **status:** REMOVED
 - **pattern:** P01
+- **removed_by:** t_c50cd12e (US-024g)
+- **removed_on:** 2026-09-13
 
 ### ### cleanup.py:209
 
@@ -301,8 +307,10 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Alert cleanup failures are hidden — old alerts accumulate.
 - **recommended-fix:** Log the error.
 - **assigned-to:** US-024a (V2-024: alert cleanup OSError silent except)
-- **status:** IDENTIFIED
+- **status:** REMOVED
 - **pattern:** P01
+- **removed_by:** t_c50cd12e (US-024g)
+- **removed_on:** 2026-09-13
 
 ### ### camera_creds.py:85
 
