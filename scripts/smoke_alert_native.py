@@ -31,14 +31,16 @@ from PIL import Image
 DAEMON_URL = "http://127.0.0.1:8090/alert"
 FRAMES_DIR = Path(__file__).resolve().parent.parent / "data" / "frames"
 
-# Working camera names from the existing frame store.
+# Working cameras — use HUMAN-FRIENDLY camera names (as registered in
+# infra/camera_creds._CAMERA_MAP). The daemon's IP allowlist fallback
+# matches on `name` not `prefix`, so channelName MUST be the human label.
 CAMERAS = [
-    "OUTSIDE_FRONT_SOLAR",
-    "OUTSIDE_FRONT_GARAGE",
-    "OUTSIDE_FRONT_POWER",
-    "FRONT",
-    "BACK",
-    "OUTSIDE_BACK_SOLAR",
+    "Outside Front Solar",
+    "Outside Front Garage",
+    "Outside Front Power",
+    "Front Door Outside",
+    "Back Door Inside",
+    "Outside Back Solar",
 ]
 
 
@@ -125,7 +127,7 @@ def main() -> int:
 
     # Step 1: POST a synthetic alert.
     print("\n[1] Posting synthetic Reolink alert to daemon ...")
-    camera = CAMERAS[0]  # OUTSIDE_FRONT_SOLAR
+    camera = CAMERAS[0]  # Outside Front Solar
     result = post_alert(camera)
     if result is None:
         print("FAIL: daemon did not return HTTP 200 or is unreachable.")
