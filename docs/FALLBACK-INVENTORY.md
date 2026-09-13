@@ -35,7 +35,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Masks real failures (connection drops, decode errors) — the caller never knows the stream is broken and will keep returning stale frames from the ring buffer.
 - **recommended-fix:** Re-raise after logging; let the caller handle the failure.
 - **assigned-to:** US-024a (V2-024: RTSP stream processing silent except)
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-024f
+- **removed_on:** 2026-09-13
 - **pattern:** P01, P10
 
 ### frame_capture.py:304
@@ -46,7 +48,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** If frame write fails (disk full, permissions), the pipeline silently drops the alert with no signal.
 - **recommended-fix:** Log the error and re-raise or return an error indicator.
 - **assigned-to:** US-024a (V2-024: frame save OS error silent except)
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-024f
+- **removed_on:** 2026-09-13
 - **pattern:** P01
 
 ### frame_capture.py:465
@@ -57,7 +61,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Ring buffer corruption or memory errors are hidden — the caller gets partial data with no error signal.
 - **recommended-fix:** Log and re-raise.
 - **assigned-to:** US-024a (V2-024: ring buffer silent except)
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-024f
+- **removed_on:** 2026-09-13
 - **pattern:** P01
 
 ### frame_capture.py:565
@@ -68,7 +74,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Silent failure during frame capture means the ring buffer fills with stale data; downstream consumers see "no motion" when there IS motion.
 - **recommended-fix:** Log and re-raise.
 - **assigned-to:** US-024a (V2-024: RTSP read silent except)
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-024f
+- **removed_on:** 2026-09-13
 - **pattern:** P01, P10
 
 ### frame_capture.py:573
@@ -79,7 +87,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Reconnect failures are hidden — the connection stays broken but the reader reports healthy.
 - **recommended-fix:** Log and re-raise.
 - **assigned-to:** US-024a (V2-024: stream reconnect silent except)
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-024f
+- **removed_on:** 2026-09-13
 - **pattern:** P01, P10
 
 ### frame_capture.py:782
@@ -90,7 +100,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Cleanup failures (failed deletes, permission errors) are silently ignored.
 - **recommended-fix:** Log the error.
 - **assigned-to:** US-024a (V2-024: cleanup OS error silent except)
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-024f
+- **removed_on:** 2026-09-13
 - **pattern:** P01
 
 ### frame_capture.py:79
@@ -101,7 +113,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** The `None` branch picks env var, the non-None branch uses the arg — different data sources for the same value create inconsistent behavior between constructor and manual override.
 - **recommended-fix:** Use a sentinel value (`_UNSET`) instead of `None`, or make the None-branch explicit with a clear raise.
 - **assigned-to:** US-024a (V2-024: optional kwarg with branch — _resolve_scheduled_reconnect_seconds)
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-024f
+- **removed_on:** 2026-09-13
 - **pattern:** P09, P04
 
 ### frame_capture.py:97
@@ -112,7 +126,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Same issue as _resolve_scheduled_reconnect_seconds — None branch uses env, non-None uses arg.
 - **recommended-fix:** Same: use sentinel or explicit None check with raise.
 - **assigned-to:** US-024a (V2-024: optional kwarg with branch — _resolve_max_reconnect_attempts)
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-024f
+- **removed_on:** 2026-09-13
 - **pattern:** P09, P04
 
 ### frame_capture.py:599
@@ -123,7 +139,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Callers may use the result as if always-present, leading to confusing AttributeError later.
 - **recommended-fix:** Raise KeyError when camera not found; callers that need optional behavior should handle explicitly.
 - **assigned-to:** US-024a (V2-024: Optional[] in hot signature — get() returns None)
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-024f
+- **removed_on:** 2026-09-13
 - **pattern:** P09
 
 ### frame_capture.py:612
@@ -134,7 +152,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Empty RTSP URL causes downstream connection to fail silently or connect to wrong target.
 - **recommended-fix:** Raise KeyError with clear message when rtsp_url is missing.
 - **assigned-to:** US-024a (V2-024: .get() fallback to empty rtsp_url)
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-024f
+- **removed_on:** 2026-09-13
 - **pattern:** P03
 
 ### frame_capture.py:636
@@ -145,7 +165,9 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Same as above — silent fallback to empty string masks missing camera config.
 - **recommended-fix:** Raise KeyError when rtsp_url is missing.
 - **assigned-to:** US-024a (V2-024: .get() fallback to empty rtsp_url)
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-024f
+- **removed_on:** 2026-09-13
 - **pattern:** P03
 
 ### frame_capture.py:642
@@ -156,10 +178,12 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **why-fallback:** Masking a missing config key — the fallback value may not match the intended registry key.
 - **recommended-fix:** Require "prefix" in the camera dict; raise if missing.
 - **assigned-to:** US-024a (V2-024: .get() fallback for registry prefix)
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-024f
+- **removed_on:** 2026-09-13
 - **pattern:** P03
 
-### gate.py:232
+### ### gate.py:232
 
 - **file:line:** `gate.py:232`
 - **code excerpt:** `except Exception as err:`
@@ -170,7 +194,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P01
 
-### gate.py:265
+### ### gate.py:265
 
 - **file:line:** `gate.py:265`
 - **code excerpt:** `except Exception as err:`
@@ -181,7 +205,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P01
 
-### gate.py:486
+### ### gate.py:486
 
 - **file:line:** `gate.py:486`
 - **code excerpt:** `except Exception as e:`
@@ -192,7 +216,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P01
 
-### gate.py:870
+### ### gate.py:870
 
 - **file:line:** `gate.py:870`
 - **code excerpt:** `except Exception as e:`
@@ -203,7 +227,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P01
 
-### gate.py:168
+### ### gate.py:168
 
 - **file:line:** `gate.py:168`
 - **code excerpt:** `val = os.environ.get("GATE_KEEP_DISK_ARTIFACTS", "").strip().lower()`
@@ -214,7 +238,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** DEFERRED-to-V2-021
 - **pattern:** P02
 
-### gate.py:358
+### ### gate.py:358
 
 - **file:line:** `gate.py:358`
 - **code excerpt:** `return os.environ.get("MOTION_GATE_V2", "").strip().lower() in ("1", "true", "yes")`
@@ -225,7 +249,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** DEFERRED-to-V2-021
 - **pattern:** P02
 
-### gate.py:530
+### ### gate.py:530
 
 - **file:line:** `gate.py:530`
 - **code excerpt:** `gate_enabled = cfg.get("gate_enabled") or DEFAULT_GATE_ENABLED`
@@ -236,7 +260,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P03
 
-### cleanup.py:126
+### ### cleanup.py:126
 
 - **file:line:** `cleanup.py:126`
 - **code excerpt:** `except OSError:`
@@ -247,7 +271,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P01
 
-### cleanup.py:140
+### ### cleanup.py:140
 
 - **file:line:** `cleanup.py:140`
 - **code excerpt:** `except OSError:`
@@ -258,7 +282,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P01
 
-### cleanup.py:142
+### ### cleanup.py:142
 
 - **file:line:** `cleanup.py:142`
 - **code excerpt:** `except OSError as e:`
@@ -269,7 +293,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P01
 
-### cleanup.py:209
+### ### cleanup.py:209
 
 - **file:line:** `cleanup.py:209`
 - **code excerpt:** `except OSError:`
@@ -280,7 +304,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P01
 
-### camera_creds.py:85
+### ### camera_creds.py:85
 
 - **file:line:** `camera_creds.py:85`
 - **code excerpt:** `except (IndexError, ValueError):`
@@ -291,7 +315,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P01
 
-### pipeline_cooldown.py:74
+### ### pipeline_cooldown.py:74
 
 - **file:line:** `pipeline_cooldown.py:74`
 - **code excerpt:** `def should_suppress(`
@@ -302,7 +326,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P08
 
-### pipeline_cooldown.py:42-43
+### ### pipeline_cooldown.py:42-43
 
 - **file:line:** `pipeline_cooldown.py:42`, `pipeline_cooldown.py:43`
 - **code excerpt:** `infra/gate_cooldown.py — gate-level (camera, event_type) cooldown` and `infra/cooldown.py — alert-level (alert_id) and bucket cooldowns`
@@ -313,7 +337,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** DEFERRED-to-V2-020
 - **pattern:** P11
 
-### paths.py:89
+### ### paths.py:89
 
 - **file:line:** `paths.py:89`
 - **code excerpt:** `PRODUCTION_MODE = os.environ.get("FARMSURV_PRODUCTION", "0") == "1"`
@@ -324,7 +348,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** DEFERRED-to-V2-021
 - **pattern:** P02
 
-### paths.py:109
+### ### paths.py:109
 
 - **file:line:** `paths.py:109`
 - **code excerpt:** `_DATA_DIR_OVERRIDE = os.environ.get("FARMSURV_DATA_DIR")`
@@ -335,7 +359,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P03
 
-### paths.py:147
+### ### paths.py:147
 
 - **file:line:** `paths.py:147`
 - **code excerpt:** `IDENTITY_BACKUP_DIR = os.environ.get("FARM_IDENTITY_BACKUP_DIR", "")`
@@ -346,7 +370,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P02
 
-### paths.py:248
+### ### paths.py:248
 
 - **file:line:** `paths.py:248`
 - **code excerpt:** `BROWSER_CHROME_PATH = os.environ.get("BROWSER_CHROME_PATH", _DEFAULT_CHROME_PATH)`
@@ -357,7 +381,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P02
 
-### quick_classifier.py:80
+### ### quick_classifier.py:80
 
 - **file:line:** `quick_classifier.py:80`
 - **code excerpt:** `NIGHT_SUPPRESS_ENABLED = os.environ.get("MOTION_GATE_NIGHT_SUPPRESS_ENABLED", "0") == "1"`
@@ -368,7 +392,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** DEFERRED-to-V2-021
 - **pattern:** P02
 
-### quick_classifier.py:81
+### ### quick_classifier.py:81
 
 - **file:line:** `quick_classifier.py:81`
 - **code excerpt:** `NIGHT_CONF_FLOOR = float(os.environ.get("MOTION_GATE_NIGHT_CONF_FLOOR", "0.40"))`
@@ -379,7 +403,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P02
 
-### quick_classifier.py:83
+### ### quick_classifier.py:83
 
 - **file:line:** `quick_classifier.py:83`
 - **code excerpt:** `os.environ.get("MOTION_GATE_NIGHT_BRIGHTNESS_RATIO", "1.5")`
@@ -390,7 +414,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P02
 
-### quick_classifier.py:301
+### ### quick_classifier.py:301
 
 - **file:line:** `quick_classifier.py:301`
 - **code excerpt:** `except Exception as err:`
@@ -401,7 +425,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P01
 
-### quick_classifier.py:651
+### ### quick_classifier.py:651
 
 - **file:line:** `quick_classifier.py:651`
 - **code excerpt:** `except Exception:`
@@ -412,7 +436,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P01, P10
 
-### quick_classifier.py:655
+### ### quick_classifier.py:655
 
 - **file:line:** `quick_classifier.py:655`
 - **code excerpt:** `except Exception:`
@@ -423,7 +447,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P01, P10
 
-### frame_diff.py:113
+### ### frame_diff.py:113
 
 - **file:line:** `frame_diff.py:113`
 - **code excerpt:** `def load_frame(path: str) -> np.ndarray | None:`
@@ -434,7 +458,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P09
 
-### frame_diff.py:577
+### ### frame_diff.py:577
 
 - **file:line:** `frame_diff.py:577`
 - **code excerpt:** `def crop_frame_to_bbox(frame_path: str, bbox: tuple[int, int, int, int]) -> str | None:`
@@ -445,7 +469,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P09
 
-### vision_analyzer.py:162
+### ### vision_analyzer.py:162
 
 - **file:line:** `vision_analyzer.py:162`
 - **code excerpt:** `entry = DISPATCH.get(mode)`
@@ -460,7 +484,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 
 ## telegram_formatter/ + vehicle_matcher/
 
-### detail.py:54
+### ### detail.py:54
 
 - **file:line:** `detail.py:54`
 - **code excerpt:** `cls = vm2_result.get("class_confirmed") or vm2_result.get("class", "unknown")`
@@ -471,7 +495,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P03
 
-### dispatcher.py:125
+### ### dispatcher.py:125
 
 - **file:line:** `dispatcher.py:125`
 - **code excerpt:** `caption = msg.get("caption", "")`
@@ -482,7 +506,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P03
 
-### match_alert.py:45
+### ### match_alert.py:45
 
 - **file:line:** `match_alert.py:45`
 - **code excerpt:** `if match_result.get("matched"):`
@@ -497,7 +521,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 
 ## listener/
 
-### pipeline.py:128
+### ### pipeline.py:128
 
 - **file:line:** `pipeline.py:128`
 - **code excerpt:** `except (json.JSONDecodeError, OSError): return []`
@@ -508,7 +532,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P01
 
-### pipeline.py:141
+### ### pipeline.py:141
 
 - **file:line:** `pipeline.py:141`
 - **code excerpt:** `camera_id = alert.get("camera_id", "unknown")`
@@ -519,7 +543,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P03
 
-### pipeline.py:142
+### ### pipeline.py:142
 
 - **file:line:** `pipeline.py:142`
 - **code excerpt:** `alert_id = alert.get("id", camera_id)`
@@ -530,7 +554,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P03
 
-### pipeline.py:143
+### ### pipeline.py:143
 
 - **file:line:** `pipeline.py:143`
 - **code excerpt:** `classification = alert.get("classification", "motion")`
@@ -541,7 +565,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P03
 
-### pipeline.py:144
+### ### pipeline.py:144
 
 - **file:line:** `pipeline.py:144`
 - **code excerpt:** `camera_label = alert.get("camera_label", camera_id)`
@@ -552,7 +576,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P03
 
-### pipeline.py:207
+### ### pipeline.py:207
 
 - **file:line:** `pipeline.py:207`
 - **code excerpt:** `mode = vm1_result.get("class", "vehicle")`
@@ -563,7 +587,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P03
 
-### daemon.py:76
+### ### daemon.py:76
 
 - **file:line:** `daemon.py:76`
 - **code excerpt:** `_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()`
@@ -574,7 +598,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P02
 
-### daemon.py:161
+### ### daemon.py:161
 
 - **file:line:** `daemon.py:161`
 - **code excerpt:** `alarm = payload.get("alarm")`
@@ -585,7 +609,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P03
 
-### daemon.py:166
+### ### daemon.py:166
 
 - **file:line:** `daemon.py:166`
 - **code excerpt:** `device_name = alarm.get("channelName") or alarm.get("device") or alarm.get("name")`
@@ -596,7 +620,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P03
 
-### daemon.py:170
+### ### daemon.py:170
 
 - **file:line:** `daemon.py:170`
 - **code excerpt:** `event_type = alarm.get("type", "unknown")`
@@ -607,7 +631,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P03
 
-### daemon.py:171
+### ### daemon.py:171
 
 - **file:line:** `daemon.py:171`
 - **code excerpt:** `outer_type = payload.get("type", "")`
@@ -618,7 +642,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P03
 
-### daemon.py:174
+### ### daemon.py:174
 
 - **file:line:** `daemon.py:174`
 - **code excerpt:** `event_type = event_type.lower() if isinstance(event_type, str) else "unknown"`
@@ -629,7 +653,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P06
 
-### daemon.py:177
+### ### daemon.py:177
 
 - **file:line:** `daemon.py:177`
 - **code excerpt:** `alarm.get("time") or alarm.get("alarmTime") or datetime.now(UTC).isoformat()`
@@ -640,7 +664,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** IDENTIFIED
 - **pattern:** P03
 
-### daemon.py:206
+### ### daemon.py:206
 
 - **file:line:** `daemon.py:206`
 - **code excerpt:** `request.headers.get("X-Forwarded-For", request.remote_addr or "")`
@@ -651,7 +675,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P03
 
-### daemon.py:235-236
+### ### daemon.py:235-236
 
 - **file:line:** `daemon.py:235`, `daemon.py:236`
 - **code excerpt:** `cam.get("name") == camera_label and source_ip == cam.get("ip")` and `matched_cam_id = cam.get("prefix", camera_id)`
@@ -662,7 +686,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P03
 
-### daemon.py:265-267
+### ### daemon.py:265-267
 
 - **file:line:** `daemon.py:265`, `daemon.py:266`, `daemon.py:267`
 - **code excerpt:** `result.get("tg1", {})`, `result.get("tg2", {})`, `result.get("tg3", {})`
@@ -673,7 +697,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P03
 
-### daemon.py:284-287
+### ### daemon.py:284-287
 
 - **file:line:** `daemon.py:284`
 - **code excerpt:** `except Exception as exc: log.error("tg-dispatch: unexpected %s: %s", type(exc).__name__, exc)`
@@ -684,7 +708,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P10
 
-### daemon.py:303
+### ### daemon.py:303
 
 - **file:line:** `daemon.py:303`
 - **code excerpt:** `tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")`
@@ -695,7 +719,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P02
 
-### daemon.py:304
+### ### daemon.py:304
 
 - **file:line:** `daemon.py:304`
 - **code excerpt:** `tg_chat_id = os.environ.get("TELEGRAM_HOME_CHAT_ID", "")`
@@ -706,7 +730,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P02
 
-### daemon.py:305
+### ### daemon.py:305
 
 - **file:line:** `daemon.py:305`
 - **code excerpt:** `vision_url = os.environ.get("VISION_LLM_URL", "http://127.0.0.1:8080")`
@@ -717,7 +741,7 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **status:** FALSE-POSITIVE
 - **pattern:** P02
 
-### daemon.py:429
+### ### daemon.py:429
 
 - **file:line:** `daemon.py:429`
 - **code excerpt:** `values = dotenv_values(env_path) or {}`
