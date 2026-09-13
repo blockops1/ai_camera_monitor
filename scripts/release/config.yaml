@@ -1,0 +1,104 @@
+# farm-surveillance-v2 release config
+#
+# Single source of truth for what gets included/excluded in a public
+# release cut of farm-surveillance-v2.
+#
+# Edit this file when:
+#   - adding/removing operator-internal paths
+#   - adding/removing data-dependent tests
+#   - changing the public install flow
+#
+# This file IS shipped in the public cut (no operator-specific data).
+
+version: 1
+
+# Branch and tag naming
+branch_template: "v2-public-squash-{version}"
+tag_template: "{version}"
+
+# Paths to STRIP from the public cut. Matched as git ls-files globs.
+# Order doesn't matter — they're all collected then git rm'd together.
+strip_paths:
+  # Internal phase PRDs (planning docs)
+  - "docs/PHASE-V2-*.json"
+  - "docs/PHASE-V2-*.md"
+  - "docs/PHASE-V2-CORE-*.json"
+  # Internal learnings + planning docs
+  - "docs/FALLBACK-INVENTORY.md"
+  - "docs/DEAD-CODE-AUDIT-*.md"
+  - "docs/PLAN.md"
+  - "docs/RECREATION.md"
+  - "docs/V2-LIFT-PLAN.md"
+  - "docs/V2-LOGIC-FLOW.md"
+  - "docs/references/us-024*-fallback-table.md"
+  # Operator data (enrolled people, owned vehicles)
+  - "data/known/people/known_people.json"
+  - "data/known/people/README.md"
+  - "data/vehicles/known_vehicles.json"
+
+# Tests that REQUIRE operator data and must be stripped entirely.
+tests_to_strip:
+  - path: tests/test_known_entities_privacy.py
+    why: "asserts data/known/people/known_people.json is empty of PII — file doesn't exist on public"
+  - path: tests/test_known_vehicles.py
+    why: "loads data/vehicles/known_vehicles.json with real operator vehicles"
+  - path: tests/test_smoke_alert_roundtrip.py
+    why: "REAL_CANDIDATES loader reads operator's known_vehicles.json"
+  - path: tests/test_yolo_dynamic_export.py
+    why: "loads models/yolov8n.onnx for inference verification — file isn't shipped"
+
+# Files that REQUIRE a fix-up before they ship on public. The script
+# applies each rule and verifies the resulting file passes any
+# pre-push scanner.
+tests_to_fix:
+  - path: tests/test_gate_routing_classification.py
+    description: >-
+      test_full_gate_run_no_motion_suppress calls run() without a
+      FakeClassifier, which triggers a real QuickClassifier() load
+      that exits when models/yolov8n.onnx is missing. Public install
+      path downloads the ONNX on first run, so fresh CI / test
+      installs fail until download completes. Fix: inject
+      FakeClassifier like the sibling tests in the same class.
+    verified_in_commit: "v0.6.0"
+
+# Required files in the public cut. The script verifies each exists
+# after the strip + amend cycle. If absent, fail with a clear error.
+required_files:
+  - LICENSE
+  - README.md
+
+# License author line for the public cut. Update on operator request.
+license:
+  type: MIT
+  author: "The ai-camera-monitor authors"
+  year: 2026
+
+# Pre-push scanners that MUST pass on the public cut before tagging.
+scanners:
+  individual:
+    - scripts/check_no_private_data.py
+    - scripts/check_no_jpeg.py
+    - scripts/check_no_image_resize.py
+    - scripts/check_no_orphan_modules.py
+  final_gate:
+    - .git/hooks/pre-push
+
+# Push destinations. The script NEVER pushes automatically — it
+# prints the commands and exits, requiring operator approval.
+push_remotes:
+  - name: github
+    url: "git@github.com:blockops1/ai_camera_monitor.git"
+    push_modes:
+      - description: "Push public branch as tag only (safe — leaves existing main alone)"
+        command: "git push -f github {branch}:{version}"
+        recommended_for: "first cut, or when you want a side-by-side with the previous version"
+      - description: "Push public branch to GitHub main (replaces any prior main)"
+        command: "git push -f github {branch}:main"
+        recommended_for: "subsequent cuts where the new version is the canonical version"
+
+# Pre-flight checks the script runs before doing anything destructive.
+preflight:
+  - "Working tree clean on the source branch"
+  - "Tests pass on source branch"
+  - "Current branch is NOT the public cut branch (operator cut-from-clean rule)"
+  - "Git user.email + user.name configured (commits will use them)"
