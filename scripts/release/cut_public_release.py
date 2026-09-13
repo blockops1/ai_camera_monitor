@@ -301,7 +301,10 @@ def stage_strip(cfg: dict[str, Any], logger: logging.Logger) -> list[str]:
             f.unlink()
         run_tmp.rmdir()
     # remove stripped paths from tracking — verify with git status
-    rc = _run(["git", "status", "--short"], logger, check=False, capture=False)
+    rc = subprocess.run(
+        ["git", "status", "--short"],
+        cwd=PROJECT_ROOT, capture_output=True, text=True, check=True,
+    )
     deleted_count = sum(1 for line in rc.stdout.splitlines() if line.startswith("D "))
     logger.info(f"  verified: {deleted_count} deletions staged")
     return matches
