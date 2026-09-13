@@ -76,9 +76,14 @@ class TestScannerOnProductionTree:
         assert total > 0, "Expected at least one .py file in production dirs"
 
     def test_known_fp_excluded(self, repo_root: Path):
-        """Known false-positive lines (vision_analyzer mime fallback + dispatcher _sniff_mime) must be excluded."""
+        """Known false-positive lines (vision_analyzer mime fallback + dispatcher _sniff_mime + codec.py exceptions) must be excluded.
+
+        Updated for V2-030: 2 JPEG codec entries added to _KNOWN_FP.
+        """
         assert _KNOWN_FP == {
             ("infra/vision_analyzer.py", 111),  # mime fallback, not JPEG producer
+            ("telegram_formatter/codec.py", 93),  # V2-030 JPEG exception (codec encodes bytes)
+            ("telegram_formatter/codec.py", 94),  # V2-030 JPEG exception (codec docstring)
             ("telegram_formatter/dispatcher.py", 39),  # _sniff_mime docstring mentions .jpg
             ("telegram_formatter/dispatcher.py", 50),  # _sniff_mime returns image/jpeg, .jpg
         }
