@@ -47,6 +47,7 @@ logs/*.log
 /models/
 *.pt
 *.onnx
+yolov8n_static_640.onnx
 *.weights
 yolo*.pt
 
