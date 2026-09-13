@@ -1,0 +1,82 @@
+{
+  "prd_id": "PHASE-V2-030",
+  "title": "reviewer profile must enable terminal + auto-load phantom-leak-verifier (phantom-done prevention)",
+  "author": "the operator",
+  "status": "active",
+  "phase": "v2-pipeline-rearchitecture",
+  "plan_section": "v2-process-trust",
+  "trigger": "On 2026-09-13, two phantom-dones were observed in succession: (a) US-029e (auto-merge hook) was marked done by the coder despite 0 commits on the branch — implementation had been written to the wrong repo (hermes-agent core, which is forbidden by AGENTS.md). (b) US-024g (cleanup.py silent excepts) was marked done by the kanban DB despite the fix never reaching main; the branch had the 3 commits but the auto-merge hook did not run, so main never received them. In both cases the reviewer stage failed to catch the discrepancy because the reviewer profile has terminal and code_execution DISABLED in /Users/jill/.hermes/profiles/reviewer/config.yaml, and does not auto-load the phantom-leak-verifier or verifiable-acs skills. The reviewer literally cannot run the verification commands needed to detect a phantom-done.",
+  "background": "The reviewer profile's disabled_toolsets list includes 'terminal' and 'code_execution', which prevents it from running git diff, git log, pytest, or any verification command. Combined with the absence of any skill loader directive, the reviewer is forced to make verdict decisions on faith, not on observable evidence. The phantom-leak-verifier skill (canonical at ~/.hermes/skills/devops/phantom-leak-verifier/SKILL.md) and the verifiable-acs skill (canonical at ~/.hermes/skills/devops/verifiable-acs/SKILL.md) provide the exact tools needed to detect phantom-dones and produce verifiable acceptance criteria, but they are not auto-loaded by the reviewer profile. The fix is two-fold: (1) enable terminal + code_execution for the reviewer, (2) add a skill loader directive that auto-loads phantom-leak-verifier + verifiable-acs (and devops/sdlc-review which is the reviewer's primary skill).",
+  "shipping_definition": "After this card ships: (a) the reviewer profile can run git diff, git log, pytest, ruff, and pyright; (b) when a card enters the review state, the reviewer agent has the phantom-leak-verifier and verifiable-acs skills loaded and is required to run them before issuing a verdict; (c) the verdict=approved outcome is gated on a clean phantom-leak-verifier report (no missing commits, no scope-creep changes); (d) US-024g's manual-merge follow-up is acknowledged in the ledger (a single doc-only commit noting that the phantom-done was recovered).",
+  "scope_exclusions": [
+    "Re-filing the US-024g card itself is NOT this PRD — the recovery merge was performed manually and committed (7c36879); only the ledger note is in scope.",
+    "Re-filing US-029e (auto-merge hook) as a hermes-agent patch is NOT this PRD — operator explicitly rejected that scope.",
+    "Building a hermes-agent plugin for auto-merge is NOT this PRD — the auto-merge hook scope is a separate operator decision.",
+    "Modifying hermes-agent core is NOT this PRD — hermes-agent is OFF LIMITS per AGENTS.md.",
+    "Touching the US-024f or US-026e branches (already content-equivalent on main) is NOT this PRD."
+  ],
+  "design_principles": [
+    "The reviewer must be able to verify, not just observe. Without terminal + code_execution, the reviewer is a witness, not a judge.",
+    "Skill auto-load is more reliable than skill-discovery-at-judgment-time. The reviewer's mental state when issuing a verdict is the worst time to ask 'do I have the right skills?' — load them at profile start.",
+    "Verifiable acceptance criteria are the unit of trust. A card without a verifiable AC is un-verifiable by definition; the phantom-leak-verifier catches this case and the card cannot pass review.",
+    "Phantom-done prevention is layered: (1) the worker's verifiable-acs skill produces testable ACs; (2) the reviewer's phantom-leak-verifier skill confirms the branch actually contains the claimed changes; (3) the auto-merge hook (separate concern, deferred) lands them on main."
+  ],
+  "stories": [
+    {
+      "id": "US-030a",
+      "title": "enable terminal + code_execution in reviewer profile and auto-load phantom-leak-verifier + verifiable-acs",
+      "story_type": "process-config",
+      "acceptance": [
+        "/Users/jill/.hermes/profiles/reviewer/config.yaml has 'terminal' and 'code_execution' REMOVED from agent.disabled_toolsets (so the reviewer can run git, pytest, ruff, pyright).",
+        "/Users/jill/.hermes/profiles/reviewer/skills/devops/ has a symlink (not a copy) from phantom-leak-verifier, verifiable-acs, and sdlc-review pointing to ~/.hermes/skills/devops/<name>/SKILL.md (canonical).",
+        "Either via config.yaml agent.skills (if supported) or via ~/.hermes/profiles/reviewer/CLAUDE.md (auto-loaded at profile start), the reviewer agent runs a 'verify' tool sequence before issuing any verdict: (a) git diff --stat main..HEAD on the worktree's branch, (b) grep the verification_ledger entries in the card body for one-line shell commands, (c) run each shell command and capture exit code, (d) run phantom-leak-verifier's standard grep against the worktree's branch vs main, (e) report a single verdict (pass/fail) with the evidence.",
+        "A test card is filed, manually advanced to 'review' state, and the reviewer profile produces a verification report with the test verdict. The test card is then closed (no-op, not a real change)."
+      ],
+      "files_modified": [
+        "/Users/jill/.hermes/profiles/reviewer/config.yaml",
+        "/Users/jill/.hermes/profiles/reviewer/skills/devops/phantom-leak-verifier",
+        "/Users/jill/.hermes/profiles/reviewer/skills/devops/verifiable-acs",
+        "/Users/jill/.hermes/profiles/reviewer/skills/devops/sdlc-review"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "US-030b",
+      "title": "ledger note: US-024g phantom-done recovery",
+      "story_type": "documentation",
+      "acceptance": [
+        "docs/FALLBACK-INVENTORY.md has a note appended at the bottom of the US-024 section: 'US-024g phantom-done: card t_c50cd12e was marked done on 2026-09-13 but the branch's 3 commits (0ece83a, 71c39a0, 158266f) never reached main. Manual merge performed on 2026-09-13, commit 7c36879. Recovery validated by grep: cleanup.py lines 126/140/142/209 now log.exception (no silent pass).'",
+        "Single commit: 'chore(ledger): note US-024g phantom-done recovery (merge 7c36879)'.",
+        "pytest tests/ still green (no code change)."
+      ],
+      "files_modified": ["docs/FALLBACK-INVENTORY.md"],
+      "depends_on": []
+    }
+  ],
+  "verification_ledger": [
+    {
+      "id": "AC-US030a-1",
+      "description": "reviewer terminal enabled",
+      "shell_command": "grep -c \"terminal\" /Users/jill/.hermes/profiles/reviewer/config.yaml; grep \"disabled_toolsets\" /Users/jill/.hermes/profiles/reviewer/config.yaml | grep -v \"terminal\" | grep -v \"code_execution\" && echo PASS",
+      "expected_exit_code": 0
+    },
+    {
+      "id": "AC-US030a-2",
+      "description": "reviewer profile symlinks exist",
+      "shell_command": "ls -la /Users/jill/.hermes/profiles/reviewer/skills/devops/phantom-leak-verifier /Users/jill/.hermes/profiles/reviewer/skills/devops/verifiable-acs /Users/jill/.hermes/profiles/reviewer/skills/devops/sdlc-review 2>&1 | head -10",
+      "expected_exit_code": 0
+    },
+    {
+      "id": "AC-US030b-1",
+      "description": "ledger note appended",
+      "shell_command": "grep -c \"phantom-done recovery\" docs/FALLBACK-INVENTORY.md",
+      "expected_exit_code": 0
+    },
+    {
+      "id": "AC-US030b-2",
+      "description": "tests still green",
+      "shell_command": ".venv/bin/python -m pytest tests/test_frame_capture.py -q 2>&1 | tail -3",
+      "expected_exit_code": 0
+    }
+  ]
+}

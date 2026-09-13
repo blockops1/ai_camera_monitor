@@ -104,8 +104,9 @@ class TestLoadHomeEnv:
 
     def test_telegram_token_length_revealed_not_value(self, tmp_path, monkeypatch, caplog):
         """The log lines must NOT contain the token value, only its length."""
+        fake_token = "secret-value-1234567890abcdef"  # 29 chars (real token is 46)
         env_file = tmp_path / ".env"
-        env_file.write_text("TELEGRAM_BOT_TOKEN=secret-value-1234567890abcdef\n")
+        env_file.write_text(f"TELEGRAM_BOT_TOKEN={fake_token}\n")
         _redirect_repo_env(monkeypatch, env_file)
         monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
 
@@ -116,7 +117,7 @@ class TestLoadHomeEnv:
         # summary line — one of them has the token length.
         all_msgs = [r.getMessage() for r in caplog.records]
         assert any("secret-value-1234567890abcdef" not in m for m in all_msgs)
-        # At least one log line must include the token length (26 chars).
-        assert any("26" in m and "token" in m.lower() for m in all_msgs), (
-            f"expected token length 26 in some log line; got: {all_msgs}"
+        # At least one log line must include the token length (29 chars for our fake token).
+        assert any(str(len(fake_token)) in m and "token" in m.lower() for m in all_msgs), (
+            f"expected token length {len(fake_token)} in some log line; got: {all_msgs}"
         )
