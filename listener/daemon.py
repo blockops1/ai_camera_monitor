@@ -167,15 +167,22 @@ def normalize_reolink(payload: dict, source_ip: str) -> dict | None:
     if not device_name:
         return None
 
-    event_type = alarm.get("type", "unknown")
-    outer_type = payload.get("type", "")
+    event_type = alarm.get("type")
+    if event_type is None:
+        raise KeyError("alarm missing required key 'type'")
+    outer_type = payload.get("type")
     if outer_type and outer_type != event_type:
         event_type = outer_type
-    event_type = event_type.lower() if isinstance(event_type, str) else "unknown"
+    if not isinstance(event_type, str):
+        raise TypeError(f"alarm 'type' must be a string, got {type(event_type).__name__}: {event_type!r}")
+    event_type = event_type.lower()
 
-    timestamp = (
-        alarm.get("time") or alarm.get("alarmTime") or datetime.now(UTC).isoformat()
-    )
+    ts_key = alarm.get("time") or alarm.get("alarmTime")
+    if ts_key is None:
+        log.warning("alarm missing timestamp keys 'time' and 'alarmTime'; using now()")
+        timestamp = datetime.now(UTC).isoformat()
+    else:
+        timestamp = ts_key
 
     return {
         "id": str(uuid.uuid4()),
