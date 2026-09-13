@@ -179,6 +179,14 @@ TG_UPLOADS_DIR = os.path.join(DATA_DIR, "tg_uploads")
 ANIMALS_DIR = os.path.join(DATA_DIR, "animals")
 ANIMAL_KNOWN_FILE = os.path.join(ANIMALS_DIR, "known_animals.json")
 
+# Person identity (Phase V2-032).
+#   known_people.json — people Operator recognizes (name, tag, identity_markers).
+#                       Empty until first enrollment. Mirrors
+#                       data/vehicles/known_vehicles.json shape.
+#                       Consumed by person_matcher.match_person().
+PEOPLE_DIR = os.path.join(DATA_DIR, "known", "people")
+PERSON_KNOWN_FILE = os.path.join(PEOPLE_DIR, "known_people.json")
+
 # Vehicle tracker artifacts (Phase 6B.6 audit trail, 2026-07-24).
 # One subdirectory per alert with the 6 captured frames, the cropped
 # vehicle region, the raw first-pass vision result, and the raw
@@ -300,6 +308,7 @@ def ensure_dirs() -> None:
         STATE_DIR,
         VEHICLES_DIR,
         ANIMALS_DIR,
+        PEOPLE_DIR,
     ]:
         os.makedirs(d, exist_ok=True)
 
