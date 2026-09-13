@@ -21,6 +21,7 @@ dev = [
     "pytest-asyncio",
     "ruff",
     "pyright",
+    "PyYAML>=6.0",
 ]
 
 [tool.ruff.lint]

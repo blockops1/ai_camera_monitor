@@ -35,6 +35,8 @@ strip_paths:
   - "data/known/people/known_people.json"
   - "data/known/people/README.md"
   - "data/vehicles/known_vehicles.json"
+  # Maintainer release tooling (not for end-user installs)
+  - "scripts/release/"
 
 # Tests that REQUIRE operator data and must be stripped entirely.
 tests_to_strip:
