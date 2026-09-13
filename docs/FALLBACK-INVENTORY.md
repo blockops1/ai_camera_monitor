@@ -310,9 +310,11 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 - **code excerpt:** `except (IndexError, ValueError):`
 - **what-it-does:** Catches URL parsing errors and returns None.
 - **why-fallback:** Returns None which the caller may use as if valid — but in practice the caller checks for None (line 75-76), so this is a defensible fallback.
-- **recommended-fix:** Keep as-is; it's a controlled fallback. Consider adding a debug log.
+- **recommended-fix:** Log the error at debug level; raise to surface config bugs.
 - **assigned-to:** US-029a (V2-029: silent exception on URL parsing — returns None)
-- **status:** IDENTIFIED
+- **status:** REMOVED
+- **removed_by:** US-029c
+- **removed_on:** 2026-09-13
 - **pattern:** P01
 
 ### ### pipeline_cooldown.py:74
