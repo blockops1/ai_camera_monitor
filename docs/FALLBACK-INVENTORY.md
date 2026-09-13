@@ -818,3 +818,20 @@ why-fallback, recommended-fix) plus `assigned-to` and `status`.
 ---
 
 **FROZEN 2026-09-10** — All 63 inventory entries have operator-approved disposition. No new entries may be added without re-opening this story.
+
+---
+
+## phantom-done recovery log
+
+### 2026-09-13: US-024g (t_c50cd12e) phantom-done — cleanup.py silent excepts
+
+- **What happened:** Card marked `done` by coder but auto-merge hook never ran. Branch had 3 commits (cleanup.py fixes) but `main` did not receive them. Manual recovery merge: commit `7c36879`.
+- **Root cause:** Reviewer profile had `terminal` and `code_execution` in `disabled_toolsets` (config.yaml L37-38), so reviewer could not verify commits landed on `main`. No phantom-leak-verifier or verifiable-acs skills loaded for reviewer.
+- **Fix:** V2-030 US-030a (t_1478517b): enabled terminal + code_execution in reviewer config; symlinked phantom-leak-verifier + verifiable-acs + sdlc-review into reviewer profile skills. Reviewer now has tools to verify ACs mechanically before verdict.
+- **Ledger impact:** 4 cleanup.py entries (cleanup.py:126, :140, :142, :209) already marked REMOVED by t_c50cd12e — recovery merge `7c36879` confirmed these on `main`. No ledger entries affected.
+
+### 2026-09-13: US-029e phantom-done — hermes-agent core write
+
+- **What happened:** Card marked `done` but implementation was written to hermes-agent core (forbidden by AGENTS.md). 0 commits on the feature branch.
+- **Root cause:** Same reviewer tooling gap — reviewer could not run `git log` or `git diff` to confirm commits existed before approving.
+- **Fix:** US-030a (t_1478517b) addresses both incidents with the same root fix (reviewer tooling).
