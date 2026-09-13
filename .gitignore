@@ -14,6 +14,9 @@ _ac1_verify.py
 # privacy scanner config (operator-local identifier list)
 data/private_identifiers.json
 
+# person identity data (enrolled people — not for public repo)
+data/known/people/known_people.json
+
 # python
 __pycache__/
 *.py[cod]

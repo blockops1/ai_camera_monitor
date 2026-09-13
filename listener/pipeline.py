@@ -38,9 +38,10 @@ from pathlib import Path
 
 from infra.alert_artifacts import prepare_alert_artifacts
 from infra.gate import GateVerdict, run as run_gate
-from infra.paths import VEHICLE_KNOWN_FILE, data_dir_for
+from infra.paths import PERSON_KNOWN_FILE, VEHICLE_KNOWN_FILE, data_dir_for
 from infra.pipeline_cooldown import record_hit, should_suppress
 from infra.vision_analyzer import detail_class, verify_class
+from person_matcher.match import match_person
 from telegram_formatter.alert import build_alert_message
 from telegram_formatter.detail import build_detail_message
 from telegram_formatter.match_alert import build_match_message
@@ -73,6 +74,25 @@ def _load_candidates() -> list[dict]:
     except (json.JSONDecodeError, OSError):
         return []
     # Unwrap if format is {entries: [...]}
+    if isinstance(data, dict) and "entries" in data:
+        return data["entries"]
+    if isinstance(data, list):
+        return data
+    return []
+
+
+def _load_person_candidates() -> list[dict]:
+    """Load known-person candidates from disk. Returns empty list on miss.
+
+    Same wrapper/legacy format as _load_candidates.
+    """
+    p = Path(PERSON_KNOWN_FILE)
+    if not p.is_file():
+        return []
+    try:
+        data = json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
     if isinstance(data, dict) and "entries" in data:
         return data["entries"]
     if isinstance(data, list):
@@ -180,15 +200,18 @@ def run(alert: dict) -> dict:
         alert=alert,
     )
 
-    # Stage 12: vehicle match (vehicle only).
+    # Stage 12: per-class match (vehicle -> match_vehicle, person -> match_person).
     match_result: dict = {"matched": False}
     if mode == "vehicle":
         candidates = _load_candidates()
         match_result = match_vehicle(vm2_result, candidates)
+    elif mode == "person":
+        candidates = _load_person_candidates()
+        match_result = match_person(vm2_result, candidates)
 
-    # Stage 13: build TG#3 (vehicle only).
+    # Stage 13: build TG#3 (vehicle + person).
     tg3 = {}
-    if mode == "vehicle":
+    if mode in ("vehicle", "person"):
         tg3 = build_match_message(
             match_result,
             vm2_result,
