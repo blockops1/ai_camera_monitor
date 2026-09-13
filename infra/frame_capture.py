@@ -75,10 +75,16 @@ SCHEDULED_RECONNECT_DEFAULT = 3600.0  # 1 hour
 _SCHEDULED_RECONNECT_ENV = "FARMSV_RTSP_RECONNECT_SECONDS"
 _MAX_RECONNECT_ATTEMPTS_ENV = "FARMSV_RTSP_MAX_RETRIES"
 
+# Sentinel: signals that no explicit arg was passed (caller wants env/default).
+# Replaces `float | None` / `int | None` in resolver signatures — the None
+# branch would silently pick up env vars, creating two data sources for the
+# same value.
+_UNSET = object()
 
-def _resolve_scheduled_reconnect_seconds(arg_value: float | None) -> float:
+
+def _resolve_scheduled_reconnect_seconds(arg_value: float | object = _UNSET) -> float:
     """Resolve the scheduled-reconnect cadence. Precedence:
-    1. Explicit constructor arg (if not None)
+    1. Explicit constructor arg (if not _UNSET)
     2. Env var FARMSV_RTSP_RECONNECT_SECONDS (if set + non-empty)
     3. SCHEDULED_RECONNECT_DEFAULT (3600s)
 
@@ -86,7 +92,7 @@ def _resolve_scheduled_reconnect_seconds(arg_value: float | None) -> float:
     but not a valid float — same shape as the existing ring-size
     resolver pattern.
     """
-    if arg_value is not None:
+    if arg_value is not _UNSET:
         return float(arg_value)
     env_val = os.environ.get(_SCHEDULED_RECONNECT_ENV)
     if env_val:
@@ -94,11 +100,11 @@ def _resolve_scheduled_reconnect_seconds(arg_value: float | None) -> float:
     return SCHEDULED_RECONNECT_DEFAULT
 
 
-def _resolve_max_reconnect_attempts(arg_value: int | None) -> int:
+def _resolve_max_reconnect_attempts(arg_value: int | object = _UNSET) -> int:
     """Resolve the max consecutive failure-driven reconnect attempts.
 
     Precedence:
-    1. Explicit constructor arg (if not None)
+    1. Explicit constructor arg (if not _UNSET)
     2. Env var FARMSV_RTSP_MAX_RETRIES (if set + non-empty)
     3. RECONNECT_MAX_ATTEMPTS_DEFAULT (10)
 
@@ -106,7 +112,7 @@ def _resolve_max_reconnect_attempts(arg_value: int | None) -> int:
     retry forever). Raises ValueError if env var is set but not a valid
     int.
     """
-    if arg_value is not None:
+    if arg_value is not _UNSET:
         return int(arg_value)
     env_val = os.environ.get(_MAX_RECONNECT_ATTEMPTS_ENV)
     if env_val:
@@ -151,8 +157,8 @@ class PersistentRTSPReader:
         rtsp_url: str,
         ring_size: int = RING_SIZE_DEFAULT,
         ffmpeg_flags: dict | None = None,
-        scheduled_reconnect_seconds: float | None = None,
-        max_reconnect_attempts: int | None = None,
+        scheduled_reconnect_seconds: float = _UNSET,  # type: ignore[assignment]
+        max_reconnect_attempts: int = _UNSET,  # type: ignore[assignment]
     ) -> None:
         self._rtsp_url = rtsp_url
         self._ring_size = ring_size
@@ -165,10 +171,10 @@ class PersistentRTSPReader:
             "buffer_size": "20000000",
         }
         self._scheduled_reconnect_seconds = _resolve_scheduled_reconnect_seconds(
-            scheduled_reconnect_seconds
+            scheduled_reconnect_seconds  # type: ignore[arg-type]
         )
         self._max_reconnect_attempts = _resolve_max_reconnect_attempts(
-            max_reconnect_attempts
+            max_reconnect_attempts  # type: ignore[arg-type]
         )
         self._container: av.container.InputContainer | None = None
         self._thread: threading.Thread | None = None
@@ -259,8 +265,8 @@ class PersistentRTSPReader:
         if self._container is not None:
             try:
                 self._container.close()
-            except Exception:  # noqa: BLE001, S110
-                pass
+            except Exception:
+                log.exception("stop: container.close() failed")
             self._container = None
         self._healthy = False
 
@@ -302,7 +308,8 @@ class PersistentRTSPReader:
             try:
                 old.unlink()
             except OSError:
-                pass
+                log.exception("_clean_old: failed to unlink %s", old)
+                raise
 
     def _save_frames(
         self,
@@ -562,16 +569,21 @@ class PersistentRTSPReader:
                     continue
                 try:
                     img = frame.to_image()
-                except Exception:  # noqa: BLE001, S112
-                    continue
+                except Exception:
+                    log.exception(
+                        "_decode_iteration: frame.to_image() failed, "
+                        "discarding this frame"
+                    )
+                    raise
                 with self._ring_lock:
                     self._ring.append(img)
                 self.frames_decoded_total += 1
                 self._last_frame_time = time.monotonic()
         try:
             container.close()
-        except Exception:  # noqa: BLE001, S110
-            pass
+        except Exception:
+            log.exception("_decode_iteration: container.close() failed")
+            raise
         self._container = None
         self._healthy = False
 
@@ -596,11 +608,14 @@ class CameraCaptureRegistry:
         return cls._instance
 
     @classmethod
-    def get(cls, camera_id: str) -> PersistentRTSPReader | None:
-        """Return reader for *camera_id*, starting it lazily if needed."""
+    def get(cls, camera_id: str) -> PersistentRTSPReader:
+        """Return reader for *camera_id*, starting it lazily if needed.
+
+        Raises KeyError if the camera is not configured or has no rtsp_url.
+        """
         inst = cls._instance
         if inst is None:
-            return None
+            raise KeyError(f"CameraCaptureRegistry not initialized: {camera_id}")
         with inst._lock:
             if camera_id in inst._readers:
                 return inst._readers[camera_id]
@@ -608,10 +623,10 @@ class CameraCaptureRegistry:
 
         cam = _camera_creds.get_camera(camera_id)
         if cam is None:
-            return None
-        rtsp_url = cam.get("rtsp_url", "")
+            raise KeyError(f"Camera not configured: {camera_id}")
+        rtsp_url = cam["rtsp_url"]
         if not rtsp_url:
-            return None
+            raise KeyError(f"Camera {camera_id} has no rtsp_url")
         reader = PersistentRTSPReader(rtsp_url)
         reader.start()
         with inst._lock:
@@ -633,13 +648,13 @@ class CameraCaptureRegistry:
 
         threads: list[threading.Thread] = []
         for camera_id, cam_info in cameras.items():
-            rtsp_url = cam_info.get("rtsp_url", "")
+            rtsp_url = cam_info["rtsp_url"]
             # Use the uppercase prefix as the registry key so it matches the
             # camera_id that the /alert pipeline resolves via IP fallback.
             # Without this, get_recent_frames("OUTSIDE_FRONT_SOLAR") misses the
             # boot reader keyed by friendly name and the lazy get() fallback
             # would create a second reader under the prefix key.
-            registry_key = cam_info.get("prefix") or camera_id
+            registry_key = cam_info["prefix"] if "prefix" in cam_info else camera_id
             t = threading.Thread(
                 target=cls._boot_one,
                 args=(registry_key, rtsp_url),
@@ -748,8 +763,9 @@ class CameraCaptureRegistry:
 
 
 def _get_healthy_reader(camera_id: str):
-    reader = CameraCaptureRegistry.get(camera_id)
-    if reader is None:
+    try:
+        reader = CameraCaptureRegistry.get(camera_id)
+    except KeyError:
         log.warning("No reader for camera %s; returning empty.", camera_id)
         return None
     if not reader.is_healthy():
@@ -780,6 +796,7 @@ def get_recent_frames(
             if os.path.getmtime(p) >= cutoff:
                 aged.append(p)
         except OSError:
+            log.exception("get_recent_frames: stat failed for %s", p)
             continue
     return aged
 

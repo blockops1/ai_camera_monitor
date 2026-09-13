@@ -631,13 +631,13 @@ class TestCameraCaptureRegistry:
         # After clear, instance should be None
         assert CameraCaptureRegistry._instance is None
 
-    def test_get_returns_none_for_unknown_camera(self):
-        """get() returns None when camera is not in camera_creds."""
+    def test_get_raises_keyerror_for_unknown_camera(self):
+        """get() raises KeyError when camera is not in camera_creds."""
         from infra.frame_capture import CameraCaptureRegistry
 
         CameraCaptureRegistry.clear()
-        result = CameraCaptureRegistry.get("nonexistent_cam")
-        assert result is None
+        with pytest.raises(KeyError, match="CameraCaptureRegistry not initialized"):
+            CameraCaptureRegistry.get("nonexistent_cam")
 
     def test_clear_then_reinstantiate(self):
         """After clear, a new CameraCaptureRegistry() creates a fresh instance."""
