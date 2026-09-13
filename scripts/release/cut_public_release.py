@@ -271,6 +271,48 @@ def stage_branch(cfg: dict[str, Any], version: str, source: str | None,
     return branch
 
 
+def stage_ensure_license(cfg: dict[str, Any], logger: logging.Logger) -> bool:
+    """Write LICENSE from cfg.license if missing. Returns True if created."""
+    logger.info("stage: ensure LICENSE")
+    license_path = PROJECT_ROOT / "LICENSE"
+    if license_path.exists():
+        logger.info("  LICENSE exists — skipping")
+        return False
+    lic = cfg.get("license", {})
+    if not lic:
+        sys.exit(
+            "ERROR: LICENSE missing and config.yaml has no license block.\n"
+            "  Add a license: { type, author, year } entry to config.yaml."
+        )
+    text = (
+        f"{lic.get('type', 'MIT')} License\n"
+        f"\n"
+        f"Copyright (c) {lic.get('year', '2026')} {lic.get('author', 'The ai-camera-monitor authors')}\n"
+        f"\n"
+        f"Permission is hereby granted, free of charge, to any person obtaining a copy\n"
+        f"of this software and associated documentation files (the \"Software\"), to deal\n"
+        f"in the Software without restriction, including without limitation the rights\n"
+        f"to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n"
+        f"copies of the Software, and to permit persons to whom the Software is\n"
+        f"furnished to do so, subject to the following conditions:\n"
+        f"\n"
+        f"The above copyright notice and this permission notice shall be included in all\n"
+        f"copies or substantial portions of the Software.\n"
+        f"\n"
+        f"THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n"
+        f"IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n"
+        f"FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n"
+        f"AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n"
+        f"LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n"
+        f"OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n"
+        f"SOFTWARE.\n"
+    )
+    license_path.write_text(text)
+    _run(["git", "add", "LICENSE"], logger)
+    logger.info("  LICENSE created and staged")
+    return True
+
+
 def stage_strip(cfg: dict[str, Any], logger: logging.Logger) -> list[str]:
     """git rm all paths matched by cfg.strip_paths. Returns list of removed paths."""
     logger.info("stage: strip — collecting paths")
@@ -489,6 +531,9 @@ def main() -> int:
         summary["stages"].append({"branch": branch})
 
         # strip
+        stage_ensure_license(cfg, logger)
+        summary["stages"].append({"license": "ok"})
+
         stripped = stage_strip(cfg, logger)
         summary["stages"].append({"stripped": len(stripped)})
 
