@@ -28,6 +28,8 @@ CALLS INTO:
     - telegram_formatter.match_alert: build_match_message() for TG#3
     - vehicle_matcher: match_vehicle() for vehicle matching
     - animal_matcher: match_animal() for animal matching (stub until US-045d)
+    - infra.animal_embedder: embed_image() for MegaDescriptor Tier-2 embeddings
+      (US-045d wiring: embed_image → cosine vs enrolled animals)
 """
 
 from __future__ import annotations

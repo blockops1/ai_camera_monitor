@@ -12,6 +12,8 @@ dependencies = [
     "av>=11.0",
     "httpx>=0.25",
     "python-dotenv>=1.0",
+    "timm>=0.9",
+    "torch>=2.0",
 ]
 
 [project.optional-dependencies]
