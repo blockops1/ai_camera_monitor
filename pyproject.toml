@@ -6,7 +6,6 @@ requires-python = ">=3.11"
 dependencies = [
     "flask>=3.0",
     "python-telegram-bot>=21.0",
-    "opencv-python-headless>=4.8",
     "numpy>=1.24",
     "Pillow>=10.0",
     "onnxruntime>=1.16",
