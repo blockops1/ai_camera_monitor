@@ -397,3 +397,35 @@ def match_vehicle(vm2_result: dict, candidates: list[dict]) -> dict:
         return jaccard_result
 
     return {"matched": False}
+
+
+def score_top_n(
+    vm2_result: dict,
+    known_vehicles: list[dict],
+    n: int = 3,
+) -> list[tuple[str, float]]:
+    """Return top-N (kv_id, score) tuples sorted desc, regardless of threshold.
+
+    Computes the v1-style _score_candidate score for every known vehicle
+    and returns the *n* highest-scoring candidates as ``(id, score)``
+    tuples, sorted in descending order by score.
+
+    This is used for no-match alerts so the operator can see which known
+    vehicles were closest matches even though none crossed the threshold.
+
+    Args:
+        vm2_result: VM2 analysis output (make, model, color, etc.).
+        known_vehicles: List of known-vehicle dicts.
+        n: Number of top candidates to return (default 3).
+
+    Returns:
+        List of (kv_id, score) tuples, length <= n.
+    """
+    results: list[tuple[str, float]] = []
+    for kv in known_vehicles:
+        ev = kv.get("vehicle_features") or {}
+        score, _ = _score_candidate(vm2_result, kv, ev)
+        cid = kv.get("id", str(kv))
+        results.append((cid, score))
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results[:n]

@@ -134,12 +134,45 @@ def test_message_match_includes_details():
 
 
 def test_message_unmatched():
-    """Unmatched alert shows 'unrecognized vehicle'."""
+    """Unmatched alert shows 'unrecognized vehicle' (default class fallback)."""
     match_result = {"matched": False}
     result = build_match_message(match_result, {}, camera_label="Gate")
     caption = result["caption"]
     assert "unrecognized vehicle" in caption
     assert "Match" not in caption
+
+
+def test_message_unmatched_person_classification():
+    """Unmatched alert uses classification-aware wording: 'unrecognized person'."""
+    match_result = {"matched": False}
+    vm2_result = {"class": "person"}
+    result = build_match_message(match_result, vm2_result, camera_label="Gate")
+    caption = result["caption"]
+    assert "unrecognized person" in caption
+    assert "Match" not in caption
+
+
+def test_message_unmatched_with_top_candidates():
+    """Unmatched alert with top_candidates shows full no-match body."""
+    match_result = {"matched": False}
+    vm2_result = {"class": "vehicle"}
+    result = build_match_message(
+        match_result,
+        vm2_result,
+        camera_label="Gate",
+        classification="vehicle",
+        reason="below confidence threshold",
+        top_candidates=[("v_a", 5.0), ("v_b", 2.0)],
+        match_threshold=6.0,
+        gap_threshold=1.5,
+    )
+    caption = result["caption"]
+    assert "Status: unrecognized vehicle" in caption
+    assert "below confidence threshold" in caption
+    assert "Top candidates:" in caption
+    assert "Thresholds:" in caption
+    assert "Match: 6.0" in caption
+    assert "Gap: 1.5" in caption
 
 
 def test_message_alert_metadata_included():
