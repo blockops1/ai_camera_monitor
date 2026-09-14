@@ -103,12 +103,12 @@ class TestPyAvBinding:
 
     def test_persistent_rtsp_reader_import(self):
         """from infra.frame_capture import PersistentRTSPReader must succeed."""
-        from infra.frame_capture import PersistentRTSPReader  # noqa: F401
+        from infra.frame_capture import PersistentRTSPReader
 
         # Basic sanity: it's a class, not a module shadow.
-        assert isinstance(
-            PersistentRTSPReader, type
-        ), "PersistentRTSPReader should be a class"
+        assert isinstance(PersistentRTSPReader, type), (
+            "PersistentRTSPReader should be a class"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +145,7 @@ class TestNoCv2Residue:
             ],
             capture_output=True,
             text=True,
+            check=False,
         )
         # exit 0 = matches (bad), exit 1 = no matches (good), >1 = git error
         assert result.returncode == 1, (
