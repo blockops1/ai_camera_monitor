@@ -34,6 +34,7 @@ strip_paths:
   # Operator data (enrolled people, owned vehicles)
   - "data/known/people/known_people.json"
   - "data/known/people/README.md"
+  - "data/animals/"
   - "data/vehicles/known_vehicles.json"
   # Maintainer release tooling (not for end-user installs)
   - "scripts/release/"
