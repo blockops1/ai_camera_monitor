@@ -19,6 +19,9 @@ OUTPUTS:
       shaped for the Telegram client
 
 PUBLIC API:
+    build_match_alert_body(match_result, vm2_result, score, gap, runner_ups) -> str
+        Build the matched-vehicle details block for TG#3 (label, ID,
+        owner, color, make/model, confidence, gap, runner-ups).
     build_match_message(match_result, vm2_result, camera_label, alert=None) -> dict
         Build a Telegram-ready message dict for TG#3 (match result).
     pick_alert_image_path(vm2_result, crop_a_path, crop_b_path) -> str | None
@@ -81,6 +84,72 @@ def pick_alert_image_path(
     return crop_a_path  # 'crop_a', 'neither', or missing -> fallback to crop_a
 
 
+def build_match_alert_body(
+    match_result: dict[str, Any],
+    vm2_result: dict[str, Any],
+    score: float,
+    gap: float,
+    runner_ups: list[tuple[str, float]] | None = None,
+) -> str:
+    """Build the matched-vehicle body for a TG#3 match alert.
+
+    Slimmed v1 layout (Phase 6B.121):
+        ✅ Match — <label>
+
+          ID: <id>
+          Label: <label>
+          Owner: <owner>    (if present)
+          Color: <color>    (if present)
+          Make/Model: <make> <model>   (if present)
+          Body: <type>      (if present)
+
+        Confidence: <score>   (gap: <gap>)
+
+        Runner-ups:           (if present)
+          #1 <kv_id>: <score>
+          #2 <kv_id>: <score>
+
+    Args:
+        match_result: Match result dict (must have 'matched' and 'known_vehicle').
+        vm2_result: VM2 output dict (present for compatibility).
+        score: Float score for the matched candidate (internal scale).
+        gap: Score gap to the next-best candidate.
+        runner_ups: List of (kv_id, score) tuples for next-2 candidates.
+
+    Returns:
+        Formatted body string.
+    """
+    kv = match_result.get("known_vehicle") or {}
+    lines: list[str] = [f"✅ Match \u2014 {kv.get('label', '?')}"]
+    lines.append("")
+    parts: list[str] = [
+        f"  ID: {kv.get('id', '?')}",
+        f"  Label: {kv.get('label', '?')}",
+    ]
+    if kv.get("owner"):
+        parts.append(f"  Owner: {kv['owner']}")
+    if kv.get("color"):
+        parts.append(f"  Color: {kv['color']}")
+    if kv.get("make") or kv.get("model"):
+        parts.append(f"  Make/Model: {kv.get('make', '?')} {kv.get('model', '')}".rstrip())
+    if kv.get("type"):
+        parts.append(f"  Body: {kv['type']}")
+    lines.extend(parts)
+    lines.append("")
+
+    score_str = f"{score:.2f}" if 0 <= score <= 1 else f"{score:.1f}"
+    lines.append(f"Confidence: {score_str}   (gap: {gap:.2f})")
+    lines.append("")
+
+    if runner_ups:
+        lines.append("Runner-ups:")
+        for i, (kid, s) in enumerate(runner_ups[:2], 1):
+            s_str = f"{s:.2f}" if 0 <= s <= 1 else f"{s:.1f}"
+            lines.append(f"  #{i} {kid}: {s_str}")
+
+    return "\n".join(lines)
+
+
 def build_match_message(
     match_result: dict[str, Any],
     vm2_result: dict[str, Any],
@@ -90,18 +159,34 @@ def build_match_message(
     """Build a TG#3 Telegram message dict for the match result.
 
     The caption always starts with 'Camera: <label>'. When *alert* is
-    provided, 'Alert 3 of 3', Alert ID and Timestamp lines follow the
+    provided, 'Alert 3 of 3', 'Alert ID' and Timestamp lines follow the
     Status line, mirroring the TG#2 / TG#1 layout.
+
+    On match, uses build_match_alert_body for the matched-vehicle details
+    (label, ID, owner, color, make/model, body, confidence, gap, runner-ups).
     """
     lines: list[str] = [
         f"Camera: {camera_label}",
     ]
 
     if match_result.get("matched"):
-        plate = vm2_result.get("license_plate")
-        if plate:
-            lines.append(f"Recognized: {plate}")
-        lines.append("Status: recognized vehicle")
+        # Build the matched vehicle details block.
+        score = match_result.get("score", 0.0)
+        all_scores = match_result.get("all_scores", [])
+
+        # Compute gap and runner-ups from all_scores.
+        gap = 0.0
+        runner_ups: list[tuple[str, float]] = []
+        if all_scores:
+            # all_scores is [(id, score), ...]; the first is the best.
+            best_val = all_scores[0][1]
+            if len(all_scores) > 1:
+                gap = best_val - all_scores[1][1]
+                runner_ups = all_scores[1:]
+            else:
+                gap = best_val
+
+        lines.append(build_match_alert_body(match_result, vm2_result, score, gap, runner_ups))
     else:
         lines.append("Status: unrecognized vehicle")
 

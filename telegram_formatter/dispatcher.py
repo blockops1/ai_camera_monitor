@@ -163,9 +163,7 @@ def send_photo(
     if owns_client:
         client = httpx.Client(timeout=10.0)
     try:
-        return _send_photo(
-            client, bot_token, chat_id, photo_path, caption, base_url
-        )
+        return _send_photo(client, bot_token, chat_id, photo_path, caption, base_url)
     finally:
         if owns_client:
             client.close()
