@@ -1,5 +1,5 @@
 """
-pipeline.py — Stages 1-12 of the 12-stage linear alert pipeline.
+pipeline.py — Stages 1-13 of the 13-stage linear alert pipeline.
 
 STATUS: stable
 THREAD SAFETY: single-threaded
@@ -27,6 +27,7 @@ CALLS INTO:
     - telegram_formatter.detail: build_detail_message() for TG#2
     - telegram_formatter.match_alert: build_match_message() for TG#3
     - vehicle_matcher: match_vehicle() for vehicle matching
+    - animal_matcher: match_animal() for animal matching (stub until US-045d)
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ from infra.gate import GateVerdict, run as run_gate
 from infra.paths import PERSON_KNOWN_FILE, VEHICLE_KNOWN_FILE, data_dir_for
 from infra.pipeline_cooldown import record_hit, should_suppress
 from infra.vision_analyzer import detail_class, verify_class
+from animal_matcher.match import match_animal
 from person_matcher.match import match_person
 from telegram_formatter.alert import build_alert_message
 from telegram_formatter.detail import build_detail_message
@@ -201,7 +203,7 @@ def run(alert: dict) -> dict:
         alert=alert,
     )
 
-    # Stage 12: per-class match (vehicle -> match_vehicle, person -> match_person).
+    # Stage 12: per-class match (vehicle -> match_vehicle, person -> match_person, animal -> match_animal).
     match_result: dict = {"matched": False}
     if mode == "vehicle":
         candidates = _load_candidates()
@@ -209,10 +211,12 @@ def run(alert: dict) -> dict:
     elif mode == "person":
         candidates = _load_person_candidates()
         match_result = match_person(vm2_result, candidates)
+    elif mode == "animal":
+        match_result = match_animal(vm2_result, [])
 
-    # Stage 13: build TG#3 (vehicle + person).
+    # Stage 13: build TG#3 (vehicle + person + animal).
     tg3 = {}
-    if mode in ("vehicle", "person"):
+    if mode in ("vehicle", "person", "animal"):
         tg3 = build_match_message(
             match_result,
             vm2_result,
