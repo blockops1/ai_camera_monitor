@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from infra.motion_visualization import render_motion_composite
+from infra.motion_visualization import _draw_rectangle, render_motion_composite
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -204,3 +204,29 @@ class TestRenderMotionCompositeErrors:
                 f"Expected {w}x{h}, got {img.size}"
             )
             assert img.format == "PNG", f"Expected PNG format, got {img.format}"
+
+
+class TestDrawRectangleBoundsClamp:
+    """Defense-in-depth bounds-check in _draw_rectangle (US-040b)."""
+
+    def test_draw_rectangle_clamps_to_frame_bounds(self):
+        """Out-of-range coords should be clamped to frame dimensions instead
+        of raising IndexError.
+
+        Large negative/positive coords must clamp so a rectangle is drawn
+        within the valid frame bounds.
+        """
+        arr = np.zeros((100, 200, 3), dtype=np.uint8)
+        # x0=-50 clamps to 0, y0=-50 → 0, x1=9999 → 199, y1=9999 → 99
+        # This should draw a green rectangle covering the entire frame.
+        _draw_rectangle(arr, x0=-50, y0=-50, x1=9999, y1=9999, thickness=2)
+        assert arr.sum() > 0, "Expected green pixels after clamping out-of-range coords"
+
+    def test_draw_rectangle_no_write_on_fully_out_of_range(self):
+        """Fully out-of-range coords must produce no writes (sum == 0)."""
+        arr = np.zeros((100, 200, 3), dtype=np.uint8)
+        # x0=x1=y0=y1=9999 → entirely outside frame → early-exit.
+        _draw_rectangle(
+            arr, x0=9999, y0=9999, x1=9999, y1=9999, thickness=2
+        )
+        assert arr.sum() == 0, "Expected no writes when coords are fully out of frame"

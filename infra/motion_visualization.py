@@ -368,7 +368,25 @@ def _draw_rectangle(
     """Draw a filled rectangle outline on a BGR numpy array (in-place).
 
     Draws the four edges with the given thickness using green color.
+    Defensive bounds-clamp: protects against callers that bypass
+    _native_bbox_to_corners (e.g. integration tests, direct writes).
     """
+    H, W = arr.shape[:2]
+
+    # Early-exit if the unclipped rect is entirely outside the frame.
+    if x1 < 0 or x0 >= W or y1 < 0 or y0 >= H:
+        return
+
+    # Defensive clamp — mirrors _native_bbox_to_corners logic.
+    x0 = max(0, x0)
+    x1 = min(W - 1, x1)
+    y0 = max(0, y0)
+    y1 = min(H - 1, y1)
+    thickness = max(0, min(thickness, min(W, H)))
+
+    if x0 > x1 or y0 > y1:
+        return  # Clamp collapsed the rect; nothing to draw.
+
     green = np.array([0, 255, 0], dtype=arr.dtype)  # BGR green
     # Top edge
     for dy in range(thickness):
