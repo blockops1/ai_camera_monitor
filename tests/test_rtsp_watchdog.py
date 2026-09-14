@@ -285,21 +285,16 @@ class TestMaxReconnectAttemptsCap:
 import infra.frame_capture as _frame_capture_module
 
 
-class TestWatchdogProceedsAnywayOnStuckDecodeThread:
-    """US-039a: v1-refactor evidence (2026-09-14) shows 456
-    scheduled_reconnect_fire:completed events with 0 join-timeouts,
-    0 segfaults. When the decode thread is stuck in demux() C-land
-    and the join times out, the watchdog proceeds anyway — closes
-    the container and respawns a fresh thread.
+class TestWatchdogProceedAnywayOnStuckDecodeThread:
+    """v1-refactor evidence (2026-09-14): 456 fire:completed, 0 join-timeouts,
+    0 segfaults — proceed anyway is the real behavior. Replaces old abort-and-die (US-017d)."""
 
-    This replaces the old abort-and-die path (US-017d).
-    """
-
-    def test_watchdog_proceeds_when_decode_thread_is_stuck(self, monkeypatch):
+    def test_watchdog_proceeds_anyway_when_decode_thread_is_stuck(self, monkeypatch):
         """When the decode thread is alive after join() times out, the
         watchdog proceeds anyway:
           1. Close the container
           2. Spawn a fresh decode thread
+          3. _watchdog_thread is NOT cleared
         """
         cadence = 0.05
         reader = PersistentRTSPReader(
@@ -308,13 +303,14 @@ class TestWatchdogProceedsAnywayOnStuckDecodeThread:
         )
 
         sentinel_container = MagicMock(name="zombie_container")
+        original_watchdog_thread = MagicMock(spec=threading.Thread)
 
         stuck_thread = MagicMock(spec=threading.Thread)
         stuck_thread.is_alive.return_value = True
 
         reader._container = sentinel_container
         reader._thread = stuck_thread
-        reader._watchdog_thread = MagicMock(spec=threading.Thread)
+        reader._watchdog_thread = original_watchdog_thread
 
         with patch.object(_frame_capture_module,
                           "_sleep_until_stop_or_watchdog",
@@ -343,7 +339,12 @@ class TestWatchdogProceedsAnywayOnStuckDecodeThread:
             f"reconnects_total should advance, got {reader.reconnects_total}"
         )
 
-    def test_watchdog_proceeds_logs_warning(self, monkeypatch, caplog):
+        # 4. _watchdog_thread is NOT cleared (proceed-anyway vs abort).
+        assert reader._watchdog_thread is original_watchdog_thread, (
+            "watchdog must NOT clear _watchdog_thread on proceed-anyway"
+        )
+
+    def test_watchdog_logs_proceed_anyway_warning(self, monkeypatch, caplog):
         """The proceed path must log a warning explaining the
         join timeout — so operators see what happened in the logs.
         """
