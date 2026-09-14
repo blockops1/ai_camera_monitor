@@ -20,6 +20,7 @@ from infra.motion_visualization import _draw_rectangle, render_motion_composite
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _solid_rgb(w: int, h: int, r: int, g: int, b: int) -> Image.Image:
     """Return a solid-color PIL.Image (RGB) of size (w, h)."""
     arr = np.full((h, w, 3), (r, g, b), dtype=np.uint8)
@@ -27,8 +28,10 @@ def _solid_rgb(w: int, h: int, r: int, g: int, b: int) -> Image.Image:
 
 
 def _frame_with_scarce_motion(
-    w: int, h: int,
-    move_x: int = 2, move_y: int = 0,
+    w: int,
+    h: int,
+    move_x: int = 2,
+    move_y: int = 0,
 ) -> list[Image.Image]:
     """4-frame burst with motion in frame 2→3 (a bright rectangle moves).
 
@@ -57,6 +60,7 @@ def _frame_with_scarce_motion(
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestRenderMotionComposite:
     """Core render_motion_composite integration tests."""
@@ -172,9 +176,9 @@ class TestRenderMotionComposite:
             # (b) Green outline region — top edge of bbox.
             # Green outline pixel should have G > R and G > B.
             outline_px = arr[78, 115]  # type: ignore[index]
-            assert int(outline_px[1]) > int(outline_px[0]) and int(outline_px[1]) > int(outline_px[2]), (
-                f"Expected green-dominant outline pixel but got {outline_px}"
-            )
+            assert int(outline_px[1]) > int(outline_px[0]) and int(outline_px[1]) > int(
+                outline_px[2]
+            ), f"Expected green-dominant outline pixel but got {outline_px}"
 
 
 class TestRenderMotionCompositeErrors:
@@ -200,9 +204,7 @@ class TestRenderMotionCompositeErrors:
         with tempfile.TemporaryDirectory() as tmpdir:
             result = render_motion_composite(frames, output_dir=tmpdir)
             img = Image.open(result)
-            assert img.size == (w, h), (
-                f"Expected {w}x{h}, got {img.size}"
-            )
+            assert img.size == (w, h), f"Expected {w}x{h}, got {img.size}"
             assert img.format == "PNG", f"Expected PNG format, got {img.format}"
 
 
@@ -226,7 +228,37 @@ class TestDrawRectangleBoundsClamp:
         """Fully out-of-range coords must produce no writes (sum == 0)."""
         arr = np.zeros((100, 200, 3), dtype=np.uint8)
         # x0=x1=y0=y1=9999 → entirely outside frame → early-exit.
-        _draw_rectangle(
-            arr, x0=9999, y0=9999, x1=9999, y1=9999, thickness=2
-        )
+        _draw_rectangle(arr, x0=9999, y0=9999, x1=9999, y1=9999, thickness=2)
         assert arr.sum() == 0, "Expected no writes when coords are fully out of frame"
+
+
+def test_render_motion_composite_wide_frame_no_indexerror():
+    """Full pipeline on 1920x1080 with corner bbox must return a valid PNG.
+
+    Wide-frame integration: 1920x1080 with corner bbox (US-040c).
+
+    Bug end-to-end: 2304x1296 native Reolink frames, motion bbox can have
+    y0+h near/beyond H_orig. Pre-fix, render_motion_composite raised
+    IndexError → HTTP 500. Post-fix (a+b), render returns valid PNG.
+
+    This test exercises the full pipeline with a tight corner bbox
+    (1700,900,200,300) — y0+y1 = 900+1200 = 2100 > H=1080 — which
+    triggers the original IndexError pre-fix.
+    """
+    frames = [
+        _solid_rgb(1920, 1080, 50, 50, 50),
+        _solid_rgb(1920, 1080, 50, 50, 50),
+        _solid_rgb(1920, 1080, 200, 200, 200),  # motion in frame 3
+        _solid_rgb(1920, 1080, 50, 50, 50),
+    ]
+    # Corner bbox: x0=1700, y0=900, w=200, h=300
+    # y1 = 900+300 = 1200 > H=1080 → triggers original IndexError
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = render_motion_composite(
+            frames,
+            bbox_a=(1700, 900, 200, 300),
+            bbox_b=(1700, 900, 200, 300),
+            output_dir=tmpdir,
+        )
+        assert result, "Expected a non-empty path"
+        assert os.path.isfile(result), f"composite.png not found at {result}"
