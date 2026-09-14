@@ -44,7 +44,7 @@ CALLS INTO:
     - PIL: image load
     - scripts.export_yolo_dynamic: pad_to_multiple_of_32 helper
     - numpy: tensor prep + brightness stats
-    - cv2: NMS for duplicate detection removal
+    - numpy: NMS for duplicate detection removal
     - infra/time_of_day: is_night_at_edt() for night/day signal
 
 RELATED:
@@ -65,7 +65,6 @@ from typing import Literal
 UTC = timezone.utc  # compat shim for Python 3.9 (UTC was added in 3.11)
 from pathlib import Path
 
-import cv2  # only used for NMS in _postprocess
 import numpy as np
 import onnxruntime as ort
 from PIL import Image
@@ -524,6 +523,62 @@ def _select_top_detection(
 
 
 # ---------------------------------------------------------------------------
+# Pure-numpy NMS (no external dependencies)
+# ---------------------------------------------------------------------------
+
+def _nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float) -> np.ndarray:
+    """Non-maximum suppression — pure numpy implementation.
+
+    Args:
+        boxes: (N, 4) or (N, 5) array of bounding boxes.
+            If (N, 4): columns are (x1, y1, x2, y2).
+            If (N, 5): columns are (x1, y1, x2, y2, extra) — extra column
+            is ignored.
+        scores: (N,) array of confidence scores.
+        iou_threshold: IoU threshold for suppression.
+
+    Returns:
+        Array of indices to keep, sorted by score descending.
+    """
+    if boxes.size == 0:
+        return np.array([], dtype=np.int64)
+
+    # Strip to (N, 4) if (N, 5) — first 4 cols are xyxy
+    if boxes.shape[1] == 5:
+        boxes = boxes[:, :4]
+
+    # Compute areas
+    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+
+    # Sort by score descending
+    order = np.argsort(scores)[::-1]
+
+    keep = []
+    while order.size > 0:
+        # Keep the highest-score box
+        i = order[0]
+        keep.append(i)
+
+        # Compute IoU of remaining boxes with the current best box
+        xx1 = np.maximum(boxes[order[1:], 0], boxes[i, 0])
+        yy1 = np.maximum(boxes[order[1:], 1], boxes[i, 1])
+        xx2 = np.minimum(boxes[order[1:], 2], boxes[i, 2])
+        yy2 = np.minimum(boxes[order[1:], 3], boxes[i, 3])
+
+        w = np.maximum(0.0, xx2 - xx1)
+        h = np.maximum(0.0, yy2 - yy1)
+        inter = w * h
+
+        iou = inter / (areas[order[0]] + areas[order[1:]] - inter + 1e-7)
+
+        # Keep boxes with IoU below threshold
+        inds = np.where(iou <= iou_threshold)[0]
+        order = order[inds + 1]
+
+    return np.array(keep, dtype=np.int64)
+
+
+# ---------------------------------------------------------------------------
 # Image preprocessing
 # ---------------------------------------------------------------------------
 
@@ -582,20 +637,8 @@ def _postprocess(
     xyxy[:, [0, 2]] = np.clip(xyxy[:, [0, 2]], 0, orig_w)
     xyxy[:, [1, 3]] = np.clip(xyxy[:, [1, 3]], 0, orig_h)
 
-    # NMS (using cv2.dnn.NMSBoxes — simpler than rolling our own)
-    nms_boxes = [
-        [int(xyxy[i, 0]), int(xyxy[i, 1]),
-         int(xyxy[i, 2] - xyxy[i, 0]), int(xyxy[i, 3] - xyxy[i, 1])]
-        for i in range(xyxy.shape[0])
-    ]
-    indices: np.ndarray = cv2.dnn.NMSBoxes(
-        nms_boxes, confidences.tolist(), conf_threshold, iou_threshold
-    )  # type: ignore[assignment]
-    if len(indices) == 0:
-        return []
-    # cv2.dnn.NMSBoxes returns either np.ndarray or a sequence-of-lists
-    # depending on OpenCV version; flatten covers both shapes.
-    indices = np.array(indices).flatten()
+    # NMS — pure numpy, no external dependencies
+    indices = _nms(xyxy, confidences, iou_threshold)
 
     return [
         (int(class_ids[i]), float(confidences[i]),
