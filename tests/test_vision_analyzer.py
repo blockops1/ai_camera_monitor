@@ -255,6 +255,7 @@ class TestSchemaContract:
         allowed = {
             "color", "body_style_hint", "make", "model",
             "vehicle_features", "description", "confidence", "notable_details",
+            "better_crop",
         }
         found = set(VEHICLE_SCHEMA["properties"].keys())
         extra = found - allowed
