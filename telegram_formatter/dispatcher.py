@@ -77,6 +77,23 @@ def _send_message(
     return client.post(url, json={"chat_id": chat_id, "text": caption})
 
 
+def _send_photo(
+    client: httpx.Client,
+    bot_token: str,
+    chat_id: str,
+    photo_path: str,
+    caption: str = "",
+    base_url: str = "https://api.telegram.org",
+) -> httpx.Response:
+    """sendPhoto — single-photo delivery with optional caption."""
+    url = f"{base_url}/bot{bot_token}/sendPhoto"
+    mime, suffix = _sniff_mime(photo_path)
+    with open(photo_path, "rb") as f:
+        data = f.read()
+    files = [("photo", (f"photo{suffix}", data, mime))]
+    return client.post(url, data={"chat_id": chat_id, "caption": caption}, files=files)
+
+
 def _send_media_group(
     client: httpx.Client,
     bot_token: str,
@@ -115,6 +132,43 @@ def _send_media_group(
         data={"chat_id": chat_id, "media": str(media).replace("'", '"')},
         files=files,
     )
+
+
+def send_photo(
+    bot_token: str,
+    chat_id: str,
+    photo_path: str,
+    caption: str = "",
+    base_url: str = "https://api.telegram.org",
+    client: httpx.Client | None = None,
+) -> httpx.Response:
+    """Send a single photo to Telegram.
+
+    Args:
+        bot_token: required, from env TELEGRAM_BOT_TOKEN.
+        chat_id: required, from env TELEGRAM_HOME_CHAT_ID.
+        photo_path: absolute path to the image file.
+        caption: optional caption text.
+        base_url: override for testing (default api.telegram.org).
+        client: optional httpx.Client. If None, a fresh Client is created.
+
+    Returns:
+        httpx.Response from the Telegram API.
+
+    Raises:
+        ConfigError: bot_token or chat_id empty.
+    """
+    _require(bot_token, chat_id)
+    owns_client = client is None
+    if owns_client:
+        client = httpx.Client(timeout=10.0)
+    try:
+        return _send_photo(
+            client, bot_token, chat_id, photo_path, caption, base_url
+        )
+    finally:
+        if owns_client:
+            client.close()
 
 
 def dispatch(
