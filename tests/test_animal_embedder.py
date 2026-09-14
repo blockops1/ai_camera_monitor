@@ -7,11 +7,11 @@ AC4: Full test suite passes (unit tests only; live integration is opt-in).
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import numpy as np
 import pytest
 from PIL import Image
+
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -64,9 +64,8 @@ import os
 import time
 
 import numpy as np
-from PIL import Image
-
 import torch
+from PIL import Image
 from torch import nn
 
 logger = logging.getLogger(__name__)
