@@ -232,7 +232,10 @@ def run(alert: dict) -> dict:
                 alert=alert,
             )
         except Exception:
-            log.exception("pipeline: TG#3 send_match_alert failed for alert %s", alert.get("id", "unknown"))
+            log.exception(
+                "pipeline: TG#3 send_match_alert failed for alert %s",
+                alert.get("id", "unknown"),
+            )
 
     # Stage 14: record_hit — only on full pipeline success (TG#1+TG#2+TG#3).
     record_hit(camera_id, classification, time.monotonic())

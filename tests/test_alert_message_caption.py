@@ -332,13 +332,20 @@ class TestTg3CaptionAlertMetadata:
         from telegram_formatter.match_alert import build_match_message
 
         alert = _make_alert(alert_id="evt-ghi-456", timestamp="2026-09-12T09:00:00Z")
-        # match_alert.py uses vm2_result['distinctive_features'] — TG#3 concern.
         result = build_match_message(
-            match_result={"matched": True},
+            match_result={
+                "matched": True,
+                "known_vehicle": {
+                    "id": "v1",
+                    "label": "Test vehicle",
+                    "color": "white",
+                    "make": "Ford",
+                    "model": "F-150",
+                },
+                "score": 8.5,
+                "all_scores": [("v1", 8.5)],
+            },
             vm2_result={
-                "make": "Ford",
-                "model": "F-150",
-                "color": "white",
                 "distinctive_features": ["white"],
             },
             camera_label="Front Gate",
@@ -348,14 +355,14 @@ class TestTg3CaptionAlertMetadata:
         assert "Alert 3 of 3" in caption
         assert "Alert ID: evt-ghi-456" in caption
         assert "Timestamp: 2026-09-12T09:00:00Z" in caption
-        # Verify order: Camera -> Status -> Alert lines
+        # Verify order: Camera -> Match block -> Alert lines
         parts = caption.split("\n")
         idx_camera = parts.index("Camera: Front Gate")
-        idx_status = next(i for i, p in enumerate(parts) if p.startswith("Status:"))
+        idx_match = next(i for i, p in enumerate(parts) if "Match" in p and "✅" in p)
         idx_alert3 = parts.index("Alert 3 of 3")
         idx_alert_id = parts.index("Alert ID: evt-ghi-456")
         idx_ts = parts.index("Timestamp: 2026-09-12T09:00:00Z")
-        assert idx_camera < idx_status < idx_alert3 < idx_alert_id < idx_ts
+        assert idx_camera < idx_match < idx_alert3 < idx_alert_id < idx_ts
 
     def test_tg3_caption_camera_line_is_first(self):
         """Camera: is the FIRST line of the caption (before Status)."""

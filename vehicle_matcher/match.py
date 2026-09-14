@@ -362,12 +362,15 @@ def match_vehicle(vm2_result: dict, candidates: list[dict]) -> dict:
     # --- Scored path (Pass 1 make+model, Pass 1.7a features, Pass 3-5) ---
     best_score = -1.0
     best_candidate = None
+    all_scores: list[tuple[str, float]] = []
 
     for candidate in candidates:
         kv = candidate
         ev = kv.get("vehicle_features") or {}
 
         score, _ = _score_candidate(vm2_result, kv, ev)
+        cid = kv.get("id", str(candidate))
+        all_scores.append((cid, score))
         if score > best_score:
             best_score = score
             best_candidate = candidate
@@ -376,16 +379,21 @@ def match_vehicle(vm2_result: dict, candidates: list[dict]) -> dict:
         result = dict(best_candidate)
         result["matched"] = True
         result["score"] = best_score
+        result["all_scores"] = all_scores
         return result
 
     # --- Fallback: license plate ---
     plate_result = _match_by_plate(vm2_result, candidates)
     if plate_result:
+        plate_result["score"] = plate_result.get("score", 0.0)
+        plate_result["all_scores"] = all_scores
         return plate_result
 
     # --- Fallback: Jaccard ---
     jaccard_result = _match_by_jaccard(vm2_result, candidates)
     if jaccard_result:
+        jaccard_result["score"] = jaccard_result.get("score", 0.0)
+        jaccard_result["all_scores"] = all_scores
         return jaccard_result
 
     return {"matched": False}
