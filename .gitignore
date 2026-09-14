@@ -17,6 +17,9 @@ data/private_identifiers.json
 # person identity data (enrolled people — not for public repo)
 data/known/people/known_people.json
 
+# animal identity data + enrollment staging crops (biometric, not for public repo)
+data/known/animals/
+
 # python
 __pycache__/
 *.py[cod]
