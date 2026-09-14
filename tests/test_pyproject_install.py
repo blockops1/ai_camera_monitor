@@ -20,7 +20,6 @@ PYPROJECT = ROOT / "pyproject.toml"
 REQUIRED_RUNTIME = [
     "flask",
     "python-telegram-bot",
-    "opencv-python-headless",
     "numpy",
     "Pillow",
     "onnxruntime",
