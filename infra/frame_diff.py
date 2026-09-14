@@ -16,6 +16,8 @@ PUBLIC API:
         # so YOLO's internal pad-to-multiple-of-32 becomes a no-op.
   - diff_pair_with_bbox(frame_a_path, frame_b_path, threshold=25, min_area_px=64)
       -> tuple[bbox, changed_pixel_count, mask] | (None, 0, empty_mask)
+  - compute_diff_bbox(frame_a_path, frame_b_path, threshold=25, min_area=64)
+      -> (x, y, w, h) — convenience wrapper, never returns None
   - crop_frame_to_bbox(frame_path, bbox) -> str | None
 DOES NOT DO:
   - Does NOT classify what's in the bbox (that's quick_classifier's job)
@@ -28,7 +30,7 @@ DOES NOT DO:
   - Does NOT fall back to bbox_from_mask when subject detection fails
     (Phase 6B.171 strict — caller suppresses the alert instead)
 CALLED BY: listener/motion_gate_pipeline.py (Phase 6B.107 + 6B.171)
-CALLS INTO: nothing in this repo (pure cv2 + numpy)
+CALLS INTO: nothing in this repo (pure numpy + PIL)
 RELATED: infra/motion_detector.py does its OWN pairwise diff at 160×120 for
   its 6-frame trajectory tracking — that module is unchanged. frame_diff is a
   focused helper for the gate's 2-frame diff (Option C1 in §11.37).
@@ -39,11 +41,11 @@ Implementation notes:
     letterbox for YOLO at 640×640 inside quick_classifier. Keeping native
     resolution in frame_diff means the bbox coordinates map directly to the
     frame's pixels — no scale math.
-  - cv2.absdiff is fast (~10ms on 1920×1080 grayscale on Apple Silicon CPU).
+  - np.abs diff is fast (~10ms on 1920×1080 grayscale on Apple Silicon CPU).
   - Threshold 25 is empirically reasonable for daytime (headlight flare at
     night may need lower; future tuning per-camera).
-  - Connected components via cv2.connectedComponentsWithStats — gets bboxes
-    + areas in one pass.
+  - Connected components via pure-numpy union-find (8-connectivity) — gets
+    labels + areas; bboxes derived from label mask.
   - min_area_px=64 filters out noise (single-pixel sensor glitches, JPEG
     artifacts on flat surfaces). Tunable per-camera in a future phase.
 
@@ -72,8 +74,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import cv2
 import numpy as np
+from PIL import Image
 
 # Default diff threshold (grayscale 0-255). Pixel must change by at least
 # this much between frames to count as "changed".
@@ -87,6 +89,74 @@ DEFAULT_MIN_AREA_PX = 64
 # context regardless of subject size and makes YOLO's pad-to-multiple-of-32
 # a no-op (dimensions are already multiples of 32).
 DEFAULT_BBOX_PAD_PCT = 0.10
+
+
+def _connected_components(
+    mask: np.ndarray,
+) -> tuple[int, np.ndarray]:
+    """Label connected components in a binary mask (8-connectivity).
+
+    Uses a union-find (disjoint-set) based approach.  Returns
+    ``(num_labels, labels_array)`` where label 0 is background.
+    """
+    h, w = mask.shape
+    labels = np.zeros((h, w), dtype=np.int32)
+    # Union-find with path compression + union-by-rank
+    # We need indices 0..max_uid where max_uid <= h*w.
+    max_uid = h * w + 1
+    parent = np.arange(max_uid, dtype=np.int32)
+    rank = np.zeros(max_uid, dtype=np.int8)
+
+    def _find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def _union(a: int, b: int) -> None:
+        ra, rb = _find(a), _find(b)
+        if ra == rb:
+            return
+        if rank[ra] < rank[rb]:
+            ra, rb = rb, ra
+        parent[rb] = ra
+        if rank[ra] == rank[rb]:
+            rank[ra] += 1
+
+    uid = 0
+    for y in range(h):
+        for x in range(w):
+            if mask[y, x] == 0:
+                continue
+            uid += 1
+            labels[y, x] = uid
+            # Look at already-labeled neighbors (left, top, top-left, top-right)
+            neighbors: list[int] = []
+            if x > 0 and labels[y, x - 1] > 0:
+                neighbors.append(int(labels[y, x - 1]))
+            if y > 0 and labels[y - 1, x] > 0:
+                neighbors.append(int(labels[y - 1, x]))
+            if y > 0 and x > 0 and labels[y - 1, x - 1] > 0:
+                neighbors.append(int(labels[y - 1, x - 1]))
+            if y > 0 and x < w - 1 and labels[y - 1, x + 1] > 0:
+                neighbors.append(int(labels[y - 1, x + 1]))
+            for nb in neighbors:
+                _union(uid, nb)
+
+    # Second pass: relabel to consecutive integers
+    root_map: dict[int, int] = {}
+    next_label = 1
+    for y in range(h):
+        for x in range(w):
+            if labels[y, x] > 0:
+                r = _find(int(labels[y, x]))
+                if r not in root_map:
+                    root_map[r] = next_label
+                    next_label += 1
+                labels[y, x] = root_map[r]
+
+    num_labels = next_label - 1
+    return num_labels, labels
 
 
 def _expand_bbox_pct(
@@ -135,10 +205,11 @@ def load_frame(path: str) -> np.ndarray | None:
     Native resolution (not resized) because the bbox we extract from this
     frame needs to map directly to the frame's pixel coordinates for cropping.
     """
-    img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-    if img is None:
+    try:
+        pil_img = Image.open(path).convert("L")
+    except OSError:
         return None
-    return img
+    return np.array(pil_img, dtype=np.uint8)
 
 
 def pairwise_diff(
@@ -161,8 +232,8 @@ def pairwise_diff(
         raise ValueError(
             f"frames must be uint8 grayscale, got {frame_a.dtype} and {frame_b.dtype}"
         )
-    diff = cv2.absdiff(frame_a, frame_b)
-    _, mask = cv2.threshold(diff, threshold, 255, cv2.THRESH_BINARY)
+    diff = np.abs(frame_a.astype(np.int16) - frame_b.astype(np.int16))
+    mask = (diff >= threshold).astype(np.uint8) * 255
     return mask
 
 
@@ -187,19 +258,18 @@ def bbox_from_mask(
     """
     if mask is None or mask.size == 0:
         return None
-    # connectedComponentsWithStats: labels, stats (x,y,w,h,area), centroids
-    num_labels, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
-        mask, connectivity=8
-    )
-    if num_labels <= 1:
-        # 1 label = background only. No motion.
+    # Pure-numpy connected-components (8-connectivity).
+    # Returns (num_labels, label_array) where label 0 = background.
+    num_labels, labels = _connected_components(mask)
+    if num_labels < 1:
+        # No components at all. No motion.
         return None
 
     # Find the largest component (excluding background at index 0)
     largest_idx = 1
-    largest_area = stats[1, cv2.CC_STAT_AREA]
-    for i in range(2, num_labels):
-        area = stats[i, cv2.CC_STAT_AREA]
+    largest_area = 0
+    for i in range(1, num_labels + 1):
+        area = int(np.sum(labels == i))
         if area > largest_area:
             largest_area = area
             largest_idx = i
@@ -207,10 +277,11 @@ def bbox_from_mask(
     if largest_area < min_area_px:
         return None
 
-    x = int(stats[largest_idx, cv2.CC_STAT_LEFT])
-    y = int(stats[largest_idx, cv2.CC_STAT_TOP])
-    w = int(stats[largest_idx, cv2.CC_STAT_WIDTH])
-    h = int(stats[largest_idx, cv2.CC_STAT_HEIGHT])
+    # Compute bbox from the label mask
+    rows = np.where(labels == largest_idx)[0]
+    cols = np.where(labels == largest_idx)[1]
+    y, x = int(rows.min()), int(cols.min())
+    h, w = int(rows.max() - rows.min() + 1), int(cols.max() - cols.min() + 1)
 
     # Expand by percentage, round UP to mult of 32, clamp to image bounds.
     h_img, w_img = mask.shape
@@ -255,6 +326,51 @@ def diff_pair_with_bbox(
     return bbox, changed_count, mask
 
 
+def compute_diff_bbox(
+    frame_a_path: str,
+    frame_b_path: str,
+    threshold: int = DEFAULT_DIFF_THRESHOLD,
+    min_area: int = DEFAULT_MIN_AREA_PX,
+) -> tuple[int, int, int, int]:
+    """Convenience wrapper: load 2 frames, diff, return raw bbox (x, y, w, h).
+
+    Always returns a tuple (never None).  When no motion is detected the
+    bbox defaults to ``(0, 0, 0, 0)``.
+
+    Returns the unexpanded bbox of the largest connected component
+    (no padding applied).
+    """
+    a = load_frame(frame_a_path)
+    b = load_frame(frame_b_path)
+    if a is None or b is None:
+        return (0, 0, 0, 0)
+    if a.shape != b.shape:
+        return (0, 0, 0, 0)
+    mask = pairwise_diff(a, b, threshold=threshold)
+    changed_count = int(np.count_nonzero(mask))
+    if changed_count < min_area:
+        return (0, 0, 0, 0)
+
+    num_labels, labels = _connected_components(mask)
+    if num_labels < 1:
+        return (0, 0, 0, 0)
+
+    largest_idx = 1
+    largest_area = 0
+    for i in range(1, num_labels + 1):
+        area = int(np.sum(labels == i))
+        if area > largest_area:
+            largest_area = area
+            largest_idx = i
+
+    if largest_area < min_area:
+        return (0, 0, 0, 0)
+
+    rows = np.where(labels == largest_idx)[0]
+    cols = np.where(labels == largest_idx)[1]
+    return (int(cols.min()), int(rows.min()), int(cols.max() - cols.min() + 1), int(rows.max() - rows.min() + 1))
+
+
 def crop_frame_to_bbox(frame_path: str, bbox: tuple[int, int, int, int]) -> str | None:
     """Crop a frame file to the given bbox. Saves to a sibling _crop suffix.
 
@@ -266,22 +382,24 @@ def crop_frame_to_bbox(frame_path: str, bbox: tuple[int, int, int, int]) -> str 
     src = Path(frame_path)
     if not src.is_file():
         return None
-    img = cv2.imread(str(src), cv2.IMREAD_COLOR)
-    if img is None:
+    try:
+        pil_img = Image.open(str(src)).convert("RGB")
+    except OSError:
         return None
     x, y, w, h = bbox
     # Clamp to image bounds
-    h_img, w_img = img.shape[:2]
+    w_img, h_img = pil_img.size
     x = max(0, min(x, w_img - 1))
     y = max(0, min(y, h_img - 1))
     w = max(1, min(w, w_img - x))
     h = max(1, min(h, h_img - y))
-    crop = img[y : y + h, x : x + w]
+    crop = pil_img.crop((x, y, x + w, y + h))
     if crop.size == 0:
         return None
     out_path = src.with_name(f"{src.stem}_crop{x}_{y}_{w}x{h}.png")
     # §11.88 (2026-09-01) — PNG lossless, NOT JPEG q90.
-    ok = cv2.imwrite(str(out_path), crop)
-    if not ok:
+    try:
+        crop.save(str(out_path), format="PNG", optimize=False)
+    except OSError:
         return None
     return str(out_path)
