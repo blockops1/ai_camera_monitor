@@ -23,6 +23,7 @@ DOES NOT DO:
 from __future__ import annotations
 
 import logging
+import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -71,12 +72,10 @@ def sweep() -> dict:
         # date is older than 24 hours.
         if entry.name < cutoff:
             try:
-                for item in entry.rglob("*"):
-                    if item.is_file() or item.is_symlink():
-                        item.unlink()
-                    elif item.is_dir():
-                        item.rmdir()
-                entry.rmdir()
+                # Use shutil.rmtree: rglob() yields parents before children
+                # in arbitrary order, so a manual unlink/rmdir walk races and
+                # hits ENOTEMPTY. rmtree walks the tree top-down.
+                shutil.rmtree(entry)
                 stats["deleted_dirs"] += 1
                 log.info("tg_upload_cleanup: removed date dir %s", entry.name)
             except OSError as exc:
