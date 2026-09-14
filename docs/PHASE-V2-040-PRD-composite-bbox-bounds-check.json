@@ -1,0 +1,66 @@
+{
+  "prd_id": "PHASE-V2-040-PRD-composite-bbox-bounds-check",
+  "title": "Bounds-check motion_visualization composite bbox rendering to eliminate IndexError on 16:9 frames",
+  "author": "jill (operator-directed 2026-09-14, post alert-quality review)",
+  "status": "active",
+  "phase": "v2",
+  "plan_section": "V2-024 follow-up (composite rendering) + V2-031 follow-up (single-bbox padded crops rounded mult32)",
+  "trigger": "Operator 2026-09-14 (verbatim): 'OK, so, my Car, me, and my dog have all been active around the building and have many alerts. Overall, they look very good ... Now none of them matched any known vehicle vehicles, or people or animals, so we probably want to look at that aspect of it, but let me know overall how things are going in your opinion.' Alert review on logs/daemon.log (2026-09-11 through 2026-09-14, 1817 /alert POSTs) found 227 HTTP 500 crashes (12.5% of alerts) caused by IndexError in infra/motion_visualization.py:378. Of 4 alerts sampled from the operator's reported car/human/dog activity, 3 returned 500 silently: the operator was getting real alerts but ~1 in 8 were silently dropped without Telegram delivery.",
+  "background": "Traceback (from logs/daemon.log, alert_id=a7101065-b971-4b8a-b3c7-fc7fefcef967 and ~225 others): File '.../infra/motion_visualization.py', line 378, in _draw_rectangle arr[y1 - dy, x0:x1 + 1] = green IndexError: index 1296 is out of bounds for axis 0 with size 1296. Root cause: _native_bbox_to_corners (lines 113-131) clamps y1 against min(W - 1, ...) instead of min(H - 1, ...). On 1920x1080 frames (W=1920, H=1080), y1 gets clamped to 1919 instead of 1079, then _draw_rectangle writes past arr.shape[0]=1080. Secondary issue: _draw_rectangle does not bounds-check y0-dy or y1+dy against arr height, nor x0-dx/x1+dx against arr width; any unclamped or edge-case bbox can IndexError. V2-024 PRD acceptance specified render_motion_composite works on the refactor's test fixtures (which used square or near-square bboxes), so the bug never surfaced. V2-031 added rounded-mult32 padding to crops; that change multiplied the number of edge-case bboxes hitting the buggy clamp. fix is mechanical: (1) clamp y1 against H not W; (2) clamp all four (y0,y1,x0,x1) inside _draw_rectangle as defense in depth.",
+  "operator_guarantees": {
+    "git_maintained": "Story lands as a real git commit on main BEFORE claiming done. Worker reports 'done' without a commit SHA on main = card failed. Reviewer verifies via `git log main --grep <story_id>`.",
+    "code_actually_written": "Every AC is a re-runnable shell command with explicit expected output. Reviewer round-2 lens: checkout the work, run every AC verbatim, compare actual to expected. No 'looks right'. No diff-summary-only approval.",
+    "no_residue": "After the story lands, the file MUST contain the bug-fix code (clamp y1 against H, clamp edges inside _draw_rectangle). No commented-out old clamp. No 'if False:' branches keeping the bug. Reviewer round-3 lens: `git grep` for the old `min(W - 1, y1)` pattern across infra/motion_visualization.py."
+  },
+  "shipping_definition": "(a) _native_bbox_to_corners clamps y1 against H-1 (not W-1). (b) _draw_rectangle clamps all four edges against arr.shape before writing. (c) New edge-case test in tests/test_motion_visualization.py covers a 1920x1080-frame bbox where y0+h > H_orig (the production failure mode). (d) `python -c 'import infra.motion_visualization'` exits 0. (e) `pytest tests/test_motion_visualization.py` passes including the new edge-case test. (f) Full pytest still green. (g) commit on main with US-040 in the message. Working tree clean.",
+  "scope_exclusions": [
+    "Do NOT touch /Users/jill/farm-surveillance-refactor/. Frozen archive.",
+    "Do NOT touch /Users/jill/farm-surveillance-internal/. Frozen archive.",
+    "Do NOT touch /Users/jill/farm-surveillance/ (v1). OFF and stays OFF.",
+    "Do NOT git push to forgejo or GitHub. Operator reviews and pushes.",
+    "Do NOT install new skills. Use existing skill set.",
+    "Do NOT touch infra/gate.py. The motion_gate 'classification=vehicle / top_class=dog' mislabel on large bbox is a separate, non-actionable bug — listener.pipeline corrects it before Telegram. Out of scope here.",
+    "Do NOT redesign _native_bbox_to_corners or _draw_rectangle. Surgical clamp fixes only.",
+    "Do NOT touch the alert_artifacts.py caller or the webhook route. Bug is purely in motion_visualization.",
+    "Do NOT restart the daemon. Operator restarts manually after merge."
+  ],
+  "design_principles": [
+    "Minimal surface change. Two files: infra/motion_visualization.py (clamp fixes) + tests/test_motion_visualization.py (new edge-case test).",
+    "_native_bbox_to_corners is a pure helper — clamp against the CORRECT dimension (H for y, W for x).",
+    "_draw_rectangle is defense in depth — clamp all four edges against arr.shape regardless of caller (future-proofing).",
+    "Edge-case test reproduces production failure: 1920x1080 frame, bbox with y0+h > H_orig so the old code would IndexError.",
+    "Single commit on main with US-040 in the message.",
+    "Re-run daemon's existing /alert path is the integration verification (operator does this manually post-merge)."
+  ],
+  "stories": [
+    {
+      "id": "US-040",
+      "title": "Fix _draw_rectangle IndexError on wide frames (1920x1080) by clamping bbox against correct dimensions",
+      "story_type": "code",
+      "scope": "infra/motion_visualization.py L113-131 (_native_bbox_to_corners clamp bug) + L375-388 (_draw_rectangle defense in depth) + tests/test_motion_visualization.py (new edge-case test)",
+      "assignee": "coder",
+      "depends_on": [],
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'import infra.motion_visualization' \u2192 exit 0",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'from infra.motion_visualization import _native_bbox_to_corners; corners=_native_bbox_to_corners((0, 1000, 100, 200), W=1920, H=1080); assert corners is None or corners[3] < 1080, f\"y1 not clamped against H: {corners}\"' \u2192 exit 0",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'from infra.motion_visualization import _native_bbox_to_corners; corners=_native_bbox_to_corners((1900, 1000, 100, 200), W=1920, H=1080); assert corners is None or corners[2] < 1920 and corners[3] < 1080, f\"y1/x1 not clamped: {corners}\"' \u2192 exit 0",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'from infra.motion_visualization import render_motion_composite; from PIL import Image; import numpy as np, tempfile, os; f=[Image.fromarray(np.full((1080, 1920, 3), 50, dtype=np.uint8), mode=\"RGB\") for _ in range(4)]; f[2]=Image.fromarray(np.full((1080, 1920, 3), 200, dtype=np.uint8), mode=\"RGB\"); f[3]=Image.fromarray(np.full((1080, 1920, 3), 50, dtype=np.uint8), mode=\"RGB\"); d=tempfile.mkdtemp(); p=render_motion_composite(f, bbox_a=(1700, 900, 200, 300), bbox_b=(1700, 900, 200, 300), output_dir=d); assert p and os.path.exists(p), \"render failed on 1920x1080 bbox with y+h > H\"' \u2192 exit 0",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_motion_visualization.py -v --no-header 2>&1 | tail -20 \u2192 contains 'passed' with the new test name visible (test name should reference 'edge' or 'wide' or '1920x1080')",
+        "AC6: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 \u2192 contains 'passed' (full suite green, N \u2265 339)",
+        "RESIDUE: git -C /Users/jill/farm-surveillance-v2 grep -n 'min(W - 1, y1)' -- infra/motion_visualization.py | wc -l \u2192 0 (the old buggy clamp is gone)",
+        "GIT-1: cd /Users/jill/farm-surveillance-v2 && git status --porcelain | wc -l \u2192 0 (working tree clean)",
+        "GIT-2: cd /Users/jill/farm-surveillance-v2 && git log --oneline main -10 | grep -iE 'us-040' | wc -l \u2192 \u2265 1 (commit with story id on main)"
+      ],
+      "files_modified": [
+        "infra/motion_visualization.py",
+        "tests/test_motion_visualization.py"
+      ],
+      "notes": "Reproducer for the production bug: alert_id a7101065-b971-4b8a-b3c7-fc7fefcef967, BACK camera, crop_bbox_b=(454, 848, 704, 448). Native frame 1920x1080, y0=848, h=448, so unclamped y1=1296; with the old code, y1 was clamped to min(W-1=1295, 1296)=1295, then arr[y1-dy, ...] crashed because arr.shape[0]=1296 in this case but the IndexError on production was arr.shape[0]=1080 (real 16:9 frames). Fix AC2/AC3 verify the y1-clamp against H. AC4 is the integration test that reproduces the IndexError with a 1920x1080 frame and asserts render succeeds. _draw_rectangle defense-in-depth clamps all four edges against arr.shape so future callers can't reproduce the IndexError either.",
+      "operator_approval_required": false,
+      "commit_required": true
+    }
+  ],
+  "operator_directives": {
+    "2026-09-14": "go ahead and set those up as stories and then Make sure you follow all the specialist and Kanban rules and then Set the cards up to be picked up by the dispatcher"
+  }
+}
