@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from infra.motion_visualization import _draw_rectangle, render_motion_composite
+from infra.motion_visualization import render_motion_composite, _native_bbox_to_corners, _draw_rectangle
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -262,3 +262,45 @@ def test_render_motion_composite_wide_frame_no_indexerror():
         )
         assert result, "Expected a non-empty path"
         assert os.path.isfile(result), f"composite.png not found at {result}"
+
+
+class TestNativeBboxToCorners:
+    """Tests for _native_bbox_to_corners bounds clamping."""
+
+    def test_clamps_to_correct_dimensions(self):
+        """Verify x- and y-dimensions use the correct clamp bounds.
+
+        The (0,1000,100,200) case: y1 = 1000+200 = 1200 > H-1=1079 for a
+        1920x1080 frame.  Pre-fix the code used min(W-1, y1)=min(1919,1200)
+        = 1200 (wrong — 1200 > H-1).  Post-fix y1 must be clamped to
+        min(H-1, 1200) = 1079.  Similarly x1 must clamp to W-1.
+        """
+        W, H = 1920, 1080
+
+        # y1 out of range: (0,1000,100,200) → corners (0,1000,100,1200)
+        c = _native_bbox_to_corners((0, 1000, 100, 200), W=W, H=H)
+        assert c is not None
+        assert c[2] < W, f"x1={c[2]} should be < W={W}"
+        assert c[3] < H, f"y1={c[3]} should be < H={H}"
+
+        # x1 out of range: (1900,1000,100,200) → corners (1900,1000,2000,1200)
+        c = _native_bbox_to_corners((1900, 1000, 100, 200), W=W, H=H)
+        assert c is not None
+        assert c[2] < W, f"x1={c[2]} should be < W={W}"
+        assert c[3] < H, f"y1={c[3]} should be < H={H}"
+
+        # Both x1 and y1 out of range: (1900,1000,200,300) → (1900,1000,2100,1300)
+        c = _native_bbox_to_corners((1900, 1000, 200, 300), W=W, H=H)
+        assert c is not None
+        assert c[2] < W, f"x1={c[2]} should be < W={W}"
+        assert c[3] < H, f"y1={c[3]} should be < H={H}"
+
+        # Negative coords: (-50,-50,60,60) → (-50,-50,10,10)
+        c = _native_bbox_to_corners((-50, -50, 60, 60), W=W, H=H)
+        assert c is not None
+        assert c[0] >= 0
+        assert c[1] >= 0
+
+        # Zero-area bbox returns None
+        assert _native_bbox_to_corners((100, 200, 0, 50), W=W, H=H) is None
+        assert _native_bbox_to_corners((100, 200, 50, 0), W=W, H=H) is None
