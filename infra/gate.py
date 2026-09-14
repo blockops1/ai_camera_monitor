@@ -130,7 +130,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
-import cv2
 from PIL import Image
 
 from infra.frame_diff import (
@@ -177,14 +176,12 @@ def _load_frame_as_pil(path: str) -> Image.Image:
     """Load a frame from disk into a PIL.Image (RGB).
 
     Used by the gate at run() start to populate verdict.frames so the
-    downstream pipeline doesn't need to re-read the disk. cv2.imread
-    gives BGR; we convert to RGB for PIL.
+    downstream pipeline doesn't need to re-read the disk. PIL's
+    Image.open+convert handles the decode and colour-space conversion.
     """
-    bgr = cv2.imread(path, cv2.IMREAD_COLOR)
-    if bgr is None:
-        raise RuntimeError(f"could not load frame from {path}")
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    return Image.fromarray(rgb)
+    img = Image.open(path)
+    img.load()  # force full decode before any lazy reference
+    return img.convert("RGB")
 
 
 def _pil_crop(image: Image.Image, bbox: tuple[int, int, int, int]) -> Image.Image:
