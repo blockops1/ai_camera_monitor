@@ -127,7 +127,7 @@ def _native_bbox_to_corners(
     x0 = max(0, min(W - 1, x0))
     y0 = max(0, min(H - 1, y0))
     x1 = max(0, min(W - 1, x1))
-    y1 = max(0, min(W - 1, y1))
+    y1 = max(0, min(H - 1, y1))
     return (x0, y0, x1, y1)
 
 
