@@ -58,6 +58,19 @@ from telegram_formatter.dispatcher import _send_message, send_photo
 logger = logging.getLogger(__name__)
 
 
+def status_wording_for(classification: str, matched: bool) -> str:
+    """Return 'recognized <class>' or 'unrecognized <class>' based on match.
+
+    Args:
+        classification: Gate classification (e.g. 'vehicle', 'person', 'animal').
+        matched: True when the subject was matched in the knowledge base.
+
+    Returns:
+        Status wording string, e.g. 'recognized vehicle', 'unrecognized person'.
+    """
+    return f"{'recognized' if matched else 'unrecognized'} {classification}"
+
+
 def pick_alert_image_path(
     vm2_result: dict[str, Any] | None,
     crop_a_path: str | None,
@@ -155,6 +168,11 @@ def build_match_message(
     vm2_result: dict[str, Any],
     camera_label: str = "Camera",
     alert: dict[str, Any] | None = None,
+    classification: str | None = None,
+    reason: str = "",
+    top_candidates: list[tuple[str, float]] | None = None,
+    match_threshold: float = 0.0,
+    gap_threshold: float = 0.0,
 ) -> dict[str, Any]:
     """Build a TG#3 Telegram message dict for the match result.
 
@@ -164,12 +182,34 @@ def build_match_message(
 
     On match, uses build_match_alert_body for the matched-vehicle details
     (label, ID, owner, color, make/model, body, confidence, gap, runner-ups).
+    On no-match, uses build_no_match_alert_body (from no_match_telegram)
+    which shows reason, top candidates, and thresholds.
+
+    Args:
+        match_result: Match result dict with 'matched' key.
+        vm2_result: VM2 detail output.
+        camera_label: Human-readable camera name.
+        alert: Optional parent alert dict for metadata.
+        classification: Gate classification ('vehicle', 'person', 'animal').
+        reason: Reason for no-match (e.g. 'below confidence threshold').
+        top_candidates: Top-N (kv_id, score) tuples for no-match display.
+        match_threshold: Score threshold used for match/no-match decision.
+        gap_threshold: Gap threshold used for match/no-match decision.
+
+    Returns:
+        Telegram-ready message dict with 'caption' and 'photos' keys.
     """
+    from telegram_formatter.no_match_telegram import build_no_match_alert_body
+
     lines: list[str] = [
         f"Camera: {camera_label}",
     ]
 
-    if match_result.get("matched"):
+    # Determine classification from vm2_result if not provided.
+    cls = classification or vm2_result.get("class", "vehicle")
+    matched = match_result.get("matched", False)
+
+    if matched:
         # Build the matched vehicle details block.
         score = match_result.get("score", 0.0)
         all_scores = match_result.get("all_scores", [])
@@ -188,7 +228,17 @@ def build_match_message(
 
         lines.append(build_match_alert_body(match_result, vm2_result, score, gap, runner_ups))
     else:
-        lines.append("Status: unrecognized vehicle")
+        # No-match: use classification-aware wording + full no-match body.
+        status = status_wording_for(cls, False)
+        lines.append(f"Status: {status}")
+        if top_candidates:
+            lines.append(build_no_match_alert_body(
+                reason=reason,
+                top_candidates=top_candidates,
+                match_threshold=match_threshold,
+                gap_threshold=gap_threshold,
+                captured_at=alert.get("timestamp", "") if alert else "",
+            ))
 
     # Alert metadata (mirrors TG#1 / TG#2 caption layout).
     if alert:
