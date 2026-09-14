@@ -37,6 +37,11 @@ strip_paths:
   - "data/vehicles/known_vehicles.json"
   # Maintainer release tooling (not for end-user installs)
   - "scripts/release/"
+  # ML model weights (large binaries; users export via scripts/export_yolo_dynamic.py)
+  - "models/yolov8n.onnx"
+  - "models/*.onnx"
+  - "*.pt"
+  - "*.weights"
 
 # Tests that REQUIRE operator data and must be stripped entirely.
 tests_to_strip:
