@@ -10,21 +10,39 @@ Validates that config.yaml:
 
 This is a low-cost regression test — the cut script depends on this config
 being well-formed. Run before modifying config.yaml.
+
+Loading strategy: read config.yaml from git HEAD (via `git show HEAD:...`)
+rather than from the working tree. Reason: the cut script itself strips
+scripts/release/ from the working tree as part of staging the public cut,
+so reading from disk post-strip produces false failures. Reading from HEAD
+verifies the committed config — which is what matters.
 """
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_PATH = REPO_ROOT / "scripts" / "release" / "config.yaml"
+CONFIG_RELPATH = "scripts/release/config.yaml"
 
 
 def _load_config() -> dict:
-    assert CONFIG_PATH.exists(), f"missing {CONFIG_PATH}"
-    return yaml.safe_load(CONFIG_PATH.read_text())
+    """Load the committed config.yaml from the repo's HEAD.
+
+    Uses `git show HEAD:<path>` so the test is robust against the working
+    tree being in any state — clean, mid-cut, or post-strip. The test
+    verifies the committed config, which is what ships.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "show", f"HEAD:{CONFIG_RELPATH}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return yaml.safe_load(result.stdout)
 
 
 def test_config_parses_and_has_version():
