@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -44,7 +45,7 @@ from infra.vision_analyzer import detail_class, verify_class
 from person_matcher.match import match_person
 from telegram_formatter.alert import build_alert_message
 from telegram_formatter.detail import build_detail_message
-from telegram_formatter.match_alert import build_match_message
+from telegram_formatter.match_alert import build_match_message, send_match_alert
 from vehicle_matcher import match_vehicle
 
 log = logging.getLogger(__name__)
@@ -218,6 +219,20 @@ def run(alert: dict) -> dict:
             camera_label=camera_label,
             alert=alert,
         )
+        # Send text body + photo (pick_alert_image_path via send_match_alert).
+        try:
+            send_match_alert(
+                bot_token=os.environ["TELEGRAM_BOT_TOKEN"],
+                chat_id=os.environ.get("TELEGRAM_HOME_CHAT_ID", ""),
+                match_result=match_result,
+                vm2_result=vm2_result,
+                crop_a_path=a_p,
+                crop_b_path=b_p,
+                camera_label=camera_label,
+                alert=alert,
+            )
+        except Exception:
+            log.exception("pipeline: TG#3 send_match_alert failed for alert %s", alert.get("id", "unknown"))
 
     # Stage 14: record_hit — only on full pipeline success (TG#1+TG#2+TG#3).
     record_hit(camera_id, classification, time.monotonic())
