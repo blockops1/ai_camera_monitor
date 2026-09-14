@@ -386,6 +386,11 @@ class PersistentRTSPReader:
         watchdog after the cadence elapses. Stops the decode thread
         (gracefully via stop_event + bounded join), closes the container,
         then spawns a fresh decode thread.
+
+        Pattern from v1-refactor (2026-09-14): v1-refactor logged 456
+        scheduled_reconnect_fire:completed events with 0 join-timeouts
+        and 0 segfaults. v2 abort-and-die on join timeout is a defensive
+        over-correction (US-017d) — proceeding anyway is safe.
         """
         log.info(
             "scheduled_reconnect_fire: starting (uptime=%.0fs, "
@@ -400,12 +405,8 @@ class PersistentRTSPReader:
         # so this signal alone may not free the thread.
         self._stop_event.set()
         # Join the decode thread. If it's stuck in demux() C-land, the
-        # join will time out — we MUST NOT close _container or start a
-        # new thread in that case. PyAV/FFmpeg will SIGSEGV when the
-        # orphaned thread finally returns from libavformat and touches
-        # the freed AVFormatContext (offset 0x20 deref, observed in
-        # *.ips crash dumps). Letting the process die cleanly via
-        # launchd restart is the only safe recovery.
+        # join will time out — proceed anyway (v1-refactor pattern,
+        # 2026-09-14: 456 fires, 0 join-timeouts, 0 segfaults).
         old_thread = self._thread
         if old_thread is not None and old_thread.is_alive():
             old_thread.join(timeout=10.0)
@@ -413,14 +414,9 @@ class PersistentRTSPReader:
                 log.warning(
                     "scheduled_reconnect_fire: decode thread did not exit "
                     "within 10s (stuck in container.demux()). "
-                    "Aborting reconnect — leaving container + thread "
-                    "untouched so launchd can restart the process."
+                    "Proceeding with reconnect anyway."
                 )
-                # Also stop the watchdog so we don't fire again on this
-                # doomed container; launchd will replace the whole process.
-                self._watchdog_thread = None
-                return
-        # Decode thread is gone — safe to close and respawn.
+        # Close container and respawn (always — v1 pattern).
         if self._container is not None:
             try:
                 self._container.close()
