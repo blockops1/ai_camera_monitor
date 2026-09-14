@@ -153,10 +153,16 @@ SCHEMA_JSON: dict = {
             "items": {"type": "string"},
             "description": "Notable visual details not covered above.",
         },
+        "better_crop": {
+            "type": "string",
+            "enum": ["crop_a", "crop_b", "neither"],
+            "description": "Which crop shows the vehicle more clearly. crop_a, crop_b, or neither.",
+        },
     },
     "required": [
         "color", "body_style_hint", "make", "model",
         "vehicle_features", "description", "confidence", "notable_details",
+        "better_crop",
     ],
     "additionalProperties": False,
 }
@@ -197,8 +203,14 @@ Respond ONLY with JSON matching this schema:
   },
   "description": "1-2 sentence free-text identification in plain English",
   "confidence": 0.0-1.0 (number),
-  "notable_details": ["detail 1", "detail 2"]
+  "notable_details": ["detail 1", "detail 2"],
+  "better_crop": "crop_a" | "crop_b" | "neither"
 }
+
+After analyzing both crops, decide which crop shows the vehicle more clearly:
+  "crop_a" — image 1 has the clearer view of the vehicle
+  "crop_b" — image 2 has the clearer view of the vehicle
+  "neither" — neither image shows the vehicle clearly enough
 
 Rules:
 - Focus on ONE vehicle only.

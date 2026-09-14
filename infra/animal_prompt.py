@@ -109,10 +109,16 @@ SCHEMA_JSON: dict = {
             "minItems": 0,
             "description": "1-3 short observations the operator should see. Empty array if none.",
         },
+        "better_crop": {
+            "type": "string",
+            "enum": ["crop_a", "crop_b", "neither"],
+            "description": "Which crop shows the animal more clearly. crop_a, crop_b, or neither.",
+        },
     },
     "required": [
         "species", "breed", "size", "color_pattern",
         "distinctive_features", "action", "confidence", "notable_details",
+        "better_crop",
     ],
     "additionalProperties": False,
 }
@@ -147,8 +153,14 @@ Output (return EXACTLY this JSON shape, nothing else):
   "action": "walking" | "running" | "sitting" | "standing" | "eating" |
             "sleeping" | "other" | null,
   "confidence": 0.0-1.0 (number),
-  "notable_details": ["walking along fence line", "appears to be unleashed"] | []
+  "notable_details": ["walking along fence line", "appears to be unleashed"] | [],
+  "better_crop": "crop_a" | "crop_b" | "neither"
 }
+
+After analyzing both crops, decide which crop shows the animal more clearly:
+  "crop_a" — image 1 has the clearer view of the animal
+  "crop_b" — image 2 has the clearer view of the animal
+  "neither" — neither image shows the animal clearly enough
 
 Rules:
 - Focus on ONE animal only.
