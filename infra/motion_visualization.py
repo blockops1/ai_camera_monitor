@@ -7,7 +7,7 @@ Phase 6B.115 (V2 port): the function accepts in-memory PIL.Image frames
 Telegram's Bot API requires a file path (or URL/file_id) to attach a photo.
 
 STATUS: stable
-THREAD SAFETY: thread-safe (pure function on inputs + OpenCV/PIL I/O;
+THREAD SAFETY: thread-safe (pure function on inputs + PIL I/O;
     no shared mutable state, no caches, no lock acquired).
 
 LAYER 1: median background — per-pixel median of the 4 gate frames at
@@ -28,7 +28,7 @@ LAYER 4: red paint — the filtered diff mask is composited as a
 LAYER 5: green bbox outlines — gate's bbox_a + bbox_b in native coords,
     drawn as thin green rectangles on top.
 
-LAYER 6: PNG save — cv2.imwrite to <output_dir>/composite.png
+LAYER 6: PNG save — PIL.Image.save to <output_dir>/composite.png
     (lossless; no optimize=True, no resize, no quality param).
 
 INPUTS:
@@ -75,7 +75,7 @@ CALLED BY:
     - infra.alert_artifacts.prepare_alert_artifacts (stage 2 of pipeline)
 
 CALLS INTO:
-    - numpy, opencv-python (cv2), PIL.
+    - numpy, PIL.
 
 RELATED:
     - infra.gate.GateVerdict — provides frames, bbox_a, bbox_b.
@@ -86,7 +86,6 @@ from __future__ import annotations
 
 import os
 
-import cv2
 import numpy as np
 from PIL import Image
 
@@ -106,9 +105,9 @@ BBOX_THICKNESS_DIVISOR = 600
 # ---------------------------------------------------------------------------
 
 def _pil_to_bgr(pil_image: Image.Image) -> np.ndarray:
-    """Convert PIL.Image (RGB) to numpy BGR array for cv2."""
+    """Convert PIL.Image (RGB) to numpy BGR array for compositing."""
     rgb = np.asarray(pil_image.convert("RGB"))
-    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    return rgb[..., ::-1]  # RGB -> BGR
 
 
 def _native_bbox_to_corners(
@@ -128,7 +127,7 @@ def _native_bbox_to_corners(
     x0 = max(0, min(W - 1, x0))
     y0 = max(0, min(H - 1, y0))
     x1 = max(0, min(W - 1, x1))
-    y1 = max(0, min(H - 1, y1))
+    y1 = max(0, min(W - 1, y1))
     return (x0, y0, x1, y1)
 
 
@@ -171,20 +170,96 @@ def _cumulative_diff_mask_from_frames(
 
     combined = np.zeros((H, W), dtype=np.uint8)
     for i in range(1, len(bgr_frames)):
-        diff = cv2.absdiff(bgr_frames[i], bgr_frames[i - 1])
-        diff_gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-        _, mask = cv2.threshold(diff_gray, threshold, 255, cv2.THRESH_BINARY)
-        combined = cv2.bitwise_or(combined, mask)  # type: ignore[assignment]
+        # BGR absdiff via numpy
+        diff = np.abs(bgr_frames[i].astype(np.int16) - bgr_frames[i - 1].astype(np.int16))
+        # Convert to grayscale (mean of BGR channels)
+        diff_gray = diff.mean(axis=2).astype(np.uint8)
+        # Threshold
+        mask = (diff_gray >= threshold).astype(np.uint8) * 255
+        # OR with combined
+        combined = np.bitwise_or(combined, mask)
+
     if min_blob_area > 0:
-        n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-            combined, connectivity=8,
-        )
+        # Connected components via union-find (pure numpy, matches frame_diff.py).
+        n_labels, labels = _connected_components_with_areas(combined)
         kept = np.zeros_like(combined)
-        for lbl in range(1, n_labels):
-            if int(stats[lbl, cv2.CC_STAT_AREA]) >= min_blob_area:
+        for lbl in range(1, n_labels + 1):
+            area = int(_component_area(labels, lbl))
+            if area >= min_blob_area:
                 kept[labels == lbl] = 255
         combined = kept
     return combined
+
+
+def _connected_components_with_areas(
+    mask: np.ndarray,
+) -> tuple[int, np.ndarray]:
+    """Label connected components in a binary mask (8-connectivity).
+
+    Uses a union-find (disjoint-set) based approach.  Returns
+    ``(num_labels, labels_array)`` where label 0 is background.
+    Also returns areas in a dict {label: area}.
+    """
+    h, w = mask.shape
+    labels = np.zeros((h, w), dtype=np.int32)
+    max_uid = h * w + 1
+    parent = np.arange(max_uid, dtype=np.int32)
+    rank = np.zeros(max_uid, dtype=np.int8)
+
+    def _find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def _union(a: int, b: int) -> None:
+        ra, rb = _find(a), _find(b)
+        if ra == rb:
+            return
+        if rank[ra] < rank[rb]:
+            ra, rb = rb, ra
+        parent[rb] = ra
+        if rank[ra] == rank[rb]:
+            rank[ra] += 1
+
+    uid = 0
+    for y in range(h):
+        for x in range(w):
+            if mask[y, x] == 0:
+                continue
+            uid += 1
+            labels[y, x] = uid
+            neighbors: list[int] = []
+            if x > 0 and labels[y, x - 1] > 0:
+                neighbors.append(int(labels[y, x - 1]))
+            if y > 0 and labels[y - 1, x] > 0:
+                neighbors.append(int(labels[y - 1, x]))
+            if y > 0 and x > 0 and labels[y - 1, x - 1] > 0:
+                neighbors.append(int(labels[y - 1, x - 1]))
+            if y > 0 and x < w - 1 and labels[y - 1, x + 1] > 0:
+                neighbors.append(int(labels[y - 1, x + 1]))
+            for nb in neighbors:
+                _union(uid, nb)
+
+    # Second pass: relabel to consecutive integers
+    root_map: dict[int, int] = {}
+    next_label = 1
+    for y in range(h):
+        for x in range(w):
+            if labels[y, x] > 0:
+                r = _find(int(labels[y, x]))
+                if r not in root_map:
+                    root_map[r] = next_label
+                    next_label += 1
+                labels[y, x] = root_map[r]
+
+    num_labels = next_label - 1
+    return num_labels, labels
+
+
+def _component_area(labels: np.ndarray, label: int) -> int:
+    """Count pixels belonging to a given label."""
+    return int(np.sum(labels == label))
 
 
 # ---------------------------------------------------------------------------
@@ -264,12 +339,7 @@ def render_motion_composite(
         if corners is None:
             continue
         px0, py0, px1, py1 = corners
-        cv2.rectangle(
-            out,
-            (px0, py0), (px1, py1),
-            (0, 255, 0),  # BGR green
-            box_thickness,
-        )
+        _draw_rectangle(out, px0, py0, px1, py1, box_thickness)
 
     # Resolve output path. Telegram Bot API needs a file path.
     if not output_dir:
@@ -278,7 +348,37 @@ def render_motion_composite(
     os.makedirs(output_dir, exist_ok=True)
 
     # Write PNG (lossless; no optimize, no resize, no quality).
-    if not cv2.imwrite(output_path, out):
+    try:
+        rgb_out = out[..., ::-1]  # BGR -> RGB for PIL
+        Image.fromarray(rgb_out, mode="RGB").save(output_path, format="PNG")
+    except OSError:
         return ""
 
     return output_path
+
+
+def _draw_rectangle(
+    arr: np.ndarray,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    thickness: int,
+) -> None:
+    """Draw a filled rectangle outline on a BGR numpy array (in-place).
+
+    Draws the four edges with the given thickness using green color.
+    """
+    green = np.array([0, 255, 0], dtype=arr.dtype)  # BGR green
+    # Top edge
+    for dy in range(thickness):
+        arr[y0 + dy, x0:x1 + 1] = green
+    # Bottom edge
+    for dy in range(thickness):
+        arr[y1 - dy, x0:x1 + 1] = green
+    # Left edge
+    for dx in range(thickness):
+        arr[y0:y1 + 1, x0 + dx] = green
+    # Right edge
+    for dx in range(thickness):
+        arr[y0:y1 + 1, x1 - dx] = green
