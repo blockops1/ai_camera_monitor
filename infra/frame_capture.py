@@ -399,9 +399,13 @@ class PersistentRTSPReader:
         # but the demux() generator blocks in C waiting for a packet —
         # so this signal alone may not free the thread.
         self._stop_event.set()
-        # Join the decode thread. If it's stuck in demux() (the very
-        # zombie state we're trying to recover from), the join will time
-        # out — proceed anyway.
+        # Join the decode thread. If it's stuck in demux() C-land, the
+        # join will time out — we MUST NOT close _container or start a
+        # new thread in that case. PyAV/FFmpeg will SIGSEGV when the
+        # orphaned thread finally returns from libavformat and touches
+        # the freed AVFormatContext (offset 0x20 deref, observed in
+        # *.ips crash dumps). Letting the process die cleanly via
+        # launchd restart is the only safe recovery.
         old_thread = self._thread
         if old_thread is not None and old_thread.is_alive():
             old_thread.join(timeout=10.0)
@@ -409,10 +413,14 @@ class PersistentRTSPReader:
                 log.warning(
                     "scheduled_reconnect_fire: decode thread did not exit "
                     "within 10s (stuck in container.demux()). "
-                    "Proceeding with reconnect anyway."
+                    "Aborting reconnect — leaving container + thread "
+                    "untouched so launchd can restart the process."
                 )
-        # Now safe to close the container — decode thread is gone or
-        # stuck in C-land and we can't reach it from here.
+                # Also stop the watchdog so we don't fire again on this
+                # doomed container; launchd will replace the whole process.
+                self._watchdog_thread = None
+                return
+        # Decode thread is gone — safe to close and respawn.
         if self._container is not None:
             try:
                 self._container.close()
