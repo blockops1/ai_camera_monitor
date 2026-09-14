@@ -1,0 +1,201 @@
+{
+  "prd_id": "PHASE-V2-045-PRD-animal-body-recognition",
+  "title": "Animal re-identification via MegaDescriptor (BVRA): third-stage body-embedding model after VM1+VM2, mirroring face_recognition pattern for people",
+  "author": "jill (operator-directed 2026-09-14, post dog-enrollment + body-scan discussion)",
+  "status": "active",
+  "phase": "v2",
+  "plan_section": "v2 animal pipeline completion: enroll operator animals + third-stage embedding model (MegaDescriptor-L-384) for individual animal re-identification, paralleling how face_recognition runs on people after VM1+VM2",
+  "trigger": "Operator 2026-09-14 (verbatim): 'So here is what I am thinking, we already have a well-established pipeline and I do not want to mess with this. I mean, I do not want to mess with changing YOLO vision model 1 or vision model 2, but just like with people, we are going to do basically a third run through of a model and that will be the facial recognition, then with dogs, we can do a third or I guess a fourth run through of the model on this Bohemian animal thing. So it would basically be another add on to the pipeline on the animal branch. So yeah, create some PRD stories for after we get the detailed description of the animal from the VM2 that we then run it into the Bohemian to see if we can recognize enrolled animals.' Two concrete gaps: (1) v2 listener/pipeline.py Stage 12 only matches vehicles + persons - animal mode falls through with no match and no TG3. (2) No animal embedding model exists, so even if we add an animal branch, we have no way to re-identify THIS dog across many alerts vs. some other similar dog.",
+  "background": "v2 currently has no animal matching at all. v1 (farm-surveillance-refactor) had a feature-weighted ensemble matcher (animal_matcher.py + animal_schema.py) that scored candidates on distinctive_features + coat_primary_color + body_size + body_build + face_details + coat_pattern + estimated_age + sex_signal. That approach worked but required VM2 to emit a stable, multi-field structured output that often varied alert-to-alert (subjective descriptions). The operator wants a third-model approach (analog to face_recognition for people) that produces a deterministic 768-dim embedding from the cropped animal image and matches via cosine similarity. The chosen model is BVRA MegaDescriptor-L-384 (https://huggingface.co/BVRA/MegaDescriptor-L-384), an ArcFace-loss-trained CNN for animal re-identification, loaded via timm.create_model(hf-hub:BVRA/MegaDescriptor-L-384, pretrained=True). MegaDescriptor was trained on 49 species including dogs. Weights are downloaded at runtime into models/ (already stripped by scripts/release/config.yaml rules models/*.onnx + *.pt). Operator has confirmed: do NOT touch VM1 (YOLO) or VM2 (Qwen-VL) - the embedding model is a NEW third-stage that runs after VM2 returns the structured description + better_crop.",
+  "operator_guarantees": {
+    "git_maintained": "Story lands as a real git commit on main BEFORE claiming done. Worker reports 'done' without a commit SHA on main = card failed. Reviewer verifies via git log main --grep <story_id>.",
+    "code_actually_written": "Every AC is a re-runnable shell command with explicit expected output. Reviewer round-2 lens: checkout the work, run every AC verbatim, compare actual to expected. No 'looks right'. No diff-summary-only approval.",
+    "no_residue": "After each story lands, the file MUST contain the new code AND no commented-out old code. No 'if False:' branches keeping the old template. Reviewer round-3 lens: git grep for old patterns (no animal stage 12, no enrollment cli, no embedding storage).",
+    "vm1_vm2_untouched": "git diff main..<story_branch> infra/gate.py infra/vision_analyzer.py infra/quick_classifier.py infra/vehicle_prompt.py infra/person_prompt.py infra/animal_prompt.py must be empty. Reviewer verifies."
+  },
+  "shipping_definition": "(a) Pipeline Stage 12 routes animal mode to animal_matcher (was: fell through silently). (b) infra/animal_embedder.py loads MegaDescriptor-L-384 from local models/ via timm, computes 768-dim embedding for any 384x384+ PIL/np.ndarray input. (c) data/known/animals/known_animals.json + data/known/animals/embeddings.npz store per-animal metadata + per-image 768-dim vectors. (d) scripts/enroll_animal.py CLI: --name --id --images N jpegs saves entry + averages embeddings. (e) animal_matcher.match_animal() returns matched candidate dict + cosine score or matched:False. (f) US-044 match-alert pipeline reads animal matches correctly (depends on US-044c/d). (g) pytest green. (h) All six stories committed on main with US-045 in the message. Working tree clean.",
+  "scope_exclusions": [
+    "Do NOT touch /Users/jill/farm-surveillance-refactor/. Frozen archive (read-only reference).",
+    "Do NOT touch /Users/jill/farm-surveillance-internal/. Frozen archive.",
+    "Do NOT touch /Users/jill/farm-surveillance/ (v1). OFF and stays OFF.",
+    "Do NOT git push to forgejo or GitHub. Operator reviews and pushes.",
+    "Do NOT install new skills. Use existing skill set.",
+    "Do NOT restart the daemon. Operator restarts manually after merge.",
+    "Do NOT touch VM1 (YOLO): infra/gate.py, infra/quick_classifier.py, infra/vision_analyzer.py (vision part), models/yolov8n.onnx. Animal classification already routes correctly to mode=animal.",
+    "Do NOT touch VM2 (Qwen-VL): infra/animal_prompt.py (schema), infra/person_prompt.py, infra/vehicle_prompt.py. US-044a already added better_crop to animal schema; that is sufficient for picking which crop to embed.",
+    "Do NOT touch US-040 (HTTP-500 bbox bounds-check) - that is in flight.",
+    "Do NOT touch the dispatcher or worker-side branch enforcement - separate concern.",
+    "Do NOT bundle feature-ensemble matching (v1 animal_matcher) - operator chose embedding-only path.",
+    "Do NOT add MegaDescriptor model weights to git. They are downloaded at runtime (timm does this automatically into ~/.cache/huggingface/). Confirm scripts/release/config.yaml strip_paths already cover *.pt (it does).",
+    "Do NOT enroll any dog yet without operator approval. Card US-045c builds the infra; the actual enrollment is operator-triggered after we have a good threshold."
+  ],
+  "design_principles": [
+    "Mirror face_recognition pattern: VM1 (YOLO) detects bbox -> VM2 (Qwen-VL) returns structured description + better_crop -> ANIMAL_EMBEDDER (MegaDescriptor) on chosen crop -> cosine similarity vs enrolled embeddings.",
+    "Better crop selection: pipeline Stage 11b (NEW) reads vm2_result.better_crop, picks crop_a or crop_b accordingly. Falls back to crop_a when better_crop is absent or neither. US-044b builds the pick_alert_image_path() helper that US-045 reuses.",
+    "Embedding storage: numpy .npz file with named keys = animal ids, values = stacked 768-dim float32 arrays. Index file = known_animals.json with id + label + species + breed + color + first_enrolled_iso + sample_image_paths.",
+    "Cosine similarity: standard (A @ B) / (norm_A * norm_B). Threshold initial = 0.85, tuned in US-045f against historical alerts.",
+    "animal_matcher.match_animal() returns: {matched: True, candidate: {id, label, species, breed, color}, score: float, gap: float, runner_ups: [{id, score}, ...]} on hit, {matched: False, top_candidates: [{id, label, score}], threshold: float} on miss.",
+    "Test with synthetic embeddings first (numpy random) before plugging MegaDescriptor - keeps unit tests fast + CPU-only.",
+    "Single commit per story on main with US-045 in the message."
+  ],
+  "stories": [
+    {
+      "id": "US-045a",
+      "title": "Wire animal branch into pipeline Stage 12 + Stage 13 (TG#3 stub for animal mode)",
+      "story_type": "code",
+      "scope": "listener/pipeline.py: add 'elif mode == animal:' branch to Stage 12 (match_animal stub returning {matched: False}) + Stage 13 (build_match_message called for animal mode too). animal_matcher/__init__.py + match.py stubs. No real matching yet - just route the branch so animal alerts get a TG#3 placeholder. Update animal_matcher/__init__.py exports.",
+      "assignee": "coder",
+      "depends_on": [],
+      "acceptance": [
+        "AC1: grep -n 'elif mode == \"animal\"' listener/pipeline.py | wc -l -> 1",
+        "AC2: find animal_matcher -name match.py | xargs grep -E '^def match_animal' | wc -l -> 1",
+        "AC3: .venv/bin/python -c 'from animal_matcher.match import match_animal; r=match_animal({}, []); assert r == {\"matched\": False}' -> exit 0",
+        "AC4: .venv/bin/python -c 'from listener.pipeline import process_alert' 2>&1 | grep -v 'No module|ImportError' | wc -l -> 0 (imports clean)",
+        "AC5: .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 -> contains passed (full suite green, N >= 339)",
+        "GIT-1: git status --porcelain | wc -l -> 0",
+        "GIT-2: git log --oneline main -10 | grep -iE us-045a | wc -l -> >= 1"
+      ],
+      "files_modified": [
+        "listener/pipeline.py",
+        "animal_matcher/__init__.py",
+        "animal_matcher/match.py"
+      ],
+      "notes": "animal_matcher/__init__.py mirrors vehicle_matcher/__init__.py. match_animal() signature matches match_vehicle() so the formatter can call either without branching on type. Stub returns {matched: False} until US-045d lands. Stage 13 already handles vehicle + person - extend the condition to animal too. The placeholder TG#3 for an unmatched animal currently says 'unrecognized animal' (no 'vehicle' hardcode)."
+    },
+    {
+      "id": "US-045b",
+      "title": "Add infra/animal_embedder.py - MegaDescriptor-L-384 wrapper (load model, embed a crop -> 768-dim vector)",
+      "story_type": "code",
+      "scope": "infra/animal_embedder.py: load_megadescriptor() (caches into MODELS_DIR/megadescriptor-l-384), embed_image(pil_or_ndarray) -> np.ndarray shape (768,) float32, embed_batch(images) -> np.ndarray shape (N, 768). Use timm.create_model('hf-hub:BVRA/MegaDescriptor-L-384', pretrained=True, num_classes=0). Preprocessing via timm.data.resolve_model_data_config + create_transform. Cache model singleton at module level. Test fixture: synthetic 384x384 random RGB images so unit tests don't require the model weights.",
+      "assignee": "coder",
+      "depends_on": [],
+      "acceptance": [
+        "AC1: test -f infra/animal_embedder.py && wc -l infra/animal_embedder.py | awk '{print $1}' -> >= 50",
+        "AC2: grep -E '^def (load_megadescriptor|embed_image|embed_batch)' infra/animal_embedder.py | wc -l -> 3",
+        "AC3: .venv/bin/python -c 'from infra.animal_embedder import _synthetic_embedding; import numpy as np; v = _synthetic_embedding(); assert v.shape == (768,) and v.dtype == np.float32' -> exit 0",
+        "AC4: .venv/bin/python -m pytest tests/test_animal_embedder.py -v --no-header 2>&1 | tail -5 -> contains passed",
+        "AC5: .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 -> contains passed (full suite green)",
+        "AC6: grep -E 'timm|MegaDescriptor' infra/animal_embedder.py | wc -l -> >= 4",
+        "GIT-1: git status --porcelain | wc -l -> 0",
+        "GIT-2: git log --oneline main -10 | grep -iE us-045b | wc -l -> >= 1"
+      ],
+      "files_modified": [
+        "infra/animal_embedder.py",
+        "tests/test_animal_embedder.py"
+      ],
+      "notes": "Test using _synthetic_embedding() (returns deterministic random 768-dim vector seeded by image hash). Keeps unit tests fast + offline. Integration tests that load real MegaDescriptor weights are opt-in via env var ANIMAL_EMBEDDER_LIVE=1. scripts/release/config.yaml strip_paths already exclude *.pt (line 43) so MegaDescriptor .bin/.safetensors files are auto-stripped on public cuts. Weights downloaded by timm into ~/Library/Caches/huggingface/hub/ - OUTSIDE the repo so no strip needed."
+    },
+    {
+      "id": "US-045c",
+      "title": "Add data/known/animals/known_animals.json schema + embeddings.npz storage + scripts/enroll_animal.py CLI",
+      "story_type": "code",
+      "scope": "data/known/animals/known_animals.json (JSON list of dicts: id, label, species, breed, color, distinctive_features, first_enrolled_iso, sample_image_paths). scripts/enroll_animal.py CLI: argparse (--name, --id, --species, --breed, --color, --distinctive-features, --images N paths), prompt for missing fields, load each image via PIL, call infra.animal_embedder.embed_image(), stack into 768xN matrix, save to data/known/animals/embeddings.npz with key = animal id, append metadata to known_animals.json. Tests: test_enroll_animal.py uses synthetic embeddings to verify the JSON shape + npz storage.",
+      "assignee": "coder",
+      "depends_on": [
+        "US-045b"
+      ],
+      "acceptance": [
+        "AC1: test -d data/known/animals && test -f data/known/animals/known_animals.json",
+        "AC2: .venv/bin/python -c 'import json; data=json.load(open(\"data/known/animals/known_animals.json\")); assert isinstance(data, list)' -> exit 0 (empty list is valid)",
+        "AC3: test -f scripts/enroll_animal.py && chmod +x scripts/enroll_animal.py && grep -E '^def main' scripts/enroll_animal.py | wc -l -> 1",
+        "AC4: .venv/bin/python scripts/enroll_animal.py --help 2>&1 | grep -E 'name|id|images' | wc -l -> >= 3",
+        "AC5: round-trip storage test passes (.npz save+load returns identical array; known_animals.json save+load returns identical dict)",
+        "AC6: .venv/bin/python -m pytest tests/test_enroll_animal.py -v --no-header 2>&1 | tail -5 -> contains passed",
+        "AC7: .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 -> contains passed (full suite green)",
+        "GIT-1: git status --porcelain | wc -l -> 0",
+        "GIT-2: git log --oneline main -10 | grep -iE us-045c | wc -l -> >= 1"
+      ],
+      "files_modified": [
+        "data/known/animals/.gitkeep",
+        "data/known/animals/known_animals.json",
+        "animal_matcher/storage.py",
+        "scripts/enroll_animal.py",
+        "scripts/release/config.yaml",
+        "tests/test_enroll_animal.py"
+      ],
+      "notes": "scripts/release/config.yaml: add strip entry data/known/animals/ (analogous to data/known/people/known_people.json at line 35) since operator animals are PII-adjacent. animal_matcher/storage.py houses load_embeddings/save_embeddings + load_metadata/save_metadata - separate from match.py so storage is unit-testable. Embeddings at data/known/animals/embeddings.npz IS stripped via the directory-level entry (biometric data, matches face embeddings policy at infra/paths.py:129-131)."
+    },
+    {
+      "id": "US-045d",
+      "title": "Add animal_matcher/match.py: cosine similarity + threshold + score_top_n, replace Stage 12 stub",
+      "story_type": "code",
+      "scope": "animal_matcher/match.py: load known_animals (metadata + embeddings npz), embed the chosen crop via infra.animal_embedder.embed_image, compute cosine similarity vs every enrolled animal, sort descending, return MatchDetail on hit (score >= threshold), unmatched on miss. Threshold default = 0.85 (env var ANIMAL_MATCH_THRESHOLD overridable). score_top_n(sig_embedding, all_embeddings, n=3) helper. listener/pipeline.py: in Stage 12 animal branch, call match_animal(vm2_result, better_crop_path) instead of stub. Stage 11b (NEW): pick alert image path from vm2_result.better_crop (mirror US-044b's pick_alert_image_path).",
+      "assignee": "coder",
+      "depends_on": [
+        "US-045a",
+        "US-045b",
+        "US-045c"
+      ],
+      "acceptance": [
+        "AC1: grep -E '^def (match_animal|score_top_n)' animal_matcher/match.py | wc -l -> >= 2",
+        "AC2: score_top_n unit test passes (synthetic 768-dim vectors, identical vectors rank 1.0, opposite rank -1.0)",
+        "AC3: match_animal on missing image returns {matched: False} without raising",
+        "AC4: grep -n 'pick_alert_image_path|better_crop' listener/pipeline.py | wc -l -> >= 2",
+        "AC5: .venv/bin/python -m pytest tests/test_animal_matcher_match.py -v --no-header 2>&1 | tail -5 -> contains passed",
+        "AC6: .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 -> contains passed (full suite green)",
+        "GIT-1: git status --porcelain | wc -l -> 0",
+        "GIT-2: git log --oneline main -10 | grep -iE us-045d | wc -l -> >= 1"
+      ],
+      "files_modified": [
+        "animal_matcher/match.py",
+        "listener/pipeline.py",
+        "tests/test_animal_matcher_match.py"
+      ],
+      "notes": "When known_animals.json is empty, match_animal returns {matched: False, top_candidates: [], threshold: 0.85} - no raise. Stage 11b (image picker) is shared with US-044b - if US-044b lands first, import pick_alert_image_path from wherever US-044b put it; otherwise inline a 3-line helper. Cosine similarity in numpy: (A @ B.T) / (norm_A * norm_B). Score is float in [-1, 1]; threshold default 0.85 (positive similarity only)."
+    },
+    {
+      "id": "US-045e",
+      "title": "Wire animal matches into US-044 match-alert pipeline (TG#3 shows animal label on recognized, animal-aware status on unrecognized)",
+      "story_type": "code",
+      "scope": "telegram_formatter/match_alert.py: when match_result.matched and classification=animal, render 'Recognized: <label>' using match_result.candidate.label (not license_plate). Unrecognized path uses 'unrecognized animal' (not 'unrecognized vehicle'). Score + runner_ups from match_result flow through (already ported by US-044c/d). Test: animal + matched renders label; animal + unmatched renders 'unrecognized animal'.",
+      "assignee": "coder",
+      "depends_on": [
+        "US-044c",
+        "US-044d",
+        "US-045d"
+      ],
+      "acceptance": [
+        "AC1: grep -E 'classification.*animal|unrecognized animal' telegram_formatter/match_alert.py | wc -l -> >= 2",
+        "AC2: animal + matched path renders candidate.label (no license_plate fallback)",
+        "AC3: animal + unmatched path renders 'unrecognized animal' (no 'vehicle' string anywhere)",
+        "AC4: .venv/bin/python -m pytest tests/test_match_alert_animal.py -v --no-header 2>&1 | tail -5 -> contains passed",
+        "AC5: .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 -> contains passed (full suite green)",
+        "GIT-1: git status --porcelain | wc -l -> 0",
+        "GIT-2: git log --oneline main -10 | grep -iE us-045e | wc -l -> >= 1"
+      ],
+      "files_modified": [
+        "telegram_formatter/match_alert.py",
+        "tests/test_match_alert_animal.py"
+      ],
+      "notes": "US-044c/d port v1 match-alert layout. US-045e layers animal-aware wording ON TOP. Don't rewrite US-044c/d body template - just make classification-aware branches handle animal mode. If US-044c/d haven't landed yet, this card waits. Note: build_match_body signature may have been renamed by US-044c - check actual function name in main at the time of dispatch."
+    },
+    {
+      "id": "US-045f",
+      "title": "Tune ANIMAL_MATCH_THRESHOLD against historical alerts (find embedding similarity distribution for known dogs vs other animals)",
+      "story_type": "test+config",
+      "scope": "scripts/tune_animal_threshold.py: scan data/frames/ for historical alerts that VM2 classified as animal, pick the better_crop for each (using existing US-044a schema), embed each via MegaDescriptor-L-384, compute pairwise cosine similarity between all frames of the same camera within a 7-day window, print top 5 most-similar pairs + bottom 5 least-similar pairs. Update config.yaml with threshold default based on observed distribution. Output: docs/animal-threshold-tuning.md with recommended threshold + reasoning.",
+      "assignee": "coder",
+      "depends_on": [
+        "US-045b",
+        "US-045c"
+      ],
+      "acceptance": [
+        "AC1: test -f scripts/tune_animal_threshold.py && wc -l scripts/tune_animal_threshold.py | awk '{print $1}' -> >= 50",
+        "AC2: .venv/bin/python scripts/tune_animal_threshold.py --help 2>&1 | grep -E 'camera|days|enrolled' | wc -l -> >= 3",
+        "AC3: ANIMAL_EMBEDDER_LIVE=0 .venv/bin/python scripts/tune_animal_threshold.py --camera FRONT --days 7 2>&1 | tail -10 -> contains 'threshold recommendation' and 'N frames'",
+        "AC4: test -f docs/animal-threshold-tuning.md && grep -E 'Threshold|Recommendation|0\\.[0-9]{2}' docs/animal-threshold-tuning.md | wc -l -> >= 2",
+        "AC5: .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 -> contains passed (full suite green)",
+        "GIT-1: git status --porcelain | wc -l -> 0",
+        "GIT-2: git log --oneline main -10 | grep -iE us-045f | wc -l -> >= 1"
+      ],
+      "files_modified": [
+        "scripts/tune_animal_threshold.py",
+        "config/animal_match.yaml",
+        "docs/animal-threshold-tuning.md",
+        "tests/test_tune_animal_threshold.py",
+        "scripts/release/config.yaml"
+      ],
+      "notes": "ANIMAL_EMBEDDER_LIVE=0 makes the script use synthetic embeddings so it runs in CI without model weights. LIVE=1 loads MegaDescriptor. Threshold tuning is the empirical answer to 'will this actually distinguish your dog from another similar dog.' Once we have an enrolled animal (post-US-045c operator enrollment), re-run with enrolled embeddings file to compute true positive vs true negative similarity distributions. config/animal_match.yaml is new - single key animal_match.threshold: 0.85 (initial). docs/animal-threshold-tuning.md is internal - strip entry docs/animal-threshold-tuning.md added to scripts/release/config.yaml."
+    }
+  ]
+}
