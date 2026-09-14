@@ -163,6 +163,51 @@ def build_match_alert_body(
     return "\n".join(lines)
 
 
+def build_animal_alert_body(
+    match_result: dict[str, Any],
+    vm2_result: dict[str, Any],
+) -> str:
+    """Build the matched-animal body for a TG#3 match alert.
+
+    Slimmed layout for animal matches (US-045e):
+        Recognized: <label> (species: <species>, breed: <breed>)
+          Cosine: <cosine_score>   (tier1: <tier1_score>)
+          Runner-ups:
+            #1 <id>: cosine=<cosine>, tier1=<tier1>
+
+    Args:
+        match_result: Match result dict (must have 'matched' and 'candidate').
+        vm2_result: VM2 output dict (present for compatibility).
+
+    Returns:
+        Formatted body string for animal matches.
+    """
+    cand = match_result.get("candidate") or {}
+    cosine_score = match_result.get("cosine_score", 0.0)
+    tier1_score = match_result.get("tier1_score", 0.0)
+    runner_ups = match_result.get("runner_ups", [])
+
+    label = cand.get("label", "?")
+    species = cand.get("species", "unknown")
+    breed = cand.get("breed", "unknown")
+
+    lines: list[str] = [
+        f"Recognized: {label} (species: {species}, breed: {breed})",
+    ]
+    lines.append("")
+    lines.append(f"  Cosine: {cosine_score:.4f}   (tier1: {tier1_score:.4f})")
+
+    if runner_ups:
+        lines.append("")
+        lines.append("  Runner-ups:")
+        for i, ru in enumerate(runner_ups[:2], 1):
+            cs = ru.get("cosine_score", 0.0)
+            t1 = ru.get("tier1_score", 0.0)
+            lines.append(f"    #{i} {ru.get('id', '?')}: cosine={cs:.4f}, tier1={t1:.4f}")
+
+    return "\n".join(lines)
+
+
 def build_match_message(
     match_result: dict[str, Any],
     vm2_result: dict[str, Any],
@@ -210,23 +255,27 @@ def build_match_message(
     matched = match_result.get("matched", False)
 
     if matched:
-        # Build the matched vehicle details block.
-        score = match_result.get("score", 0.0)
-        all_scores = match_result.get("all_scores", [])
+        if cls == "animal":
+            # Animal match: render recognized label + scores via build_animal_alert_body.
+            lines.append(build_animal_alert_body(match_result, vm2_result))
+        else:
+            # Vehicle/person match: use the standard body block.
+            score = match_result.get("score", 0.0)
+            all_scores = match_result.get("all_scores", [])
 
-        # Compute gap and runner-ups from all_scores.
-        gap = 0.0
-        runner_ups: list[tuple[str, float]] = []
-        if all_scores:
-            # all_scores is [(id, score), ...]; the first is the best.
-            best_val = all_scores[0][1]
-            if len(all_scores) > 1:
-                gap = best_val - all_scores[1][1]
-                runner_ups = all_scores[1:]
-            else:
-                gap = best_val
+            # Compute gap and runner-ups from all_scores.
+            gap = 0.0
+            runner_ups: list[tuple[str, float]] = []
+            if all_scores:
+                # all_scores is [(id, score), ...]; the first is the best.
+                best_val = all_scores[0][1]
+                if len(all_scores) > 1:
+                    gap = best_val - all_scores[1][1]
+                    runner_ups = all_scores[1:]
+                else:
+                    gap = best_val
 
-        lines.append(build_match_alert_body(match_result, vm2_result, score, gap, runner_ups))
+            lines.append(build_match_alert_body(match_result, vm2_result, score, gap, runner_ups))
     else:
         # No-match: use classification-aware wording + full no-match body.
         status = status_wording_for(cls, False)
