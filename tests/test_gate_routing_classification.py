@@ -442,11 +442,17 @@ class TestGateRunWithFakeClassifier:
             _make_tiny_jpeg(fp, size=(640, 480), color=(128, 128, 128))
             frame_paths.append(str(fp))
 
+        FakeClassifier.verdict = FakeVerdict(
+            top_class="none", top_confidence=0.0, decision="suppress",
+        )
+        classifier = FakeClassifier()
+
         verdict = run(
             frame_paths=frame_paths,
             camera_name="TEST_CAM",
             alert_id="test-alert-004",
             output_dir=str(tmp_path),
+            classifier=classifier,
         )
 
         assert verdict.classification == "none"
