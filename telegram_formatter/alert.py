@@ -39,6 +39,7 @@ from __future__ import annotations
 from typing import Any
 
 from infra.alert_artifacts import AlertArtifacts
+from infra.format_ts import format_local_timestamp
 from infra.gate import GateVerdict
 
 _CAPTION_MAX_LENGTH = 1024  # Telegram caption limit
@@ -84,7 +85,7 @@ def build_alert_message(
     if alert_id:
         lines.append(f"Alert ID: {alert_id}")
     if timestamp:
-        lines.append(f"Timestamp: {timestamp}")
+        lines.append(f"Timestamp: {format_local_timestamp(timestamp)}")
     if notes:
         lines.append(notes)
 
