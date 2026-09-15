@@ -30,6 +30,7 @@ strip_paths:
   - "docs/RECREATION.md"
   - "docs/V2-LIFT-PLAN.md"
   - "docs/V2-LOGIC-FLOW.md"
+  - "docs/animal-threshold-tuning.md"
   - "docs/references/us-024*-fallback-table.md"
   # Operator data (enrolled people, owned vehicles)
   - "data/known/people/known_people.json"

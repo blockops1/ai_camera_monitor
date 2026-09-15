@@ -30,11 +30,14 @@
     "gate_enabled": {"vehicle": true, "person": false, "motion": true}
   },
   "OUTSIDE_FRONT_SOLAR": {
-    "_note": "Outside Front Solar — noisy perimeter",
+    "_note": "Outside Front Solar — noisy perimeter; thresholds tightened 2026-09-15 to suppress 921 false alarms",
     "vehicle": 0.55,
     "person": 0.50,
+    "cat": 0.85,
+    "dog": 0.75,
+    "bird": 0.80,
     "gate_cooldown": {"vehicle": 120, "person": 60, "default": 90},
-    "gate_enabled": {"vehicle": true, "person": false, "motion": true}
+    "gate_enabled": {"vehicle": true, "person": false, "cat": false, "dog": false, "motion": true}
   },
   "OUTSIDE_BACK_SOLAR": {
     "_note": "Outside Back Solar — rear perimeter",
