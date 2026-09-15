@@ -50,9 +50,11 @@ def format_local_timestamp(
     if not utc_iso or not isinstance(utc_iso, str):
         return utc_iso or ""
 
-    tz = ZoneInfo(tz_name) if tz_name else ZoneInfo(_DEFAULT_TZ_NAME)
-
     try:
+        # Resolve the display timezone FIRST (inside the try block so an
+        # invalid IANA name in DISPLAY_TZ falls back gracefully instead of
+        # crashing the daemon on every alert).
+        tz = ZoneInfo(tz_name) if tz_name else ZoneInfo(_DEFAULT_TZ_NAME)
         # Parse ISO-8601 (handles +0000, Z suffix, fractional seconds).
         dt = datetime.fromisoformat(utc_iso)
         # If naive (no tzinfo), assume UTC.

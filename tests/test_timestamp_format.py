@@ -80,6 +80,31 @@ def test_alt_tz_utc():
 
 
 # ---------------------------------------------------------------------------
+# 7. Invalid timezone name falls back to raw input (regression for QA BLOCK)
+# ---------------------------------------------------------------------------
+
+def test_invalid_tz_name_falls_back_gracefully():
+    """A typo in DISPLAY_TZ must NOT crash the daemon — falls back to raw UTC string."""
+    # Realistic operator typo: extra characters in the IANA name
+    result = format_local_timestamp(
+        "2026-09-15T15:10:48.000+0000",
+        tz_name="America/New_Yorxk",  # intentional typo
+    )
+    # Must return the raw input, NOT raise ZoneInfoNotFoundError
+    assert result == "2026-09-15T15:10:48.000+0000"
+
+
+def test_empty_tz_name_falls_back_to_default():
+    """An empty tz_name falls back to the module default (America/New_York)."""
+    result = format_local_timestamp(
+        "2026-09-15T15:10:48.000+0000",
+        tz_name="",
+    )
+    # Empty string is falsy → falls back to default TZ
+    assert result == "2026-09-15 11:10:48 EDT"
+
+
+# ---------------------------------------------------------------------------
 # 6. Integration: build_match_message body contains formatted timestamp
 # ---------------------------------------------------------------------------
 
