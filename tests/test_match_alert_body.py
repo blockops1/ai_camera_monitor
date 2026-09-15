@@ -190,7 +190,7 @@ def test_message_alert_metadata_included():
     caption = result["caption"]
     assert "Alert 3 of 3" in caption
     assert "Alert ID: evt-001" in caption
-    assert "Timestamp: 2026-09-14T10:00:00Z" in caption
+    assert "Timestamp: 2026-09-14 06:00:00 EDT" in caption
 
 
 def test_message_no_alert_metadata():

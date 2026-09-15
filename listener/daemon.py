@@ -90,6 +90,12 @@ log = logging.getLogger("daemon")
 _REPO_ENV_PATH: str = str(Path(__file__).resolve().parent.parent / ".env")
 
 
+# _format_local_timestamp is defined at the end of this module (after the
+# Flask app setup) to avoid a circular-import deadlock:
+#   daemon → pipeline → telegram_formatter.alert → daemon
+# The actual logic lives in infra/format_ts.py.
+
+
 # ---------------------------------------------------------------------------
 # Learned camera name → camera_id cache (LRU 32)
 # ---------------------------------------------------------------------------
@@ -569,3 +575,19 @@ def debug_rtsp():
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------------------
+# _format_local_timestamp — UTC ISO → local display string
+# ---------------------------------------------------------------------------
+# Must be defined here (at module bottom) to avoid a circular-import deadlock:
+#   daemon → pipeline → telegram_formatter.alert → daemon
+# Display modules import directly from infra.format_ts to avoid the cycle.
+def _format_local_timestamp(utc_iso: str) -> str:
+    """Convert a UTC ISO-8601 timestamp to local display string.
+
+    See :py:func:`infra.format_ts.format_local_timestamp` for full docs.
+    """
+    return __import__("infra.format_ts").format_ts.format_local_timestamp(
+        utc_iso, tz_name=os.environ.get("DISPLAY_TZ"),
+    )

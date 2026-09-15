@@ -143,7 +143,7 @@ class TestCaptionWithBbox:
             camera_label="Front Gate",
             alert=_make_alert(timestamp="2026-09-07T12:30:00Z"),
         )
-        assert "2026-09-07T12:30:00Z" in result["caption"]
+        assert "2026-09-07 08:30:00 EDT" in result["caption"]
 
     def test_caption_no_alert_dict_still_works(self):
         """Caption works when alert is None (no id/timestamp lines)."""
@@ -275,12 +275,12 @@ class TestTg2CaptionAlertMetadata:
         caption = result["caption"]
         assert "Alert 2 of 3" in caption
         assert "Alert ID: evt-xyz-789" in caption
-        assert "Timestamp: 2026-09-12T08:00:00Z" in caption
+        assert "Timestamp: 2026-09-12 04:00:00 EDT" in caption
         # Verify order: Camera -> Mode -> Class -> Alert lines
         parts = caption.split("\n")
         idx_alert2 = parts.index("Alert 2 of 3")
         idx_alert_id = parts.index("Alert ID: evt-xyz-789")
-        idx_ts = parts.index("Timestamp: 2026-09-12T08:00:00Z")
+        idx_ts = parts.index("Timestamp: 2026-09-12 04:00:00 EDT")
         assert idx_alert2 < idx_alert_id < idx_ts
         # Camera line comes first
         assert parts[0] == "Camera: Front Gate"
@@ -354,14 +354,14 @@ class TestTg3CaptionAlertMetadata:
         caption = result["caption"]
         assert "Alert 3 of 3" in caption
         assert "Alert ID: evt-ghi-456" in caption
-        assert "Timestamp: 2026-09-12T09:00:00Z" in caption
+        assert "Timestamp: 2026-09-12 05:00:00 EDT" in caption
         # Verify order: Camera -> Match block -> Alert lines
         parts = caption.split("\n")
         idx_camera = parts.index("Camera: Front Gate")
         idx_match = next(i for i, p in enumerate(parts) if "Match" in p and "✅" in p)
         idx_alert3 = parts.index("Alert 3 of 3")
         idx_alert_id = parts.index("Alert ID: evt-ghi-456")
-        idx_ts = parts.index("Timestamp: 2026-09-12T09:00:00Z")
+        idx_ts = parts.index("Timestamp: 2026-09-12 05:00:00 EDT")
         assert idx_camera < idx_match < idx_alert3 < idx_alert_id < idx_ts
 
     def test_tg3_caption_camera_line_is_first(self):

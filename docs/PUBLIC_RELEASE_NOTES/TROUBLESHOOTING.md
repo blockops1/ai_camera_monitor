@@ -58,6 +58,26 @@ Returns per-reader ring size, decoded total, last-frame age, container-open flag
 
 ---
 
+## Telegram alert timestamps are in UTC
+
+**Symptom:** Telegram alerts show timestamps like `Timestamp: 2026-09-15T15:10:48.000+0000`. An operator in EDT reads `15:10` as 3 PM when it is actually 11 AM local.
+
+**Cause:** The camera sends the timestamp in UTC ISO-8601 format. Prior to US-046c, alerts displayed this raw UTC value without conversion.
+
+**Fix:** US-046c (2026-09-15) added local-timezone rendering. The daemon reads `DISPLAY_TZ` from the environment (default `America/New_York`) and converts all alert timestamps to that timezone before displaying. The format is `YYYY-MM-DD HH:MM:SS TZ` (e.g. `2026-09-15 11:10:48 EDT`).
+
+**Configure:** Set `DISPLAY_TZ` in your `.env` file or launchd plist:
+
+```
+DISPLAY_TZ=America/New_York   # Eastern Time (auto-EDT/EST)
+DISPLAY_TZ=America/Los_Angeles  # Pacific Time
+DISPLAY_TZ=UTC                # keep UTC if you prefer
+```
+
+The IANA timezone name is resolved at daemon startup; no restart is needed after a timezone change — just restart the daemon to pick up the new value.
+
+---
+
 ## See also
 
 - [README.md](../../README.md) — main docs

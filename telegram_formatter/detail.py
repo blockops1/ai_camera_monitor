@@ -35,6 +35,8 @@ from pathlib import Path
 from textwrap import wrap
 from typing import Any
 
+from infra.format_ts import format_local_timestamp
+
 _MODES = ("vehicle", "person", "animal")
 
 
@@ -190,7 +192,7 @@ def build_detail_message(
             lines.append(f"Alert ID: {alert_id}")
         timestamp = alert.get("timestamp")
         if timestamp:
-            lines.append(f"Timestamp: {timestamp}")
+            lines.append(f"Timestamp: {format_local_timestamp(timestamp)}")
 
     # Render the vm2_result dict recursively using the v1 renderer.
     body_lines = _render_qwen_dict_lines(vm2_result)

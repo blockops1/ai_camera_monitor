@@ -53,6 +53,7 @@ from typing import Any
 
 import httpx
 
+from infra.format_ts import format_local_timestamp
 from telegram_formatter.dispatcher import _send_message, send_photo
 
 logger = logging.getLogger(__name__)
@@ -297,7 +298,7 @@ def build_match_message(
             lines.append(f"Alert ID: {alert_id}")
         timestamp = alert.get("timestamp")
         if timestamp:
-            lines.append(f"Timestamp: {timestamp}")
+            lines.append(f"Timestamp: {format_local_timestamp(timestamp)}")
 
     features = vm2_result.get("distinctive_features")
     if features:
