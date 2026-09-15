@@ -1,0 +1,76 @@
+{
+  "prd_id": "PHASE-V2-046-PRD-yolo-night-false-alarm-suppression",
+  "title": "Suppress YOLO night false-alarms on OUTSIDE_FRONT_SOLAR via env-var enable + per-camera threshold overrides",
+  "author": "jill (operator-directed 2026-09-15, post alert-quality review of 2026-09-14 night alerts)",
+  "status": "active",
+  "phase": "v2",
+  "plan_section": "V2-046 follow-on to V2-025 (gate classifier). Reuses v1 NIGHT_SUPPRESS primitive (Phase 6B.116 §11.47, infra/quick_classifier.py) which v2 inherited but never enabled.",
+  "trigger": "Operator 2026-09-15: 'I had a bunch of false alarms last night that made it all the way through the way we had addressed that on the version one refactor was to do a tuning to Yolo or do some kind of sensible thing to Yolo, I forget what it was / The cameras haven't been changed, don't mess with those / There was some kind of factor that we had added to Yolo version one that rejected a bunch of stuff.' Alert review on logs/daemon.log (2026-09-13 22:00 → 2026-09-15 06:00) found 921 night alerts on OUTSIDE_FRONT_SOLAR vs 0-3 on other cameras (300-900x spike). 17 alerts with top_class='cat' confidence 0.61-0.69 (default gate threshold cat=0.60 — barely passes), 7 alerts with top_class='person' confidence ~0.55. vision_analyze on alert crop 05079bbc-af35-49cf-a4c5-98e4eeb0f53b confirmed NO actual animal — just a tree branch moving in the wind, motion-diffed in red/white, YOLO hallucinated 'cat' at 64%. v1 refactor's infra/quick_classifier.py contains NIGHT_SUPPRESS logic (Phase 6B.116 §11.47) with env vars MOTION_GATE_NIGHT_SUPPRESS_ENABLED (default 0), MOTION_GATE_NIGHT_CONF_FLOOR (default 0.40), MOTION_GATE_NIGHT_BRIGHTNESS_RATIO (default 1.5), plus 35-class indoor denylist. v2 inherited the same code but the env var is never set AND quick_classifier._apply_night_suppression is not wired into infra/gate.py pipeline.",
+  "background": "Root cause is two-layer: (1) infra/gate.py default THRESHOLDS_BY_CLASS['cat']=0.60 lets 0.61-0.69 false-positive band slip through on any camera; (2) v1's proven night-suppress filter sits dormant because MOTION_GATE_NIGHT_SUPPRESS_ENABLED=0. Both layers are configurable without code changes — NIGHT_SUPPRESS via .env (the established home for runtime feature flags, US-017b 2026-09-08), per-camera thresholds via config/motion_gate_thresholds.json (the established home for tuning, per US-017b + skill local-ai/farm-surveillance-v2 'tuning parameters, not private data' rule). Cameras are OFF-LIMITS per operator — no Reolink web-UI changes; v2-side fixes only.",
+  "operator_guarantees": {
+    "git_maintained": "Story lands as a real git commit on main BEFORE claiming done. Worker reports 'done' without a commit SHA on main = card failed. Reviewer verifies via `git log main --grep <story_id>`.",
+    "code_actually_written": "Every AC is a re-runnable shell command with explicit expected output. Reviewer round-2 lens: checkout the work, run every AC verbatim, compare actual to expected. No 'looks right'. No diff-summary-only approval.",
+    "no_residue": "After the story lands, .env / .env.example / motion_gate_thresholds.json MUST contain the new keys. No commented-out old keys. Reviewer round-3 lens: `grep` for each new key across the three files.",
+    "cameras_off_limits": "Stories MUST NOT touch Reolink web-UI / camera-side configuration. v2-side fixes only.",
+    "plist_not_env": "Per US-017b (2026-09-08) + operator directive 2026-09-15, NIGHT_SUPPRESS env vars belong in .env (gitignored, mode 600) + .env.example (committed, sanitized). NOT in the plist."
+  },
+  "shipping_definition": "(a) .env contains MOTION_GATE_NIGHT_SUPPRESS_ENABLED=1 (real value, gitignored). (b) .env.example documents all three NIGHT_SUPPRESS keys with placeholders + comments. (c) config/motion_gate_thresholds.json OUTSIDE_FRONT_SOLAR section contains cat/dog/bird thresholds bumped to suppress 0.61-0.69 conf band AND gate_enabled flags for cat/dog disabled. (d) git commit on main with US-046 in the message. (e) Working tree clean. (f) No camera-side changes.",
+  "scope_exclusions": [
+    "Do NOT touch /Users/jill/farm-surveillance-refactor/. Frozen archive.",
+    "Do NOT touch /Users/jill/farm-surveillance-internal/. Frozen archive.",
+    "Do NOT touch /Users/jill/farm-surveillance/ (v1). OFF and stays OFF.",
+    "Do NOT git push to forgejo or GitHub. Operator reviews and pushes.",
+    "Do NOT install new skills. Use existing skill set.",
+    "Do NOT touch any Reolink camera web-UI. Cameras OFF-LIMITS.",
+    "Do NOT add NIGHT_SUPPRESS keys to the plist. Belongs in .env per US-017b.",
+    "Do NOT modify infra/quick_classifier.py NIGHT_SUPPRESS code (already correct, inherited from v1).",
+    "Do NOT modify infra/gate.py THRESHOLDS_BY_CLASS defaults (per-camera overrides in JSON handle the surgical fix).",
+    "Do NOT add per-camera NIGHT_* threshold keys (out of scope; only Solution B JSON edits this round).",
+    "Do NOT touch the daemon plist or restart the daemon. Operator restarts manually after merge."
+  ],
+  "design_principles": [
+    "Solution A + C (combined): enable NIGHT_SUPPRESS env flag AND bump OUTSIDE_FRONT_SOLAR per-camera thresholds.",
+    "Tuning parameters go in version-controlled JSON (motion_gate_thresholds.json), runtime feature flags go in .env — both follow the existing home established by US-017b.",
+    "Minimal surface change. Three files: .env, .env.example, config/motion_gate_thresholds.json.",
+    "Per-camera threshold overrides mirror the existing OUTSIDE_FRONT_SOLAR person:0.50 + gate_enabled person:false pattern.",
+    "Single commit on main with US-046 in the message.",
+    "Operator restarts the daemon manually post-merge to pick up the new .env."
+  ],
+  "stories": [
+    {
+      "id": "US-046a",
+      "title": "Enable NIGHT_SUPPRESS via .env + bump OUTSIDE_FRONT_SOLAR per-camera thresholds",
+      "story_type": "config",
+      "scope": ".env (real values, gitignored) + .env.example (sanitized, committed) + config/motion_gate_thresholds.json (per-camera overrides)",
+      "assignee": "coder",
+      "depends_on": [],
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -E '^MOTION_GATE_NIGHT_SUPPRESS_ENABLED=1$' .env | wc -l -> 1 (env file contains the enable flag set to 1)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -cE '^MOTION_GATE_NIGHT_(SUPPRESS_ENABLED|CONF_FLOOR|BRIGHTNESS_RATIO)=' .env -> 3 (all three NIGHT_SUPPRESS keys present)",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && grep -cE 'MOTION_GATE_NIGHT_(SUPPRESS_ENABLED|CONF_FLOOR|BRIGHTNESS_RATIO)' .env.example -> 3 (sanitized template documents all three keys)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import json; d=json.load(open(\"config/motion_gate_thresholds.json\")); s=d[\"OUTSIDE_FRONT_SOLAR\"]; assert s[\"cat\"] >= 0.80 and s[\"dog\"] >= 0.75 and s[\"bird\"] >= 0.80, f\"thresholds not bumped: cat={s.get(\\\"cat\\\")} dog={s.get(\\\"dog\\\")} bird={s.get(\\\"bird\\\")}\"' -> exit 0 (per-camera overrides suppress the 0.61-0.69 false-positive band)",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import json; d=json.load(open(\"config/motion_gate_thresholds.json\")); g=d[\"OUTSIDE_FRONT_SOLAR\"].get(\"gate_enabled\", {}); assert g.get(\"cat\") is False and g.get(\"dog\") is False, f\"gate_enabled flags not set: {g}\"' -> exit 0 (cat/dog alerts disabled on OUTSIDE_FRONT_SOLAR per the existing person pattern)",
+        "AC6: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import json; d=json.load(open(\"config/motion_gate_thresholds.json\")); assert d[\"OUTSIDE_FRONT_SOLAR\"][\"person\"] == 0.50 and d[\"OUTSIDE_FRONT_SOLAR\"][\"gate_enabled\"][\"person\"] is False, \"existing person override preserved\"' -> exit 0 (existing person override untouched)",
+        "AC7: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import json; json.load(open(\"config/motion_gate_thresholds.json\"))' -> exit 0 (JSON is valid)",
+        "AC8: cd /Users/jill/farm-surveillance-v2 && grep -nE 'MOTION_GATE_NIGHT' ~/Library/LaunchAgents/com.farm.surveillance.v2.plist | wc -l -> 0 (NIGHT_SUPPRESS keys NOT in plist per US-017b + operator directive)",
+        "RESIDUE: cd /Users/jill/farm-surveillance-v2 && git status --porcelain | wc -l -> 0 (working tree clean)",
+        "GIT-1: cd /Users/jill/farm-surveillance-v2 && git log --oneline main -10 | grep -iE 'us-046' | wc -l -> >= 1 (commit with story id on main)",
+        "GIT-2: cd /Users/jill/farm-surveillance-v2 && git diff main~1 main --stat | grep -E '\\.env$|motion_gate_thresholds\\.json$' | wc -l -> >= 1 (commit touches the three target files)"
+      ],
+      "files_modified": [
+        ".env",
+        ".env.example",
+        "config/motion_gate_thresholds.json"
+      ],
+      "notes": "Solution A (NIGHT_SUPPRESS env enable) + Solution C (per-camera threshold bumps) combined. The .env file is gitignored and mode 600 — contains real values. .env.example is the committed sanitized template. motion_gate_thresholds.json is the established home for per-camera confidence overrides (already used for OUTSIDE_FRONT_SOLAR person:0.50, gate_enabled person:false). Operator restarts the daemon manually post-merge to pick up the new .env values.",
+      "operator_approval_required": false,
+      "commit_required": true
+    }
+  ],
+  "operator_directives": {
+    "2026-09-15": "no, I want to work on something else / I had a bunch of false alarms last night that made it all the way through / the way we had addressed that on the version one refactor was to do a tuning to Yolo or do some kind of sensible thing to Yolo, I forget what it was / Take a look at what made it all the way through and review the logs and come up with a few different solutions",
+    "2026-09-15-cameras": "The cameras haven't been changed, don't mess with those / There was some kind of factor that we had added to Yolo version one that rejected a bunch of stuff",
+    "2026-09-15-env-location": "i'm not sure the p list is the right place to be doing these things / Wouldn't that be more in the environmental file? / I think you need to review the skill for the farm surveillance to v2 / we already have motion gate thresholds as a json file?",
+    "2026-09-15-priority": "First of all, I don't have any immediate pain, so there's no rush to do anything. So you can add to the PRD, the solution A and C for the yellow fix above. So do that first, and then write stories and get those lined up for the Convon and Specialists to do the work. Then create more PRD stories for moving some of the things from the P list to the environmental variables. And then we can do the Git cleanup later after all the stories are run or at the other appropriate time."
+  }
+}

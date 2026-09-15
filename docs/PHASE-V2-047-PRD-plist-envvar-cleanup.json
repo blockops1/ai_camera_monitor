@@ -1,0 +1,176 @@
+{
+  "prd_id": "PHASE-V2-047-PRD-plist-envvar-cleanup",
+  "title": "Move LLM/listen configuration from launchd plist to .env (canonical source) — operator directive 2026-09-15",
+  "author": "jill (operator-directed 2026-09-15, post YOLO false-alarm PRD review)",
+  "status": "active",
+  "phase": "v2",
+  "plan_section": "V2-047 follow-on to V2-022 (env consolidation) + US-017b (secrets to .env). Operator directive 2026-09-15: 'Almost, but the LLM IP addresses and all the other stuff that are in the P list were supposed to be in the environmental file, they got moved from the environmental file to the P list that were never put there in the first place.'",
+  "trigger": "Current plist (~/Library/LaunchAgents/com.farm.surveillance.v2.plist) contains 5 EnvironmentVariables keys: PATH (required by launchd), GATE_KEEP_DISK_ARTIFACTS (behavior flag), LISTEN_HOST (0.0.0.0), LISTEN_PORT (8090), VISION_LLM_URL (http://127.0.0.1:8080). Operator (2026-09-15) explicitly identified VISION_LLM_URL as something that 'was supposed to be in the environmental file' and 'got moved from the environmental file to the P list that were never put there in the first place.' LISTEN_HOST + LISTEN_PORT are in the same category — network/endpoint config that belongs in env, not in plist. PATH must stay (launchd requires it for binary lookup). GATE_KEEP_DISK_ARTIFACTS is debatable — it's a behavior flag, but it's not an IP/URL so it's lower priority.",
+  "background": "Per US-017b (2026-09-08) secrets were already moved out of the plist into .env (gitignored). Per local-ai/farm-surveillance-v2 skill: 'tuning parameters, not private data' — env vars are tuning parameters, secrets are private data. Both belong in .env / .env.example, not plist. Per listener/daemon.py:_load_home_env (line 480-535): repo-rooted .env is canonical; launchd-injected values take precedence over .env. To make .env authoritative, plist keys MUST be removed (not just added to .env). The current behavior is launchd-wins → so if I only add the key to .env without removing it from plist, the plist value still wins and the move has no effect.",
+  "operator_guarantees": {
+    "git_maintained": "Each story lands as a real git commit on main BEFORE claiming done. Worker reports 'done' without a commit SHA on main = card failed. Reviewer verifies via `git log main --grep <story_id>`.",
+    "code_actually_written": "Every AC is a re-runnable shell command with explicit expected output. Reviewer round-2 lens: checkout the work, run every AC verbatim, compare actual to expected. No 'looks right'. No diff-summary-only approval.",
+    "no_residue": "After each story lands, .env / .env.example MUST contain the new keys, the plist MUST NOT contain them, and the daemon MUST boot correctly. Reviewer round-3 lens: `grep` for each moved key across .env / .env.example / plist; verify daemon starts.",
+    "daemon_reboots_clean": "After each plist edit, `launchctl unload && launchctl load` must succeed and the daemon must bind to the configured LISTEN_PORT without errors in logs/daemon.log. Reviewer verifies via `lsof -i :<port>` or `curl http://localhost:<port>/healthz`.",
+    "camera_creds_file_unaffected": "This PRD does NOT touch camera-creds.env (already gitignored, already separate file). Only the plist EnvironmentVariables block + repo-root .env + .env.example are in scope.",
+    "cameras_off_limits": "Stories MUST NOT touch Reolink web-UI / camera-side configuration. v2-side fixes only.",
+    "plist_minimal_remainder": "After all stories land, the plist's EnvironmentVariables block contains ONLY PATH (required by launchd) and GATE_KEEP_DISK_ARTIFACTS (debatable, see US-047d)."
+  },
+  "shipping_definition": "(a) .env contains VISION_LLM_URL, LISTEN_HOST, LISTEN_PORT with real values. (b) .env.example documents all three keys with placeholders + comments. (c) Plist contains only PATH + GATE_KEEP_DISK_ARTIFACTS in EnvironmentVariables (or also empty, see US-047d). (d) Each story lands as its own commit on main. (e) Daemon boots cleanly after each plist change with `launchctl unload && launchctl load`. (f) No camera-side changes.",
+  "scope_exclusions": [
+    "Do NOT touch /Users/jill/farm-surveillance-refactor/. Frozen archive.",
+    "Do NOT touch /Users/jill/farm-surveillance-internal/. Frozen archive.",
+    "Do NOT touch /Users/jill/farm-surveillance/ (v1). OFF and stays OFF.",
+    "Do NOT git push to forgejo or GitHub. Operator reviews and pushes.",
+    "Do NOT install new skills. Use existing skill set.",
+    "Do NOT touch any Reolink camera web-UI. Cameras OFF-LIMITS.",
+    "Do NOT touch camera-creds.env (already gitignored, already separate file).",
+    "Do NOT touch listener/daemon.py:_load_home_env precedence logic (launchd-wins-by-design, intentional override path).",
+    "Do NOT remove PATH from plist — launchd requires it for binary lookup.",
+    "Do NOT delete the plist file. Operator-driven launchctl unload/load cycle is the migration mechanism.",
+    "Do NOT modify infra/camera_creds.py. Already loads from camera-creds.env correctly.",
+    "Do NOT change gate.py or quick_classifier.py. Out of scope for env cleanup."
+  ],
+  "design_principles": [
+    "One key per story — surgical commits, easy revert.",
+    "Each story independently verifiable via re-running its ACs.",
+    "Plist is the LAUNCH MECHANISM; .env is the CONFIG. PATH must stay in plist (launchd can't see .env). Everything else is config.",
+    "Operator applies the .env edit manually post-merge (gitignored). Worker writes the .env.example edit + verifies locally.",
+    "Operator applies the plist edit manually post-merge (it's a system file). Worker writes the recommended new plist XML in a comment / markdown table, NOT in the actual ~/Library/LaunchAgents path."
+  ],
+  "stories": [
+    {
+      "id": "US-047a",
+      "title": "Move VISION_LLM_URL from plist to .env + .env.example",
+      "story_type": "config",
+      "scope": ".env (real values, gitignored) + .env.example (sanitized, committed)",
+      "assignee": "coder",
+      "depends_on": [],
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -E '^VISION_LLM_URL=http' .env | wc -l -> 1 (.env contains the LLM URL)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -E 'VISION_LLM_URL' .env.example | wc -l -> 1 (.env.example documents the key)",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && plutil -extract EnvironmentVariables.VISION_LLM_URL raw ~/Library/LaunchAgents/com.farm.surveillance.v2.plist 2>&1 | grep -q 'plutil: cannot extract' && echo 'plist cleaned' (plist does NOT contain VISION_LLM_URL)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from dotenv import dotenv_values; print(dotenv_values(\".env\").get(\"VISION_LLM_URL\", \"\"))' | grep -qE '^http' (dotenv parses the value correctly)"
+      ],
+      "files_modified": [
+        ".env",
+        ".env.example"
+      ],
+      "notes": "VISION_LLM_URL=http://127.0.0.1:8080 — the vision LLM llama-server endpoint. Operator-direct followup: remove VISION_LLM_URL key from plist EnvironmentVariables block; launchctl unload && launchctl load to apply.",
+      "operator_approval_required": false,
+      "commit_required": true
+    },
+    {
+      "id": "US-047b",
+      "title": "Move LISTEN_HOST from plist to .env + .env.example",
+      "story_type": "config",
+      "scope": ".env (real values, gitignored) + .env.example (sanitized, committed)",
+      "assignee": "coder",
+      "depends_on": [],
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -E '^LISTEN_HOST=0\\.0\\.0\\.0$' .env | wc -l -> 1",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -E 'LISTEN_HOST' .env.example | wc -l -> 1",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && plutil -extract EnvironmentVariables.LISTEN_HOST raw ~/Library/LaunchAgents/com.farm.surveillance.v2.plist 2>&1 | grep -q 'plutil: cannot extract' && echo 'plist cleaned'",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from dotenv import dotenv_values; assert dotenv_values(\".env\")[\"LISTEN_HOST\"] == \"0.0.0.0\"' -> exit 0"
+      ],
+      "files_modified": [
+        ".env",
+        ".env.example"
+      ],
+      "notes": "LISTEN_HOST=0.0.0.0 — bind address. Operator-direct followup: remove LISTEN_HOST from plist; launchctl reload.",
+      "operator_approval_required": false,
+      "commit_required": true
+    },
+    {
+      "id": "US-047c",
+      "title": "Move LISTEN_PORT from plist to .env + .env.example",
+      "story_type": "config",
+      "scope": ".env (real values, gitignored) + .env.example (sanitized, committed)",
+      "assignee": "coder",
+      "depends_on": [],
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -E '^LISTEN_PORT=8090$' .env | wc -l -> 1",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -E 'LISTEN_PORT' .env.example | wc -l -> 1",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && plutil -extract EnvironmentVariables.LISTEN_PORT raw ~/Library/LaunchAgents/com.farm.surveillance.v2.plist 2>&1 | grep -q 'plutil: cannot extract' && echo 'plist cleaned'",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from dotenv import dotenv_values; assert int(dotenv_values(\".env\")[\"LISTEN_PORT\"]) == 8090' -> exit 0"
+      ],
+      "files_modified": [
+        ".env",
+        ".env.example"
+      ],
+      "notes": "LISTEN_PORT=8090 — Flask daemon port. Operator-direct followup: remove LISTEN_PORT from plist; launchctl reload.",
+      "operator_approval_required": false,
+      "commit_required": true
+    },
+    {
+      "id": "US-047d",
+      "title": "Decide and apply GATE_KEEP_DISK_ARTIFACTS placement (plist vs .env)",
+      "story_type": "decision + config",
+      "scope": ".env.example (documentation update ONLY if moving to .env; PLIST remains unchanged if leaving in plist)",
+      "assignee": "coder",
+      "depends_on": [],
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && plutil -extract EnvironmentVariables.GATE_KEEP_DISK_ARTIFACTS raw ~/Library/LaunchAgents/com.farm.surveillance.v2.plist 2>&1 || echo 'NOT IN PLIST' (the key's location is documented one way or the other)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -E 'GATE_KEEP_DISK_ARTIFACTS' .env .env.example 2>/dev/null | wc -l -> >= 0 (consistent with placement choice)",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && [ -f docs/PHASE-V2-047-DECISION-gate-keep-disk.md ] && wc -l docs/PHASE-V2-047-DECISION-gate-keep-disk.md | awk '{exit ($1 >= 10)}' (decision doc exists, >=10 lines)"
+      ],
+      "files_modified": [
+        ".env (if moved)",
+        ".env.example (if moved)",
+        "docs/PHASE-V2-047-DECISION-gate-keep-disk.md (always)"
+      ],
+      "notes": "GATE_KEEP_DISK_ARTIFACTS=true is a behavior flag, not an endpoint URL. Two valid placements: (a) keep in plist — minimal disruption, current behavior preserved; (b) move to .env — full consistency with the .env-is-canonical principle. Worker investigates current usage in infra/gate.py + telegram_formatter/, drafts a decision doc with recommendation, applies the chosen placement. Operator-direct followup if (b): edit plist; launchctl reload.",
+      "operator_approval_required": true,
+      "commit_required": true,
+      "operator_direct_questions": [
+        "Why was GATE_KEEP_DISK_ARTIFACTS placed in the plist originally (if known)?",
+        "Is this flag ever rotated at runtime (e.g. operator turns disk-keep off briefly for a test)?",
+        "If keeping in plist, why is it different from VISION_LLM_URL/LISTEN_HOST/LISTEN_PORT?"
+      ]
+    },
+    {
+      "id": "US-047e",
+      "title": "Update generate_plist() in listener/daemon.py to omit moved keys",
+      "story_type": "code + docs",
+      "scope": "listener/daemon.py:generate_plist() function — emits the plist XML string",
+      "assignee": "coder",
+      "depends_on": ["US-047a", "US-047b", "US-047c"],
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -nE 'VISION_LLM_URL|LISTEN_HOST|LISTEN_PORT' listener/daemon.py | grep -v '^\\s*#' | grep -v '^\\s*\"' | wc -l -> 0 (the moved keys are NOT hardcoded in generate_plist())",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from listener.daemon import generate_plist; x = generate_plist(); assert \"VISION_LLM_URL\" not in x and \"LISTEN_HOST\" not in x and \"LISTEN_PORT\" not in x' -> exit 0",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from listener.daemon import generate_plist; x = generate_plist(); assert \"PATH\" in x' -> exit 0 (PATH still present — required by launchd)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -m pytest tests/ -k 'daemon or plist or generate_plist' --tb=short 2>&1 | tail -5 (existing plist/daemon tests pass)",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && plutil -lint listener/daemon.py 2>&1 | head (daemon.py still parses — sanity)"
+      ],
+      "files_modified": [
+        "listener/daemon.py"
+      ],
+      "notes": "generate_plist() emits a template plist for new installs. After US-047a-c land, the template must match reality. Worker edits generate_plist() to remove the moved keys from the template (PATH stays — launchd requires it). Worker also updates the surrounding comments + docstring to reference US-047. Existing tests must still pass.",
+      "operator_approval_required": false,
+      "commit_required": true
+    }
+  ],
+  "operator_directives": {
+    "2026-09-15-plist": "Almost, but the LLM IP addresses and all the other stuff that are in the P list were supposed to be in the environmental file, they got moved from the environmental file to the P list that were never put there in the first place.",
+    "2026-09-15-env-location": "i'm not sure the p list is the right place to be doing these things / Wouldn't that be more in the environmental file? / I think you need to review the skill for the farm surveillance to v2 / we already have motion gate thresholds as a json file?",
+    "2026-09-15-priority": "First of all, I don't have any immediate pain, so there's no rush to do anything. So you can add to the PRD, the solution A and C for the yellow fix above. So do that first, and then write stories and get those lined up for the Convon and Specialists to do the work. Then create more PRD stories for moving some of the things from the P list to the environmental variables. And then we can do the Git cleanup later after all the stories are run or at the other appropriate time."
+  },
+  "execution_order": [
+    "US-047a (move VISION_LLM_URL)",
+    "US-047b (move LISTEN_HOST)",
+    "US-047c (move LISTEN_PORT)",
+    "US-047d (decide + apply GATE_KEEP_DISK_ARTIFACTS placement — operator approval required)",
+    "US-047e (update generate_plist() template to match reality)"
+  ],
+  "post_prd_followups": {
+    "operator_direct_steps": [
+      "After US-047a lands: remove VISION_LLM_URL from ~/Library/LaunchAgents/com.farm.surveillance.v2.plist, then `launchctl unload ~/Library/LaunchAgents/com.farm.surveillance.v2.plist && launchctl load ~/Library/LaunchAgents/com.farm.surveillance.v2.plist`.",
+      "After US-047b lands: remove LISTEN_HOST from plist + launchctl reload.",
+      "After US-047c lands: remove LISTEN_PORT from plist + launchctl reload.",
+      "After US-047d lands (if move chosen): remove GATE_KEEP_DISK_ARTIFACTS from plist + launchctl reload.",
+      "Verify after each reload: `curl -sS http://127.0.0.1:8090/healthz` returns 200 (or similar) and `tail -50 logs/daemon.log` shows no errors.",
+      "After all stories land: git push (operator reviews and pushes — never auto-push)."
+    ],
+    "git_cleanup_pending": "Operator's directive 2026-09-15: 'we can do the Git cleanup later after all the stories are run or at the other appropriate time.' Pending work: (1) .mailmap ride-along commit `0154f78` on local main not yet pushed; (2) git stash@{0} preserved; (3) 9+ worktrees on disk, 8 V2-038 leftovers un-reaped; (4) dirty files on main from US-045f scratch (animal_matcher/config.py, scripts/tune_animal_threshold.py, tests/test_tune_animal_threshold.py, docs/animal-threshold-tuning.md, scripts/release/config.yaml). Defer until US-047 series lands."
+  }
+}
