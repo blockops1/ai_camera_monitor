@@ -285,55 +285,36 @@ class TestMaxReconnectAttemptsCap:
 import infra.frame_capture as _frame_capture_module
 
 
-class TestWatchdogAbortsOnZombieDecodeThread:
-    """US-017d follow-up: when the decode thread is stuck in
-    container.demux() C-land and the join times out, the watchdog MUST
-    NOT close _container or start a new thread. Doing so tears down
-    the AVFormatContext while the orphaned thread is still blocked in
-    libavformat, causing SIGSEGV when the orphan finally returns
-    (offset 0x20 deref, observed in *.ips crash dumps).
+class TestWatchdogProceedAnywayOnStuckDecodeThread:
+    """v1-refactor evidence (2026-09-14): 456 fire:completed, 0 join-timeouts,
+    0 segfaults — proceed anyway is the real behavior. Replaces old abort-and-die (US-017d)."""
 
-    Recovery path: abort the reconnect, leave container + thread
-    untouched, and let launchd restart the whole process.
-    """
-
-    def test_watchdog_aborts_when_decode_thread_is_stuck(self, monkeypatch):
+    def test_watchdog_proceeds_anyway_when_decode_thread_is_stuck(self, monkeypatch):
         """When the decode thread is alive after join() times out, the
-        watchdog must:
-          1. NOT call _container.close()
-          2. NOT start a fresh decode thread
-          3. Clear _watchdog_thread so it doesn't fire again
+        watchdog proceeds anyway:
+          1. Close the container
+          2. Spawn a fresh decode thread
+          3. _watchdog_thread is NOT cleared
         """
-        # Short cadence so we can drive the watchdog.
         cadence = 0.05
         reader = PersistentRTSPReader(
             "rtsp://test@example.com/stream",
             scheduled_reconnect_seconds=cadence,
         )
 
-        # Sentinel container — close() must NOT be called on this.
         sentinel_container = MagicMock(name="zombie_container")
+        original_watchdog_thread = MagicMock(spec=threading.Thread)
 
-        # A Thread that pretends to be alive forever (join() always
-        # times out). This simulates a decode thread stuck in
-        # libavformat C-land.
         stuck_thread = MagicMock(spec=threading.Thread)
-        stuck_thread.is_alive.return_value = True  # always alive
-        # join() is a no-op — we're already past timeout.
+        stuck_thread.is_alive.return_value = True
 
-        # Wire up the reader's state to look like a stuck decode
-        # iteration.
         reader._container = sentinel_container
         reader._thread = stuck_thread
-        reader._watchdog_thread = MagicMock(spec=threading.Thread)
+        reader._watchdog_thread = original_watchdog_thread
 
-        # Patch out _sleep_until_stop_or_watchdog so the watchdog
-        # thread returns quickly (we just want to invoke the fire).
         with patch.object(_frame_capture_module,
                           "_sleep_until_stop_or_watchdog",
                           return_value=None):
-            # Patch Thread constructor so the watchdog itself doesn't
-            # try to spawn a real daemon thread.
             original_thread = threading.Thread
             with patch(
                 "infra.frame_capture.threading.Thread",
@@ -343,29 +324,29 @@ class TestWatchdogAbortsOnZombieDecodeThread:
             ):
                 reader._scheduled_reconnect_fire()
 
-        # 1. container.close() must NOT have been called.
-        assert not sentinel_container.close.called, (
-            "watchdog called _container.close() while decode thread "
-            "was still alive — this is the SIGSEGV trigger."
+        # 1. container.close() IS called (proceed anyway).
+        assert sentinel_container.close.called, (
+            "watchdog must close container when decode thread is stuck"
         )
 
-        # 2. _thread must NOT have been replaced with a new live thread.
-        # _thread is still the stuck_thread reference (not overwritten).
-        assert reader._thread is stuck_thread, (
-            "watchdog replaced stuck decode thread with a fresh one — "
-            "two threads now racing on the same AVFormatContext."
+        # 2. _thread is replaced with a fresh Thread.
+        assert reader._thread is not stuck_thread, (
+            "watchdog must spawn a fresh decode thread"
         )
 
-        # 3. _watchdog_thread must be cleared so the loop doesn't
-        # fire again on this doomed container.
-        assert reader._watchdog_thread is None, (
-            "watchdog did not clear _watchdog_thread after abort — "
-            "it would fire again and trigger another SIGSEGV."
+        # 3. reconnects_total advanced.
+        assert reader.reconnects_total >= 1, (
+            f"reconnects_total should advance, got {reader.reconnects_total}"
         )
 
-    def test_watchdog_aborts_logs_warning(self, monkeypatch, caplog):
-        """The abort path must log a warning explaining why we didn't
-        proceed — so operators see the recovery reasoning in the logs.
+        # 4. _watchdog_thread is NOT cleared (proceed-anyway vs abort).
+        assert reader._watchdog_thread is original_watchdog_thread, (
+            "watchdog must NOT clear _watchdog_thread on proceed-anyway"
+        )
+
+    def test_watchdog_logs_proceed_anyway_warning(self, monkeypatch, caplog):
+        """The proceed path must log a warning explaining the
+        join timeout — so operators see what happened in the logs.
         """
         cadence = 0.05
         reader = PersistentRTSPReader(
@@ -394,8 +375,8 @@ class TestWatchdogAbortsOnZombieDecodeThread:
 
         warning_msgs = [r.message for r in caplog.records
                         if r.levelno == logging.WARNING]
-        assert any("Aborting reconnect" in m for m in warning_msgs), (
-            f"Expected abort warning, got: {warning_msgs}"
+        assert any("Proceeding with reconnect anyway" in m for m in warning_msgs), (
+            f"Expected proceed warning, got: {warning_msgs}"
         )
 
     def test_watchdog_normal_path_still_works(self, monkeypatch):
