@@ -90,9 +90,9 @@ def _render_qwen_dict_lines(
             continue
 
         if isinstance(value, list):
+
             def _short_scalar(x: Any) -> bool:
-                return (not isinstance(x, (dict, list))
-                        and len(_format_scalar(x)) < 30)
+                return not isinstance(x, (dict, list)) and len(_format_scalar(x)) < 30
 
             if all(_short_scalar(x) for x in value) and len(value) <= 4:
                 rendered = ", ".join(_format_scalar(x) for x in value)
@@ -101,9 +101,12 @@ def _render_qwen_dict_lines(
                 lines.append(f"{pad}{key}:")
                 for item in value:
                     if isinstance(item, dict):
-                        lines.extend(_render_qwen_dict_lines(
-                            item, indent=indent + 3,
-                        ))
+                        lines.extend(
+                            _render_qwen_dict_lines(
+                                item,
+                                indent=indent + 3,
+                            )
+                        )
                     elif _is_empty(item):
                         continue
                     else:
@@ -114,10 +117,13 @@ def _render_qwen_dict_lines(
         formatted = _format_scalar(value)
         wrap_width = max(40, 80 - len(pad))
         if len(formatted) > wrap_width:
-            wrapped = wrap(formatted, width=wrap_width,
-                           subsequent_indent=child_pad,
-                           break_long_words=False,
-                           break_on_hyphens=False)
+            wrapped = wrap(
+                formatted,
+                width=wrap_width,
+                subsequent_indent=child_pad,
+                break_long_words=False,
+                break_on_hyphens=False,
+            )
             lines.append(f"{pad}{key}:")
             for chunk in wrapped:
                 lines.append(f"{child_pad}{chunk}")
@@ -175,20 +181,32 @@ def build_detail_message(
     if mode not in _MODES:
         raise ValueError(f"mode must be one of {_MODES}, got {mode!r}")
 
-    # Fail-fast: require class_confirmed or class; raise when neither exists.
-    if "class_confirmed" in vm2_result:
-        cls = vm2_result["class_confirmed"]
-    elif "class" in vm2_result:
-        cls = vm2_result["class"]
+    # Dispatch on mode for mode-specific VM2 outputs.
+    # VM2 returns mode-specific keys (not class_confirmed/class):
+    #   vehicle -> {color, body_style_hint, make, model, ...}
+    #   person  -> {better_crop, attributes, signature, ...}
+    #   animal  -> {species, breed, size, ...}
+    #   unsure  -> {class_confirmed: False, class: "unsure", reason: "..."}
+    if mode == "unsure":
+        cls = "unsure"
+        cls_line = "Class: unsure"
+    elif mode == "vehicle":
+        cls = vm2_result.get("make") or vm2_result.get("color") or "vehicle"
+        cls_line = f"Class confirmed: {cls}"
+    elif mode == "person":
+        attrs = vm2_result.get("attributes") or {}
+        cls = attrs.get("clothing_upper") or "person"
+        cls_line = f"Class confirmed: {cls}"
+    elif mode == "animal":
+        cls = vm2_result.get("species") or "animal"
+        cls_line = f"Class confirmed: {cls}"
     else:
-        raise ValueError(
-            f"vm2_result missing 'class_confirmed' and 'class' keys: {vm2_result!r}"
-        )
+        raise ValueError(f"mode must be one of {_MODES + ('unsure',)}, got {mode!r}")
 
     lines: list[str] = [
         f"Camera: {camera_label}",
         f"Mode: {mode}",
-        f"Class confirmed: {cls}",
+        cls_line,
     ]
 
     # Alert metadata (mirrors TG#1 caption layout).
