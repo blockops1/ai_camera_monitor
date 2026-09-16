@@ -71,8 +71,6 @@ RECONNECT_MAX_ATTEMPTS_DEFAULT = 10
 # exceptions surfaced). Defense in depth — the existing _reconnect_loop
 # handles failure-driven recoveries; the watchdog handles the "stuck
 # without raising" failure mode.
-SCHEDULED_RECONNECT_DEFAULT = 3600.0  # 1 hour
-_SCHEDULED_RECONNECT_ENV = "FARMSV_RTSP_RECONNECT_SECONDS"
 _MAX_RECONNECT_ATTEMPTS_ENV = "FARMSV_RTSP_MAX_RETRIES"
 
 # Sentinel: signals that no explicit arg was passed (caller wants env/default).
@@ -82,22 +80,6 @@ _MAX_RECONNECT_ATTEMPTS_ENV = "FARMSV_RTSP_MAX_RETRIES"
 _UNSET = object()
 
 
-def _resolve_scheduled_reconnect_seconds(arg_value: float | object = _UNSET) -> float:
-    """Resolve the scheduled-reconnect cadence. Precedence:
-    1. Explicit constructor arg (if not _UNSET)
-    2. Env var FARMSV_RTSP_RECONNECT_SECONDS (if set + non-empty)
-    3. SCHEDULED_RECONNECT_DEFAULT (3600s)
-
-    Returns a float (seconds). Raises ValueError if env var is set
-    but not a valid float — same shape as the existing ring-size
-    resolver pattern.
-    """
-    if arg_value is not _UNSET:
-        return float(arg_value)
-    env_val = os.environ.get(_SCHEDULED_RECONNECT_ENV)
-    if env_val:
-        return float(env_val)
-    return SCHEDULED_RECONNECT_DEFAULT
 
 
 def _resolve_max_reconnect_attempts(arg_value: int | object = _UNSET) -> int:
@@ -157,7 +139,6 @@ class PersistentRTSPReader:
         rtsp_url: str,
         ring_size: int = RING_SIZE_DEFAULT,
         ffmpeg_flags: dict | None = None,
-        scheduled_reconnect_seconds: float = _UNSET,  # type: ignore[assignment]
         max_reconnect_attempts: int = _UNSET,  # type: ignore[assignment]
     ) -> None:
         self._rtsp_url = rtsp_url
@@ -170,9 +151,7 @@ class PersistentRTSPReader:
             "fflags": "+genpts",
             "buffer_size": "20000000",
         }
-        self._scheduled_reconnect_seconds = _resolve_scheduled_reconnect_seconds(
-            scheduled_reconnect_seconds  # type: ignore[arg-type]
-        )
+        self._scheduled_reconnect_seconds = 3600.0  # 1 hour — hardcoded per US-049a
         self._max_reconnect_attempts = _resolve_max_reconnect_attempts(
             max_reconnect_attempts  # type: ignore[arg-type]
         )
@@ -658,7 +637,7 @@ class CameraCaptureRegistry:
             # Without this, get_recent_frames("OUTSIDE_FRONT_SOLAR") misses the
             # boot reader keyed by friendly name and the lazy get() fallback
             # would create a second reader under the prefix key.
-            registry_key = cam_info["prefix"] if "prefix" in cam_info else camera_id
+            registry_key = cam_info.get("prefix", camera_id)
             t = threading.Thread(
                 target=cls._boot_one,
                 args=(registry_key, rtsp_url),
