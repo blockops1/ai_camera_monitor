@@ -64,14 +64,16 @@ RECONNECT_BACKOFF_MULT = 2.0
 # logs and (worse) potentially blocking other code paths.
 RECONNECT_MAX_ATTEMPTS_DEFAULT = 10
 
-# Proactive watchdog cadence (Phase 6B.80 / PLAN §11.13). The v2 watchdog
-# closes + respawns the decode thread every `scheduled_reconnect_seconds`
-# so PyAV's container.demux() can't wedge silently in C-land (observed
-# on Reolink CAM5 after 41h uptime: frames_decoded_total frozen, zero
-# exceptions surfaced). Defense in depth — the existing _reconnect_loop
-# handles failure-driven recoveries; the watchdog handles the "stuck
-# without raising" failure mode.
+# US-049c: in-thread periodic teardown cadence. The _decode_iteration loop
+# closes + reopens the RTSP container every TEARDOWN_INTERVAL_SECONDS
+# so PyAV's C demux() can't wedge silently (observed on Reolink CAM5
+# after 41h uptime: frames_decoded_total frozen, zero exceptions).
 _MAX_RECONNECT_ATTEMPTS_ENV = "FARMSV_RTSP_MAX_RETRIES"
+
+# US-049c: in-thread periodic teardown cadence. After every 3600 seconds
+# the decode thread closes and re-opens the RTSP container to prevent
+# PyAV's C demux() from wedging silently (go2rtc / Frigate pattern).
+TEARDOWN_INTERVAL_SECONDS = 3600.0
 
 # Sentinel: signals that no explicit arg was passed (caller wants env/default).
 # Replaces `float | None` / `int | None` in resolver signatures — the None
@@ -164,6 +166,8 @@ class PersistentRTSPReader:
         self._healthy = False
         self.frames_decoded_total = 0
         self.reconnects_total = 0
+        self._teardowns_total = 0
+        self._last_teardown_monotonic: float | None = None
 
     @property
     def is_running(self) -> bool:
@@ -185,6 +189,12 @@ class PersistentRTSPReader:
             ),
             "consecutive_errors": self._consecutive_errors,
             "reconnects_total": self.reconnects_total,
+            "teardowns_total": self._teardowns_total,
+            "seconds_since_teardown": (
+                (time.monotonic() - self._last_teardown_monotonic)
+                if self._last_teardown_monotonic is not None
+                else None
+            ),
             "container_open": self._container is not None,
             "is_running": self.is_running,
         }
@@ -204,6 +214,7 @@ class PersistentRTSPReader:
             return
         self._stop_event.clear()
         self._start_time = time.monotonic()
+        self._last_teardown_monotonic = time.monotonic()
         self._thread = threading.Thread(
             target=self._run_loop,
             name=f"RTSP[{self._rtsp_url.split('@')[-1]}]",
@@ -211,10 +222,8 @@ class PersistentRTSPReader:
         )
         self._thread.start()
         log.info(
-            "PersistentRTSPReader started for %s "
-            "(scheduled_reconnect_seconds=%.0f)",
+            "PersistentRTSPReader started for %s",
             self._rtsp_url.split("@")[-1],
-            self._scheduled_reconnect_seconds,
         )
 
     def stop(self, timeout: float = 5.0) -> None:
@@ -410,12 +419,33 @@ class PersistentRTSPReader:
                 self.reconnects_total += 1
 
     def _decode_iteration(self) -> None:
-        container = av.open(self._rtsp_url, options=self._ffmpeg_flags)
-        self._container = container
-        stream = container.streams.video[0]
+        # US-049c: periodic in-thread teardown (Frigate/go2rtc pattern).
+        # Closes + reopens the av container every TEARDOWN_INTERVAL_SECONDS
+        # so PyAV's demux can't wedge silently in C-land.
+        if (
+            self._last_teardown_monotonic is not None
+            and (
+                time.monotonic() - self._last_teardown_monotonic
+            )
+            >= TEARDOWN_INTERVAL_SECONDS
+        ):
+            log.info("in_thread_teardown: starting")
+            if self._container is not None:
+                try:
+                    self._container.close()
+                except Exception:
+                    log.exception("in_thread_teardown: container.close() failed")
+            self._container = av.open(self._rtsp_url, options=self._ffmpeg_flags)
+            self._last_teardown_monotonic = time.monotonic()
+            self._teardowns_total += 1
+            log.info("in_thread_teardown: completed")
+        # Normal connect (or post-teardown reuse of self._container).
+        if self._container is None:
+            self._container = av.open(self._rtsp_url, options=self._ffmpeg_flags)
+        stream = self._container.streams.video[0]
         self._consecutive_errors = 0
         self._healthy = True
-        for packet in container.demux(stream):
+        for packet in self._container.demux(stream):
             if self._stop_event.is_set() or packet.dts is None:
                 continue
             for frame in packet.decode():
@@ -434,7 +464,7 @@ class PersistentRTSPReader:
                 self.frames_decoded_total += 1
                 self._last_frame_time = time.monotonic()
         try:
-            container.close()
+            self._container.close()
         except Exception:
             log.exception("_decode_iteration: container.close() failed")
             raise
