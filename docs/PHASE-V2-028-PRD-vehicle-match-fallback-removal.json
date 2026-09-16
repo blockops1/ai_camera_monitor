@@ -34,9 +34,15 @@
         "Single commit: 'detail.py:54 fail-fast on missing class key (US-028a)'.",
         "pytest tests/ --ignore=tests/test_home_env.py still 150/150 (or higher) green."
       ],
-      "files_modified": ["telegram_formatter/detail.py"],
-      "files_added": ["tests/test_detail_fallback.py"],
-      "depends_on": []
+      "files_modified": [
+        "telegram_formatter/detail.py"
+      ],
+      "files_added": [
+        "tests/test_detail_fallback.py"
+      ],
+      "depends_on": [],
+      "status": "done",
+      "completed_at": "2026-09-15"
     },
     {
       "id": "US-028b",
@@ -51,14 +57,23 @@
         "Single commit: 'match_alert.py:45 fail-fast on missing matched key (US-028b)'.",
         "pytest tests/ --ignore=tests/test_home_env.py still 150/150 (or higher) green."
       ],
-      "files_modified": ["telegram_formatter/match_alert.py"],
-      "files_added": ["tests/test_match_alert_fallback.py"],
-      "depends_on": []
+      "files_modified": [
+        "telegram_formatter/match_alert.py"
+      ],
+      "files_added": [
+        "tests/test_match_alert_fallback.py"
+      ],
+      "depends_on": [],
+      "status": "done",
+      "completed_at": "2026-09-15"
     }
   ],
   "depends_on_story_index": {
     "US-028a": [],
     "US-028b": []
   },
-  "dispatch_order": ["US-028a", "US-028b"]
+  "dispatch_order": [
+    "US-028a",
+    "US-028b"
+  ]
 }

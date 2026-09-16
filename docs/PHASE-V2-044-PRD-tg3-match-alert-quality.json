@@ -55,7 +55,9 @@
       ],
       "notes": "Person schema already has better_crop at infra/person_prompt.py:64 with required at line 198. Mirror that pattern. Prompt text should ask VM2 to choose crop_a / crop_b / neither based on which crop shows the subject clearer (or neither if both crops are equally clear or both crops lack the subject). additionalProperties: False already enforced on these schemas, so adding the field is non-breaking for existing responses that may omit it ONLY if we make it optional — but per the operator's 'must commit to a choice' framing, make it required so Qwen cannot skip.",
       "operator_approval_required": false,
-      "commit_required": true
+      "commit_required": true,
+      "status": "done",
+      "completed_at": "2026-09-15"
     },
     {
       "id": "US-044b",
@@ -81,7 +83,9 @@
       ],
       "notes": "Extract pure helper pick_alert_image_path(vm2_result, crop_a, crop_b) -> path. Behavior: better_crop=='crop_a' -> crop_a; 'crop_b' -> crop_b; 'neither' or missing -> crop_a (best-effort fallback). The match_alert caller passes crop_a + crop_b paths from the alert artifacts dir. send_photo wrapped in try/except so a bad crop path does not block the text body.",
       "operator_approval_required": false,
-      "commit_required": true
+      "commit_required": true,
+      "status": "done",
+      "completed_at": "2026-09-15"
     },
     {
       "id": "US-044c",
@@ -105,7 +109,9 @@
       ],
       "notes": "v1 build_match_telegram_body at farm-surveillance-refactor/telegram_formatter/match_telegram.py:102 is the reference. Slimmed layout per Phase 6B.121: Matched: <label>; primary fields block (ID/Owner/Color/Make-Model/Body); Confidence: <score> (gap: <gap>); Runner-ups: #1 <kv>: <score> / #2 <kv>: <score>; captured_at footer. Score formatting: if score is between 0 and 1, show as 0.85; else show as 8.5 (v2's MATCH_MIN_SCORE=3.0 implies internal scoring is on a higher scale). match_vehicle currently returns just the matched kv; expose score + all_scores list as a sibling field so formatter can render runner-ups without re-running the scorer.",
       "operator_approval_required": false,
-      "commit_required": true
+      "commit_required": true,
+      "status": "done",
+      "completed_at": "2026-09-15"
     },
     {
       "id": "US-044d",
@@ -135,7 +141,9 @@
       ],
       "notes": "v1 build_no_match_telegram_body at farm-surveillance-refactor/telegram_formatter/no_match_telegram.py:78 is the reference. score_top_n returns a list of (kv_id, score) tuples sorted desc. status_wording_for is a pure helper that takes (classification, matched) -> 'recognized vehicle' / 'recognized person' / 'unrecognized animal' etc. pipeline.py needs to call score_top_n() and pass top_candidates + thresholds to the no-match builder when match is rejected. This card directly addresses the c3762af1 alert that surfaced the original complaint (person classified but TG#3 said 'unrecognized vehicle').",
       "operator_approval_required": false,
-      "commit_required": true
+      "commit_required": true,
+      "status": "done",
+      "completed_at": "2026-09-15"
     }
   ],
   "operator_directives": {
