@@ -87,8 +87,8 @@ class TestDetailClass:
     """Tests for detail_class()."""
 
     def test_detail_class_dispatch_keys_match_mode_names(self):
-        """DISPATCH keys are exactly 'vehicle', 'person', 'animal'."""
-        assert sorted(DISPATCH.keys()) == ["animal", "person", "vehicle"]
+        """DISPATCH keys include the 3 vm2 modes plus 'unsure' for no-op handling."""
+        assert sorted(DISPATCH.keys()) == ["animal", "person", "unsure", "vehicle"]
 
     def test_detail_class_raises_on_unknown_mode(self, sample_frames):
         """detail_class raises VisionAnalyzerError on an unknown mode."""
