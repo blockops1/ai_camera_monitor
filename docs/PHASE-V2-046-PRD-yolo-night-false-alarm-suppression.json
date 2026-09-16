@@ -64,7 +64,9 @@
       ],
       "notes": "Solution A (NIGHT_SUPPRESS env enable) + Solution C (per-camera threshold bumps) combined. The .env file is gitignored and mode 600 — contains real values. .env.example is the committed sanitized template. motion_gate_thresholds.json is the established home for per-camera confidence overrides (already used for OUTSIDE_FRONT_SOLAR person:0.50, gate_enabled person:false). Operator restarts the daemon manually post-merge to pick up the new .env values.",
       "operator_approval_required": false,
-      "commit_required": true
+      "commit_required": true,
+      "status": "done",
+      "completed_at": "2026-09-15"
     }
   ],
   "operator_directives": {

@@ -58,7 +58,9 @@
       ],
       "notes": "VISION_LLM_URL=http://127.0.0.1:8080 — the vision LLM llama-server endpoint. Operator-direct followup: remove VISION_LLM_URL key from plist EnvironmentVariables block; launchctl unload && launchctl load to apply.",
       "operator_approval_required": false,
-      "commit_required": true
+      "commit_required": true,
+      "status": "done",
+      "completed_at": "2026-09-15"
     },
     {
       "id": "US-047b",
@@ -79,7 +81,9 @@
       ],
       "notes": "LISTEN_HOST=0.0.0.0 — bind address. Operator-direct followup: remove LISTEN_HOST from plist; launchctl reload.",
       "operator_approval_required": false,
-      "commit_required": true
+      "commit_required": true,
+      "status": "done",
+      "completed_at": "2026-09-15"
     },
     {
       "id": "US-047c",
@@ -100,7 +104,9 @@
       ],
       "notes": "LISTEN_PORT=8090 — Flask daemon port. Operator-direct followup: remove LISTEN_PORT from plist; launchctl reload.",
       "operator_approval_required": false,
-      "commit_required": true
+      "commit_required": true,
+      "status": "done",
+      "completed_at": "2026-09-15"
     },
     {
       "id": "US-047d",
@@ -134,7 +140,11 @@
       "story_type": "code + docs",
       "scope": "listener/daemon.py:generate_plist() function — emits the plist XML string",
       "assignee": "coder",
-      "depends_on": ["US-047a", "US-047b", "US-047c"],
+      "depends_on": [
+        "US-047a",
+        "US-047b",
+        "US-047c"
+      ],
       "acceptance": [
         "AC1: cd /Users/jill/farm-surveillance-v2 && grep -nE 'VISION_LLM_URL|LISTEN_HOST|LISTEN_PORT' listener/daemon.py | grep -v '^\\s*#' | grep -v '^\\s*\"' | wc -l -> 0 (the moved keys are NOT hardcoded in generate_plist())",
         "AC2: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from listener.daemon import generate_plist; x = generate_plist(); assert \"VISION_LLM_URL\" not in x and \"LISTEN_HOST\" not in x and \"LISTEN_PORT\" not in x' -> exit 0",
@@ -147,7 +157,9 @@
       ],
       "notes": "generate_plist() emits a template plist for new installs. After US-047a-c land, the template must match reality. Worker edits generate_plist() to remove the moved keys from the template (PATH stays — launchd requires it). Worker also updates the surrounding comments + docstring to reference US-047. Existing tests must still pass.",
       "operator_approval_required": false,
-      "commit_required": true
+      "commit_required": true,
+      "status": "done",
+      "completed_at": "2026-09-15"
     }
   ],
   "operator_directives": {
