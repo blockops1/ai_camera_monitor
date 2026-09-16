@@ -253,7 +253,9 @@ def build_match_message(
 
     # Determine classification from vm2_result if not provided.
     cls = classification or vm2_result.get("class", "vehicle")
-    matched = match_result.get("matched", False)
+    if "matched" not in match_result:
+        raise ValueError("match_result is missing required key 'matched'")
+    matched = match_result["matched"]
 
     if matched:
         if cls == "animal":
