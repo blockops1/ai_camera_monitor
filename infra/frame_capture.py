@@ -54,14 +54,14 @@ RECONNECT_BACKOFF_MAX = 30.0
 RECONNECT_BACKOFF_MULT = 2.0
 
 # US-017e — Phase 6B.155 (PLAN §11.78). Cap on consecutive failure-driven
-# reconnects. After N attempts the failure loop defers to the proactive
-# scheduled_reconnect_watchdog (still fires hourly). Prevents log/CPU
+# reconnects. After N attempts the failure loop stops hammering the camera
+# and waits for either (a) the next in-thread periodic teardown (US-049c,
+# every 3600s) or (b) operator intervention via stop_event. Prevents log/CPU
 # starvation during a camera-side Reolink stickiness event (where RTSP
 # returns ERRNO 60 / Invalid data / 404 in a burst, but the camera IS still
 # on the network — just temporarily refusing new sessions). Without this cap
 # the loop will keep hammering the camera at the 30s max forever, filling
-# logs and (worse) potentially blocking other code paths. With it: log the
-# failure once at ERROR, let the hourly watchdog take over.
+# logs and (worse) potentially blocking other code paths.
 RECONNECT_MAX_ATTEMPTS_DEFAULT = 10
 
 # Proactive watchdog cadence (Phase 6B.80 / PLAN §11.13). The v2 watchdog
@@ -299,17 +299,17 @@ class PersistentRTSPReader:
         """Main decode loop. Runs in a background thread.
 
         Phase 6B.155 (PLAN §11.78): failure-driven reconnects are capped at
-        `self._max_reconnect_attempts`. After the cap, the loop defers to
-        the proactive scheduled_reconnect_watchdog (still fires every
-        hour). The watchdog closes _container from a separate thread; the
-        resulting demux exception in this thread flows back through the
-        outer try/except, re-attempts the connection, and either recovers
-        (logging a recovery line + resetting the cap) or hits the cap again.
+        `self._max_reconnect_attempts`. After the cap, the loop stops retrying
+        and waits on _stop_event with the configured cadence. The in-thread
+        periodic teardown (US-049c, every 3600s) re-opens the container and
+        either succeeds (logging a recovery line + resetting the cap) or hits
+        the cap again. The outer while-loop retries the decode without
+        re-entering this except-block exhaustion logic on each iteration.
 
         Per the 2026-08-28 CAM3 incident (6 errors in 80s with ERRNO 60 /
         Invalid data / 404 — Reolink RTSP session stickiness), this caps
-        log spam and CPU usage during long camera outages while keeping the
-        scheduled watchdog as the long-term recovery mechanism.
+        log spam and CPU usage during long camera outages. The watchdog +
+        launchd-respawn antipattern was removed in US-049b/US-049d.
         """
         backoff = RECONNECT_BACKOFF_INITIAL
         cap_exhausted = False
@@ -349,24 +349,22 @@ class PersistentRTSPReader:
                             "consecutive_reconnect_cap_reached: "
                             "PersistentRTSP decode iteration failed "
                             "(%d consecutive attempts). Last error: %s. "
-                            "Deferring to scheduled_reconnect_watchdog "
-                            "(%.0fs cadence). Reader is UNHEALTHY until "
-                            "next reconnect.",
+                            "Reader is UNHEALTHY — waiting %.0fs for the "
+                            "next in-thread periodic teardown "
+                            "(US-049c).",
                             self._consecutive_errors,
                             e,
                             self._scheduled_reconnect_seconds,
                         )
                         self.reconnects_total += 1
                         cap_exhausted = True
-                        # Sleep until either stop_event or the watchdog
-                        # closes the container (which raises in the demux
-                        # loop and we fall through here again). Both paths
-                        # exit the inner sleep cleanly.
-                        _sleep_until_stop_or_watchdog(
-                            self._stop_event,
-                            scheduled_reconnect_seconds=(
-                                self._scheduled_reconnect_seconds
-                            ),
+                        # Sleep until either stop_event OR the next
+                        # in-thread periodic teardown (US-049c) reopens
+                        # the container. The teardown happens inside
+                        # _decode_iteration and will either succeed
+                        # (recovering) or hit this cap-block again.
+                        self._stop_event.wait(
+                            self._scheduled_reconnect_seconds,
                         )
                         if self._stop_event.is_set():
                             break
@@ -377,8 +375,8 @@ class PersistentRTSPReader:
                         # cap_exhausted=True, the inner if is skipped
                         # and we just fall through to the warning (no
                         # behavioral change vs. retry-forever, but
-                        # without the 30s hammering — the watchdog
-                        # controls cadence now).
+                        # without the 30s hammering — the cadence
+                        # waits on _stop_event for the next teardown).
                         continue
 
                 # Standard failure-driven warning (used when cap not yet
