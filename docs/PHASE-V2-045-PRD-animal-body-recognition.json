@@ -64,7 +64,9 @@
         "animal_matcher/__init__.py",
         "animal_matcher/match.py"
       ],
-      "notes": "animal_matcher/__init__.py mirrors vehicle_matcher/__init__.py. match_animal() signature matches match_vehicle() so the formatter can call either without branching on type. Stub returns {matched: False} until US-045d lands. Stage 13 already handles vehicle + person - extend the condition to animal too. The placeholder TG#3 for an unmatched animal currently says 'unrecognized animal' (no 'vehicle' hardcode)."
+      "notes": "animal_matcher/__init__.py mirrors vehicle_matcher/__init__.py. match_animal() signature matches match_vehicle() so the formatter can call either without branching on type. Stub returns {matched: False} until US-045d lands. Stage 13 already handles vehicle + person - extend the condition to animal too. The placeholder TG#3 for an unmatched animal currently says 'unrecognized animal' (no 'vehicle' hardcode).",
+      "status": "done",
+      "completed_at": "2026-09-15"
     },
     {
       "id": "US-045b",
@@ -87,7 +89,9 @@
         "infra/animal_embedder.py",
         "tests/test_animal_embedder.py"
       ],
-      "notes": "Test using _synthetic_embedding() (returns deterministic random 768-dim vector seeded by image hash). Keeps unit tests fast + offline. Integration tests that load real MegaDescriptor weights are opt-in via env var ANIMAL_EMBEDDER_LIVE=1. scripts/release/config.yaml strip_paths already exclude *.pt (line 43) so MegaDescriptor .bin/.safetensors files are auto-stripped on public cuts. Weights downloaded by timm into ~/Library/Caches/huggingface/hub/ - OUTSIDE the repo so no strip needed."
+      "notes": "Test using _synthetic_embedding() (returns deterministic random 768-dim vector seeded by image hash). Keeps unit tests fast + offline. Integration tests that load real MegaDescriptor weights are opt-in via env var ANIMAL_EMBEDDER_LIVE=1. scripts/release/config.yaml strip_paths already exclude *.pt (line 43) so MegaDescriptor .bin/.safetensors files are auto-stripped on public cuts. Weights downloaded by timm into ~/Library/Caches/huggingface/hub/ - OUTSIDE the repo so no strip needed.",
+      "status": "done",
+      "completed_at": "2026-09-15"
     },
     {
       "id": "US-045c",
@@ -117,7 +121,9 @@
         "scripts/release/config.yaml",
         "tests/test_enroll_animal.py"
       ],
-      "notes": "scripts/release/config.yaml: add strip entry data/known/animals/ (analogous to data/known/people/known_people.json at line 35) since operator animals are PII-adjacent. animal_matcher/storage.py houses load_embeddings/save_embeddings + load_metadata/save_metadata - separate from match.py so storage is unit-testable. Embeddings at data/known/animals/embeddings.npz IS stripped via the directory-level entry (biometric data, matches face embeddings policy at infra/paths.py:129-131). Worked example (operator dog 'Finnegan', staged 2026-09-14, VM2 replay at data/known/animals/_staging_finnegan/_vm2_all15.json): 15 crops already on disk at data/known/animals/_staging_finnegan/ across BACK, OUTSIDE_BACK_SOLAR, OUTSIDE_FRONT_GARAGE. VM2 output across 15 crops: species=dog (15/15), size=medium (15/15), color_pattern={brown: 6, tan: 9}, distinctive_features (top 6): black collar (6), curly fur (3), blue collar (2), curled tail (2), curly coat (1), curly tail (1). Enrollment CLI invocation (PRE-FILLED FROM VM2 REPLAY): scripts/enroll_animal.py --name 'Finnegan' --id a_dog_finnegan --species dog --breed goldendoodle --color-patterns brown tan --distinctive-features 'black collar' 'curly fur' 'curly coat' 'curled tail' --images data/known/animals/_staging_finnegan/*.png. NOTE on breed enum: infra/animal_prompt.py breed enum currently is labrador / golden retriever / german shepherd / tabby / siamese / mixed / null. VM2 will return 'null' for Finnegan. Per operator directive 'do not touch VM2', US-045 stories leave the enum alone. The enrolled metadata uses the operator-known 'goldendoodle' (from Finnegan's CLI --breed flag), but VM2's per-alert output may show null. UX fix (add 'goldendoodle' + 'labradoodle' to enum) is a SEPARATE future card, not bundled here. NOTE on storage format: npz file uses two key naming conventions per animal_id. (1) {animal_id}__{image_filename_stem} -> single 768-dim vector for that enrollment image. (2) {animal_id}__avg -> averaged 768-dim vector across all enrollment images. Tier-2 matcher uses the avg vector only (faster). Per-image vectors are kept for debugging / future re-tuning."
+      "notes": "scripts/release/config.yaml: add strip entry data/known/animals/ (analogous to data/known/people/known_people.json at line 35) since operator animals are PII-adjacent. animal_matcher/storage.py houses load_embeddings/save_embeddings + load_metadata/save_metadata - separate from match.py so storage is unit-testable. Embeddings at data/known/animals/embeddings.npz IS stripped via the directory-level entry (biometric data, matches face embeddings policy at infra/paths.py:129-131). Worked example (operator dog 'Finnegan', staged 2026-09-14, VM2 replay at data/known/animals/_staging_finnegan/_vm2_all15.json): 15 crops already on disk at data/known/animals/_staging_finnegan/ across BACK, OUTSIDE_BACK_SOLAR, OUTSIDE_FRONT_GARAGE. VM2 output across 15 crops: species=dog (15/15), size=medium (15/15), color_pattern={brown: 6, tan: 9}, distinctive_features (top 6): black collar (6), curly fur (3), blue collar (2), curled tail (2), curly coat (1), curly tail (1). Enrollment CLI invocation (PRE-FILLED FROM VM2 REPLAY): scripts/enroll_animal.py --name 'Finnegan' --id a_dog_finnegan --species dog --breed goldendoodle --color-patterns brown tan --distinctive-features 'black collar' 'curly fur' 'curly coat' 'curled tail' --images data/known/animals/_staging_finnegan/*.png. NOTE on breed enum: infra/animal_prompt.py breed enum currently is labrador / golden retriever / german shepherd / tabby / siamese / mixed / null. VM2 will return 'null' for Finnegan. Per operator directive 'do not touch VM2', US-045 stories leave the enum alone. The enrolled metadata uses the operator-known 'goldendoodle' (from Finnegan's CLI --breed flag), but VM2's per-alert output may show null. UX fix (add 'goldendoodle' + 'labradoodle' to enum) is a SEPARATE future card, not bundled here. NOTE on storage format: npz file uses two key naming conventions per animal_id. (1) {animal_id}__{image_filename_stem} -> single 768-dim vector for that enrollment image. (2) {animal_id}__avg -> averaged 768-dim vector across all enrollment images. Tier-2 matcher uses the avg vector only (faster). Per-image vectors are kept for debugging / future re-tuning.",
+      "status": "done",
+      "completed_at": "2026-09-15"
     },
     {
       "id": "US-045d",
@@ -145,7 +151,9 @@
         "listener/pipeline.py",
         "tests/test_animal_matcher_match.py"
       ],
-      "notes": "Combined-rank weighting: cosine_score (range [-1, 1], typically [0.5, 0.95]) and tier1_score (range [0.0, 4.0]) are on different scales. Worker picks a normalized combination in the design doc; recommended approach: rank_score = tier1_score + 5.0 * cosine_score (cosine on [0,1] scaled to ~[0,5] range so it carries meaningful weight, plus tier1 on [0,4]). Simpler alternative: pure tier-1-rank among cosine-acceptable candidates (no weighted combination, just sort by tier1 desc). Worker decides and documents. Tier 2 (cosine) ALWAYS runs per operator directive 4 - no early-out based on Tier 1. Lazy-load MegaDescriptor inside match_animal() (not at module import) so unit tests can run without the model. Storage load: opens data/known/animals/embeddings.npz + known_animals.json via animal_matcher/storage.py (US-045c). Unit tests pass storage dicts directly. Worked example for Finnegan: vm2_result = {species: dog, size: medium, color_pattern: brown, distinctive_features: [black collar]}; enrolled Finnegan avg embedding produces observed_cosine = 0.92 (above 0.85 threshold); enrolled Finnegan feature signature = {species: dog, size: medium, color_patterns: {brown, tan}, distinctive_features: {black collar, curly fur, curly coat, curled tail}}; Tier 1 score = 1.0 (species) + 1.0 (size) + 0.75 (color Jaccard 1/2) + 0.375 (dist-feat Jaccard 1/4) = 3.125. If Finnegan is the only cosine-acceptable candidate, return matched Finnegan, cosine=0.92, tier1=3.125, runner_ups=[]."
+      "notes": "Combined-rank weighting: cosine_score (range [-1, 1], typically [0.5, 0.95]) and tier1_score (range [0.0, 4.0]) are on different scales. Worker picks a normalized combination in the design doc; recommended approach: rank_score = tier1_score + 5.0 * cosine_score (cosine on [0,1] scaled to ~[0,5] range so it carries meaningful weight, plus tier1 on [0,4]). Simpler alternative: pure tier-1-rank among cosine-acceptable candidates (no weighted combination, just sort by tier1 desc). Worker decides and documents. Tier 2 (cosine) ALWAYS runs per operator directive 4 - no early-out based on Tier 1. Lazy-load MegaDescriptor inside match_animal() (not at module import) so unit tests can run without the model. Storage load: opens data/known/animals/embeddings.npz + known_animals.json via animal_matcher/storage.py (US-045c). Unit tests pass storage dicts directly. Worked example for Finnegan: vm2_result = {species: dog, size: medium, color_pattern: brown, distinctive_features: [black collar]}; enrolled Finnegan avg embedding produces observed_cosine = 0.92 (above 0.85 threshold); enrolled Finnegan feature signature = {species: dog, size: medium, color_patterns: {brown, tan}, distinctive_features: {black collar, curly fur, curly coat, curled tail}}; Tier 1 score = 1.0 (species) + 1.0 (size) + 0.75 (color Jaccard 1/2) + 0.375 (dist-feat Jaccard 1/4) = 3.125. If Finnegan is the only cosine-acceptable candidate, return matched Finnegan, cosine=0.92, tier1=3.125, runner_ups=[].",
+      "status": "done",
+      "completed_at": "2026-09-15"
     },
     {
       "id": "US-045e",
@@ -171,7 +179,9 @@
         "telegram_formatter/match_alert.py",
         "tests/test_match_alert_animal.py"
       ],
-      "notes": "US-044c/d port v1 match-alert layout. US-045e layers animal-aware wording ON TOP. Don't rewrite US-044c/d body template - just make classification-aware branches handle animal mode. If US-044c/d haven't landed yet, this card waits. Note: build_match_body signature may have been renamed by US-044c - check actual function name in main at the time of dispatch."
+      "notes": "US-044c/d port v1 match-alert layout. US-045e layers animal-aware wording ON TOP. Don't rewrite US-044c/d body template - just make classification-aware branches handle animal mode. If US-044c/d haven't landed yet, this card waits. Note: build_match_body signature may have been renamed by US-044c - check actual function name in main at the time of dispatch.",
+      "status": "done",
+      "completed_at": "2026-09-15"
     },
     {
       "id": "US-045f",
@@ -199,7 +209,9 @@
         "tests/test_tune_animal_threshold.py",
         "scripts/release/config.yaml"
       ],
-      "notes": "ANIMAL_EMBEDDER_LIVE=0 makes the script use synthetic embeddings so it runs in CI without model weights. LIVE=1 loads MegaDescriptor. Threshold tuning is the empirical answer to 'will this actually distinguish your dog from another similar dog.' Once we have an enrolled animal (post-US-045c operator enrollment), re-run with enrolled embeddings file to compute true positive vs true negative similarity distributions. config/animal_match.yaml is new - single key animal_match.threshold: 0.85 (initial). docs/animal-threshold-tuning.md is internal - strip entry docs/animal-threshold-tuning.md added to scripts/release/config.yaml."
+      "notes": "ANIMAL_EMBEDDER_LIVE=0 makes the script use synthetic embeddings so it runs in CI without model weights. LIVE=1 loads MegaDescriptor. Threshold tuning is the empirical answer to 'will this actually distinguish your dog from another similar dog.' Once we have an enrolled animal (post-US-045c operator enrollment), re-run with enrolled embeddings file to compute true positive vs true negative similarity distributions. config/animal_match.yaml is new - single key animal_match.threshold: 0.85 (initial). docs/animal-threshold-tuning.md is internal - strip entry docs/animal-threshold-tuning.md added to scripts/release/config.yaml.",
+      "status": "done",
+      "completed_at": "2026-09-15"
     }
   ]
 }
