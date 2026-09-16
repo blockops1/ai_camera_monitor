@@ -206,10 +206,10 @@ class TestStartStop:
             time.sleep(0.1)
             reader.start()
             time.sleep(0.1)
-            # US-017d: start() spawns decode + watchdog threads. Second
-            # start() is a no-op (is_running), so we still see exactly 2
-            # thread starts, not 4.
-            assert len(thread_ids) == 2, "Only decode + watchdog should launch"
+            # US-049b: watchdog deleted — start() spawns only decode thread.
+            # Second start() is a no-op (is_running), so we see exactly 1
+            # thread start, not 2.
+            assert len(thread_ids) == 1, "Only decode thread should launch"
             reader.stop(timeout=2.0)
 
     def test_get_frames_after_start(self, mock_av_stream, mock_av_frame):
