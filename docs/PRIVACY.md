@@ -71,6 +71,7 @@ It excludes:
 - `data/private_identifiers.json` (gitignored)
 - `scripts/check_no_private_data.py` itself
 - `docs/PRIVACY.md` (this file, which discusses what to look for)
+- `.mailmap` (operator's identity mapping per git convention, not a leak)
 
 ## VISION_LLM_URL Note
 
