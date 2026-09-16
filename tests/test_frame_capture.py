@@ -4,9 +4,11 @@ test_frame_capture.py — Tests for infra/frame_capture (PersistentRTSPReader).
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
+import time as _time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -901,3 +903,95 @@ class TestCameraCaptureRegistry:
         health = CameraCaptureRegistry.is_healthy_all()
         assert health == {}
         CameraCaptureRegistry.clear()
+
+
+# ---------------------------------------------------------------------------
+# Test: failure-driven reconnect cap (US-017e, migrated from test_rtsp_watchdog)
+# ---------------------------------------------------------------------------
+
+
+class TestFailureDrivenReconnectCap:
+    def test_cap_reached_failure_driven_logs_error_no_watchdog(self, monkeypatch, caplog):
+        """REGRESSION: RECONNECT_MAX_ATTEMPTS_DEFAULT = 10 consecutive decode
+        failures still log ERROR and exit the decode loop. No 'proceed-anyway'
+        branch. No watchdog to mask this path.
+
+        The cap path in _run_loop (lines 352-389):
+          - On Nth consecutive failure (N == max_reconnect_attempts),
+            logs ERROR 'consecutive_reconnect_cap_reached'.
+          - Enters _stop_event.wait(scheduled_reconnect_seconds).
+          - If stop_event is set during wait, breaks the outer while-loop.
+          - If stop_event is NOT set, the outer while-loop retries
+            _decode_iteration — which either recovers or re-hits the cap.
+
+        This test verifies:
+          1. ERROR log line with 'consecutive_reconnect_cap_reached' emitted.
+          2. After cap exhaustion, no further _decode_iteration calls
+             fire before stop() — the loop is halted, not hammering.
+          3. is_healthy() == False after cap exhaustion.
+          4. NO log line containing 'proceed' (the old watchdog
+             'proceed anyway' path is gone).
+        """
+        from infra import frame_capture as fc
+
+        decode_calls = {"n": 0}
+
+        def always_fail_decode() -> None:
+            decode_calls["n"] += 1
+            raise RuntimeError("simulated RTSP decode failure")
+
+        # The current code uses self._stop_event.wait() directly in the
+        # cap block (not _sleep_until_stop_or_watchdog). We monkeypatch
+        # wait() so it returns True on the first call, simulating the
+        # stop_event being set (which happens when stop() is called).
+        def fake_wait(self, timeout=None):
+            # Actually set the event so is_set() returns True after this
+            # call, matching real stop() behavior.  This makes the cap
+            # block break cleanly (the while-loop sees the event set).
+            self.set()
+            return True
+
+        monkeypatch.setattr(threading.Event, "wait", fake_wait)
+        # Backoff sleeps — make them no-ops to speed up the test.
+        monkeypatch.setattr(fc.time, "sleep", lambda _s: None)
+
+        reader = PersistentRTSPReader(
+            "rtsp://u:p@h:554/h",
+            max_reconnect_attempts=3,
+        )
+        reader._decode_iteration = always_fail_decode  # type: ignore[method-assign]
+
+        with caplog.at_level(logging.ERROR, logger="frame_capture"):
+            reader.start()
+            # Wait for the decode thread to run:
+            # 3 failures -> cap fires -> wait() returns True -> break
+            deadline = _time.monotonic() + 2.0
+            while _time.monotonic() < deadline and decode_calls["n"] < 3:
+                _time.sleep(0.01)
+            _time.sleep(0.1)
+            reader.stop(timeout=2.0)
+
+        # AC — ERROR log with consecutive_reconnect_cap_reached.
+        cap_logs = [
+            r for r in caplog.records
+            if "consecutive_reconnect_cap_reached" in r.getMessage()
+        ]
+        assert len(cap_logs) == 1, (
+            f"Expected exactly one consecutive_reconnect_cap_reached log, "
+            f"got {len(cap_logs)}: {[r.getMessage() for r in cap_logs]}"
+        )
+
+        # AC — is_healthy() is False after cap exhaustion.
+        assert reader.is_healthy() is False
+
+        # AC — exactly 3 decode calls (cap tipped on 3rd failure).
+        assert decode_calls["n"] == 3, (
+            f"Expected 3 _decode_iteration calls (cap tipped on 3rd "
+            f"failure when max_reconnect_attempts=3), got {decode_calls['n']}"
+        )
+
+        # AC — no 'proceed' log line (old watchdog proceed-anyway path is gone).
+        all_msgs = [r.getMessage() for r in caplog.records]
+        assert not any("proceed" in m.lower() for m in all_msgs), (
+            f"Found 'proceed' in log messages — old watchdog path should be gone: {all_msgs}"
+        )
