@@ -56,7 +56,7 @@
         "AC1: cd /Users/jill/farm-surveillance-v2 && git grep -nE 'FARMSV_RTSP_RECONNECT_SECONDS|_SCHEDULED_RECONNECT_ENV|_resolve_scheduled_reconnect_seconds|SCHEDULED_RECONNECT_DEFAULT' infra/frame_capture.py | wc -l -> 0 (all four symbols absent from frame_capture.py)",
         "AC2: cd /Users/jill/farm-surveillance-v2 && git grep -nE 'FARMSV_RTSP_RECONNECT_SECONDS' .env.example | wc -l -> 0 (no .env.example reference)",
         "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -m py_compile infra/frame_capture.py && echo OK (module still imports)",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from infra import frame_capture; print(\"_UNSET\" not in dir(frame_capture))' | grep -q True && echo OK (the _UNSET sentinel is also gone -- its sole user was the resolver)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && git grep -nE '_UNSET\\b' infra/frame_capture.py | wc -l -> >= 4 (_UNSET sentinel MUST remain because _resolve_max_reconnect_attempts still depends on it; only the deleted resolver used it, but the sentinel is shared infrastructure. Verifying presence prevents a future over-zealous sweep from breaking the max-attempts resolver.)",
         "AC5: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from infra.frame_capture import PersistentRTSPReader; import inspect; sig=inspect.signature(PersistentRTSPReader.__init__); print(sig)' 2>&1 | grep -v scheduled_reconnect_seconds | grep -q 'ring_size' && echo OK (constructor signature no longer takes scheduled_reconnect_seconds)"
       ],
       "files_modified": [
