@@ -175,8 +175,15 @@ def build_detail_message(
     if mode not in _MODES:
         raise ValueError(f"mode must be one of {_MODES}, got {mode!r}")
 
-    # Get classification from the v1 'class' key (not 'class_confirmed').
-    cls = vm2_result.get("class", vm2_result.get("class_", "unknown"))
+    # Fail-fast: require class_confirmed or class; raise when neither exists.
+    if "class_confirmed" in vm2_result:
+        cls = vm2_result["class_confirmed"]
+    elif "class" in vm2_result:
+        cls = vm2_result["class"]
+    else:
+        raise ValueError(
+            f"vm2_result missing 'class_confirmed' and 'class' keys: {vm2_result!r}"
+        )
 
     lines: list[str] = [
         f"Camera: {camera_label}",
