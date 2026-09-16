@@ -419,8 +419,6 @@ def generate_plist() -> str:
         <string>{tg_chat_id}</string>
         <key>VISION_LLM_URL</key>
         <string>{vision_url}</string>
-        <key>GATE_KEEP_DISK_ARTIFACTS</key>
-        <string>true</string>
     </dict>
 
     <key>RunAtLoad</key>
