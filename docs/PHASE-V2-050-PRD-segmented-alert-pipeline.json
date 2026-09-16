@@ -1,0 +1,223 @@
+{
+  "prd_id": "PHASE-V2-050-PRD-segmented-alert-pipeline",
+  "title": "Refactor listener/pipeline.py from monolithic run() into segmented stages that dispatch Telegram between each step (operator 2026-09-16: 'TG#1 should be sent before anything is called for VM2')",
+  "author": "jill (operator-directed 2026-09-16, post the Ford F-150 alert miss)",
+  "status": "proposal",
+  "phase": "v2",
+  "plan_section": null,
+  "trigger": "Operator 2026-09-16 (verbatim): 'OK, well then you deliberately broke something in the system. Telegram message one should be sent before anything is called and any action is taken for VM two. That pipeline, I designed specifically to be able to address this type of issue. It shouldn't be a single monolithic pipeline. Is supposed to be segmented calls out to different modules of the pipeline With telegram notifications and decisions made between each step.' Confirmed by 2026-09-16 morning audit: 6 confirmed-tg events (10:14-10:20, including Ford F-150 truck at 10:19:49) all silently dropped because listener/pipeline.py::run() raises ValueError at telegram_formatter/detail.py:184 BEFORE returning to daemon.py:276, which means daemon never dispatches ANY of tg1/tg2/tg3 even though tg1 was successfully built at stage 9. Spec says 'TG#1 fires' (item 7) then 'VM2' (item 8) then 'TG#2 fires' (item 9). Current code builds all three then dispatches all three from daemon AFTER run() returns -- an exception at stage 11 unwinds the entire function. Last successful Telegram send: 2026-09-15 14:12:54 (~20 hours of silence at the time of operator report). The fix is to segment the pipeline into discrete stage calls, dispatch each TG message immediately after its stage, and let per-stage try/except boundaries contain failures so earlier TGs already-sent stay sent.",
+  "background": "Current state in /Users/jill/farm-surveillance-v2/listener/pipeline.py:108-261 (run() function): 12-stage monolithic sequence. Stages 3-13 all run inside ONE function call. Stages 9+ (vm1, build TG#1, vm2, build TG#2, match, build TG#3) ALL execute before any Telegram is dispatched. Stage 11 build_detail_message raises ValueError when vm2_result lacks 'class_confirmed'/'class' keys (telegram_formatter/detail.py:184 -- fails for mode-specific VM2 outputs: vehicle->make/color/body_style_hint/model, person->attributes, animal->species). When the raise fires, the function unwinds with no return value; daemon.py:276 catches the exception and returns HTTP 500 to the camera. TG#1 (built in memory at stage 9) is discarded along with everything else. Daemon's dispatch loop (daemon.py:283-356) only reads result['tg1','tg2','tg3'] AFTER pipeline.run() returns. Spec says each TG fires IMMEDIATELY after its stage (docs/PIPELINE-SPEC-2026-09-10.md items 7, 9, 11). The architecture violates the spec by batching. Fix: segment the pipeline into named stage functions, move dispatch into the daemon's per-stage loop, add per-stage try/except boundaries so later failures cannot kill earlier TGs already-sent.",
+  "goal": "listener/pipeline.py exports a bag of named, testable stage functions (one per stage). listener/daemon.py orchestrates them in a per-stage loop, dispatching each Telegram message IMMEDIATELY after its producing stage. A failure at any stage N+1 (e.g., VM2 returns malformed output, match raises) does NOT unwind TG#N that was already sent. record_hit() fires ONLY after TG#3 successfully dispatches (spec item 12). Each stage function is independently testable with no monkey-patching of pipeline.run(). Daemon returns HTTP 200 even on stage failure (existing behavior preserved: camera-side retry storm avoidance per US-022b).",
+  "operator_guarantees": {
+    "no_residue": "After all stories land: listener/pipeline.py exports individual stage functions named stage_load_frames, stage_gate, stage_cooldown_check, stage_prepare_artifacts, stage_verify_class_vm1, stage_build_tg1, stage_detail_class_vm2, stage_build_tg2, stage_perform_match, stage_build_tg3. The monolithic run() function is DELETED (US-050e). No callsite of pipeline.run() remains (verified by grep). No inline TG#3 send_match_alert call inside pipeline.py (it moves to daemon).",
+    "dispatch_order": "In listener/daemon.py: the /alert route calls stage functions in order: stage_load_frames -> stage_gate -> stage_cooldown_check -> stage_prepare_artifacts -> stage_verify_class_vm1 -> stage_build_tg1 + dispatcher.dispatch([tg1]) -> stage_detail_class_vm2 -> stage_build_tg2 + dispatcher.dispatch([tg2]) -> stage_perform_match -> stage_build_tg3 + dispatcher.dispatch([tg3]) -> record_hit(). Each dispatch fires BEFORE the next stage runs.",
+    "tg1_survives_vm2_failure": "If stage_detail_class_vm2 raises OR stage_build_tg2 raises, TG#1 has already been dispatched. Daemon logs the failure, returns HTTP 200 to camera, but does NOT send TG#2 or TG#3 and does NOT record_hit(). Verified by test in tests/test_pipeline_segmented.py::test_tg1_dispatched_when_stage_detail_class_raises.",
+    "no_inline_send": "grep proves: telegram_formatter/match_alert.py::send_match_alert is NOT called from inside any pipeline.py or any stage function. It is called only from listener/daemon.py in the per-stage loop. No other inline httpx.Client or send_match_alert call survives outside the dispatcher.",
+    "contract_fix": "After US-050d: telegram_formatter/detail.py::build_detail_message no longer raises ValueError on mode-specific outputs. The function accepts each mode's specific key set (vehicle->make/color/body_style_hint/model/vehicle_features, person->attributes, animal->species) and produces mode-appropriate captions. infra/vision_analyzer.py::detail_class with mode='unsure' is handled (returns a structured 'unsure' dict instead of raising).",
+    "cooldown_correctness": "record_hit() fires ONLY in the daemon's per-stage loop, AFTER dispatcher.dispatch([tg3]) returns success. If TG#3 dispatch fails or any earlier stage failed, record_hit is NOT called -- so the next alert on the same camera within the cooldown window is correctly suppressed. Verified by test test_cooldown_not_recorded_when_stage_build_tg2_raises.",
+    "tests_clean": "tests/test_pipeline_segmented.py is the new test file (replaces assertions that depended on the monolithic run() returning a dict with all three tgs). Existing tests that patched pipeline.run() are updated to patch the individual stage functions instead. test_pipeline.py still exists for vehicle matcher scoring (it doesn't touch the pipeline module).",
+    "no_defensive_fallbacks": "Per operator 2026-09-15: 'I never ever ever want a defensive fallback.' Per-stage try/except blocks exist ONLY for the dispatch call (so a Telegram API hiccup doesn't surface as HTTP 5xx to camera per US-022b contract). Stage-level failures (VM2 returns malformed output, match raises) re-raise to the per-stage boundary; they are NOT silently swallowed with a default fallback. No 'send what we have' logic in the catch block.",
+    "ascii_only": "No Unicode, em-dashes, or smart quotes in any file the PRD touches.",
+    "v1_refactor_out_of_scope": "Same monolithic architecture exists in /Users/jill/farm-surveillance-refactor/ (NOT under this PRD's scope). v2 is the canonical surface; the refactor repo is operator-driven and out of scope."
+  },
+  "shipping_definition": "(a) Operator runs the daemon for 24+ hours with the segmented pipeline applied. (b) logs/daemon.log shows 'tg-send:' lines for TG#1 firing IMMEDIATELY after stage_verify_class_vm1 -- BEFORE any 'httpx POST localhost:8080/v1/chat/completions' (VM2) line in the same alert's trace. (c) Trigger a real VM2 failure (e.g., kill the VM2 llama-server mid-flight): TG#1 still arrives at Telegram within the alert's normal window. (d) All 7 stories merged to main, ACs verified by their respective workers, no dangling worktrees.",
+  "dispatch_order": [
+    "US-050a (decompose pipeline.run into stage functions)",
+    "US-050d (fix detail.py:184 contract so TG#2 builds correctly)",
+    "US-050b (per-stage dispatch in daemon, TG#1 fires before VM2)",
+    "US-050c (decision/control points between stages)",
+    "US-050e (delete monolithic run() + dead helpers)",
+    "US-050f (tests for segmented pipeline + update existing tests)",
+    "US-050g (24h runtime verification, qa)"
+  ],
+  "branch_naming": "wt/v2-050-{a-g}-{slug}, one branch per story. Each branch rebases to local main (NOT pushed until operator approves significant work + tested), archived via tag before deletion.",
+  "low_priority": "Operator 2026-09-16: 'You don't need to make this a higher priority than any other thing that's running. Though, let the system work its way through.' 049 series (049c-f in flight) gets dispatched first. US-050 series picks up after.",
+  "stories": [
+    {
+      "id": "US-050a",
+      "title": "Decompose listener/pipeline.py::run() into named stage functions (pipeline.run() still orchestrates for now)",
+      "story_type": "rewrite",
+      "scope": "listener/pipeline.py:108-261 (run() body). Add named functions stage_load_frames, stage_gate, stage_cooldown_check, stage_prepare_artifacts, stage_verify_class_vm1, stage_build_tg1, stage_detail_class_vm2, stage_build_tg2, stage_perform_match, stage_build_tg3. run() becomes a thin orchestrator that calls each in order. No dispatch moved yet (that's US-050b).",
+      "assignee": "coder",
+      "depends_on": [],
+      "estimated_lines": 120,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import ast; t=ast.parse(open(\"listener/pipeline.py\").read()); names=[n.name for n in ast.walk(t) if isinstance(n, ast.FunctionDef) and n.name.startswith(\"stage_\")]; expected=[\"stage_load_frames\",\"stage_gate\",\"stage_cooldown_check\",\"stage_prepare_artifacts\",\"stage_verify_class_vm1\",\"stage_build_tg1\",\"stage_detail_class_vm2\",\"stage_build_tg2\",\"stage_perform_match\",\"stage_build_tg3\"]; missing=[n for n in expected if n not in names]; assert not missing, f\"missing: {missing}\"; print(\"OK all 10 stage functions present\")'",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from listener.pipeline import run; result=run({\"camera_id\":\"BACK\",\"id\":\"x\",\"classification\":\"vehicle\",\"camera_label\":\"Back\",\"frames\":[]}); print(\"OK run() still callable, returned:\", type(result).__name__)' (run() still works end-to-end -- old contract preserved)",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -m py_compile listener/pipeline.py && echo OK (module still imports)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && git grep -nE 'send_match_alert\\(' listener/pipeline.py | wc -l -> 1 (the inline TG#3 send STILL INSIDE pipeline.run() for now -- US-050b removes it)",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/test_pipeline_cooldown.py tests/test_alert_message.py -q --no-header 2>&1 | tail -3 (cooldown + alert message tests still pass -- decomposition didn't change observable behavior)"
+      ],
+      "files_modified": [
+        "listener/pipeline.py"
+      ],
+      "notes": "Decomposition only. Each stage function takes its inputs as args, returns its outputs (a dict or dataclass). run() becomes a linear sequence of stage_X() calls with the same return shape as today. This is a refactor PREP -- US-050b moves the dispatch into the per-stage loop. If 050a is in flight and 050b lands first, the chain breaks. Order is enforced by depends_on.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": "ready",
+      "story_size_budget": "decomposition, ~120 lines net added, fits in one commit"
+    },
+    {
+      "id": "US-050d",
+      "title": "Fix telegram_formatter/detail.py:184 contract: accept mode-specific VM2 outputs (vehicle/person/animal) + handle 'unsure' mode",
+      "story_type": "bugfix",
+      "scope": "telegram_formatter/detail.py:175-195 (the ValueError raise). Replace single-key check with mode-aware dispatch. infra/vision_analyzer.py:155-170 (handle mode='unsure' -- return structured dict instead of raising).",
+      "assignee": "coder",
+      "depends_on": [
+        "US-050a"
+      ],
+      "estimated_lines": 30,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import telegram_formatter.detail as d; vm2_vehicle={\"color\":\"gray\",\"body_style_hint\":\"pickup\",\"make\":\"Ford\",\"model\":\"F-150\",\"vehicle_features\":{\"wheel_style\":\"off-road\"}}; msg=d.build_detail_message(\"vehicle\",vm2_vehicle,None,None,camera_label=\"Back\",alert={\"id\":\"x\"}); assert msg[\"caption\"].startswith(\"Camera: Back\") and \"Ford\" in msg[\"caption\"]; print(\"OK vehicle caption built without raise\")' (vehicle mode no longer raises)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import telegram_formatter.detail as d; vm2_person={\"attributes\":{\"top\":\"blue shirt\",\"height\":\"tall\",\"markers\":[\"cap\"]}}; msg=d.build_detail_message(\"person\",vm2_person,None,None,camera_label=\"Back\",alert={\"id\":\"x\"}); assert \"blue shirt\" in msg[\"caption\"]; print(\"OK person caption built without raise\")' (person mode no longer raises)",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import telegram_formatter.detail as d; vm2_animal={\"species\":\"dog\",\"color\":\"brown\",\"markings\":[\"white chest\"]}; msg=d.build_detail_message(\"animal\",vm2_animal,None,None,camera_label=\"Back\",alert={\"id\":\"x\"}); assert \"dog\" in msg[\"caption\"]; print(\"OK animal caption built without raise\")' (animal mode no longer raises)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from infra.vision_analyzer import detail_class; import inspect; sig=inspect.signature(detail_class); src=inspect.getsource(detail_class); assert \"unsure\" in src or \"return {\\\"unsure\\\":\" in src or any(\"unsure\" in s for s in src.split(\"\\n\")); print(\"OK unsure mode handled in detail_class\")' (unsure mode returns a structured dict, no raise)",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && git grep -nE \"vm2_result missing 'class_confirmed' and 'class'\" telegram_formatter/ | wc -l -> 0 (the literal failure string is gone)",
+        "AC6: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/ -q --no-header 2>&1 | tail -3 (no regression in existing suite)"
+      ],
+      "files_modified": [
+        "telegram_formatter/detail.py",
+        "infra/vision_analyzer.py"
+      ],
+      "notes": "The spec at docs/PIPELINE-SPEC-2026-09-10.md items 8 and 9 already says VM2 returns mode-specific fields (vehicle->license plate/features/color/type, person->clothing/height/identity markers, animal->species/color/markings). The bug is that detail.py:184 expects class_confirmed/class keys which only appear in 'unsure' mode's response shape. Fix: dispatch on mode in detail.py: handle vehicle/person/animal with their specific keys, and accept class_confirmed/class as the 'unsure' fallback. Unsure mode in vision_analyzer returns {'class_confirmed': False, 'class': 'unsure', 'reason': ...} instead of raising VisionAnalyzerError. This unblocks TG#2 from building on ALL mode outputs, so when 050b moves dispatch per-stage, TG#2 actually fires.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": "ready",
+      "story_size_budget": "contract fix, ~30 lines net, fits in one commit"
+    },
+    {
+      "id": "US-050b",
+      "title": "Per-stage Telegram dispatch in daemon: TG#1 fires before VM2 (and before TG#2/TG#3); remove inline send_match_alert from pipeline.py",
+      "story_type": "refactor",
+      "scope": "listener/daemon.py:276-356 (the result['tg1','tg2','tg3'] batched dispatch). Replace with per-stage dispatch loop. listener/pipeline.py (remove the inline send_match_alert call at stage 13).",
+      "assignee": "coder",
+      "depends_on": [
+        "US-050d"
+      ],
+      "estimated_lines": 60,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import ast; t=ast.parse(open(\"listener/daemon.py\").read()); src=t.body; calls=[n for n in ast.walk(t) if isinstance(n, ast.Call) and hasattr(n.func,\"attr\") and n.func.attr==\"dispatch\"]; assert len(calls)>=3, f\"expected >=3 dispatcher.dispatch() call sites in daemon.py (one per stage), got {len(calls)}\"; print(f\"OK {len(calls)} dispatch call sites in daemon.py\")' (dispatcher.dispatch appears at least 3 times in daemon.py: once after each TG stage)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && git grep -nE 'send_match_alert\\(' listener/pipeline.py | wc -l -> 0 (inline TG#3 send removed from pipeline.py)",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from telegram_formatter.match_alert import build_match_message, send_match_alert; import inspect; assert \"httpx\" in inspect.getsource(send_match_alert); print(\"OK send_match_alert still exists in match_alert.py -- moved out of pipeline.py, NOT deleted\")' (function still exists, just no longer called from pipeline.py)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import ast; t=ast.parse(open(\"listener/daemon.py\").read()); names=[n.name for n in ast.walk(t) if isinstance(n, ast.FunctionDef)]; assert any(\"_dispatch_tg\" in n or \"_send_tg\" in n for n in names), \"expected a per-stage dispatch helper\"; print(\"OK per-stage dispatch helper present\")' (a _dispatch_tg or _send_tg helper exists in daemon.py that handles the JPEG cache + dispatch for a single message)",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/test_daemon_dispatch.py -q --no-header 2>&1 | tail -3 (existing daemon dispatch tests still pass after the refactor)"
+      ],
+      "files_modified": [
+        "listener/daemon.py",
+        "listener/pipeline.py"
+      ],
+      "notes": "Pattern: daemon.py orchestrates the loop. After each stage that produces a TG message, daemon calls a _dispatch_tg(tg_dict) helper that does the JPEG cache + dispatcher.dispatch() for that single message. Failure of _dispatch_tg(N+1) does NOT unwind _dispatch_tg(N) -- each one is independent. The dispatch helper is a refactor of the existing JPEG conversion loop (daemon.py:296-321) into a per-message function. Pipeline.py's run() no longer calls send_match_alert at all -- that responsibility moves to daemon.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": "ready",
+      "story_size_budget": "refactor of daemon dispatch + remove inline send, ~60 lines net, fits in one commit"
+    },
+    {
+      "id": "US-050c",
+      "title": "Add stage-to-stage decision/control points in daemon: abort on stage failure, suppress TG#3 if no match, record_hit only after TG#3 dispatched",
+      "story_type": "rewrite",
+      "scope": "listener/daemon.py (the per-stage loop body after US-050b lands). Add explicit decision boundaries: each stage call wrapped in try/except that decides whether to continue or abort to the dispatch+200 path. record_hit moved to AFTER dispatcher.dispatch([tg3]) succeeds.",
+      "assignee": "coder",
+      "depends_on": [
+        "US-050b"
+      ],
+      "estimated_lines": 50,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import ast; t=ast.parse(open(\"listener/daemon.py\").read()); calls=[n for n in ast.walk(t) if isinstance(n, ast.Call) and hasattr(n.func,\"attr\") and n.func.attr==\"record_hit\"]; assert len(calls)==1, f\"expected exactly 1 record_hit call site in daemon.py, got {len(calls)}\"; print(\"OK record_hit called from exactly one site\")'",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import ast; t=ast.parse(open(\"listener/daemon.py\").read()); calls=[n for n in ast.walk(t) if isinstance(n, ast.Call) and hasattr(n.func,\"id\") and n.func.id==\"record_hit\"]; [print(ast.dump(n,include_attributes=False)) for n in calls]' 2>&1 | grep -qE \"(dispatch|tg3|stage_build_tg3)\" && echo \"OK record_hit is positioned AFTER tg3 dispatch\" || (cd /Users/jill/farm-surveillance-v2 && grep -B2 -A2 'record_hit(' listener/daemon.py | grep -E 'dispatch|tg3' | head -1 | grep -q . && echo \"OK record_hit preceded by dispatch/tg3 reference\")",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import ast; t=ast.parse(open(\"listener/daemon.py\").read()); names=[n.name for n in ast.walk(t) if isinstance(n, ast.FunctionDef) and (\"alert\" in n.name.lower() or \"process\" in n.name.lower() or \"handle\" in n.name.lower())]; print(\"candidate handler functions:\", names); src=open(\"listener/daemon.py\").read(); assert src.count(\"try:\") >= 4, f\"expected >=4 try blocks in /alert handler (one per stage boundary), got {src.count(\"try:\")}\"; print(\"OK >=4 stage try blocks in handler\")' (handler has try/except around each stage boundary)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/test_pipeline_cooldown.py -q --no-header 2>&1 | tail -3 (cooldown tests still pass -- record_hit position is correct)",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import ast; t=ast.parse(open(\"listener/daemon.py\").read()); src=open(\"listener/daemon.py\").read(); assert \"log.exception\" in src or \"log.error\" in src; print(\"OK stage failures logged with traceback or error context\")' (each stage except block logs the failure context)"
+      ],
+      "files_modified": [
+        "listener/daemon.py"
+      ],
+      "notes": "Pattern (per spec items 7-12): daemon runs the per-stage loop with try/except around EACH stage call. Stage failure: log.exception(), return HTTP 200 (camera-side retry storm avoidance per US-022b), DO NOT continue to subsequent stages. record_hit() fires ONLY at the end of the loop, AFTER dispatcher.dispatch([tg3]) returns success. If TG#3 dispatch raises, record_hit is NOT called -- so the next alert within cooldown is correctly suppressed. No defensive fallbacks: stage failure means 'send what we have so far, log the rest'. Earlier-sent TGs are NOT rolled back. No 'default empty TG#2 if build fails' logic.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": "ready",
+      "story_size_budget": "decision boundaries, ~50 lines net, fits in one commit"
+    },
+    {
+      "id": "US-050e",
+      "title": "Delete monolithic pipeline.run() and dead helpers (_gsum, _load_candidates, _load_person_candidates) once stages are split + dispatched",
+      "story_type": "deletion",
+      "scope": "listener/pipeline.py:108-261 (run() function body), plus _gsum (L58-64), _load_candidates (L67-86), _load_person_candidates (L89-105) which are now called from individual stage functions or removed entirely if no longer needed.",
+      "assignee": "coder",
+      "depends_on": [
+        "US-050c"
+      ],
+      "estimated_lines": -150,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && git grep -nE 'pipeline\\.run\\(|pipeline\\.run \\(|from listener.pipeline import .*run\\b' listener/ tests/ | wc -l -> 0 (no callsite of pipeline.run remains)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import ast; t=ast.parse(open(\"listener/pipeline.py\").read()); names=[n.name for n in ast.walk(t) if isinstance(n, ast.FunctionDef)]; assert \"run\" not in names, f\"run() still defined\"; print(\"OK run() deleted\")'",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import ast; t=ast.parse(open(\"listener/pipeline.py\").read()); names=[n.name for n in ast.walk(t) if isinstance(n, ast.FunctionDef)]; assert \"_gsum\" not in names and \"_load_candidates\" not in names, f\"dead helpers still present: {[n for n in [\\\"_gsum\\\",\\\"_load_candidates\\\"] if n in names]}\"; print(\"OK dead helpers deleted\")' (the old helpers are gone)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -m py_compile listener/pipeline.py && echo OK (module still imports after deletion)",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/ -q --no-header 2>&1 | tail -3 (no regression -- tests now exercise the segmented path)"
+      ],
+      "files_modified": [
+        "listener/pipeline.py"
+      ],
+      "notes": "After US-050a-c, the segmented stage functions and the daemon's per-stage loop are the canonical path. The old run() is dead code. _gsum was a dict-projection for the old monolithic result shape -- no longer needed. _load_candidates/_load_person_candidates stay IF stage_perform_match still uses them; otherwise deleted. No defensive 'kept around just in case' helpers -- if it's dead, it's gone.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": "ready",
+      "story_size_budget": "deletion only, ~150 lines removed, fits in one commit"
+    },
+    {
+      "id": "US-050f",
+      "title": "Add tests/test_pipeline_segmented.py: TG#1 dispatched when Stage 11 raises, dispatch order, cooldown recorded only after TG#3, update existing pipeline-monolith tests",
+      "story_type": "test-add",
+      "scope": "tests/test_pipeline_segmented.py (new file). Update existing tests in tests/test_daemon_dispatch.py + tests/test_alert_route.py + tests/test_cooldown_lifecycle.py + tests/test_drop_after_gate.py + tests/test_known_vehicles.py + tests/test_person_match_integration.py to patch the individual stage functions instead of pipeline.run().",
+      "assignee": "coder",
+      "depends_on": [
+        "US-050e"
+      ],
+      "estimated_lines": 280,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/test_pipeline_segmented.py -q --no-header 2>&1 | tail -3 (new file collects and passes)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/test_pipeline_segmented.py --collect-only -q 2>&1 | grep -cE '::' | python -c 'import sys; n=int(sys.stdin.read().strip()); assert n>=4, f\"expected >=4 segmented-pipeline cases, got {n}\"'",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/ -q --no-header 2>&1 | tail -3 (no regression -- the full suite passes with the new segmented path + updated existing tests)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && git grep -nE 'with patch\\(\"listener\\.daemon\\.pipeline\"\\)|mock_pipeline\\.run\\.return_value' tests/ | wc -l -> 0 (no test patches the monolithic pipeline.run anymore -- they patch individual stage functions or dispatcher.dispatch)"
+      ],
+      "files_modified": [
+        "tests/test_pipeline_segmented.py",
+        "tests/test_daemon_dispatch.py",
+        "tests/test_alert_route.py",
+        "tests/test_cooldown_lifecycle.py",
+        "tests/test_drop_after_gate.py",
+        "tests/test_known_vehicles.py",
+        "tests/test_person_match_integration.py"
+      ],
+      "notes": "Minimum new tests: (1) test_tg1_dispatched_when_stage_detail_class_raises -- stage_detail_class_vm2 raises, assert dispatcher.dispatch was called exactly once with TG#1, daemon returned HTTP 200, no TG#2/TG#3 dispatched, record_hit NOT called. (2) test_dispatch_order_tg1_before_tg2_before_tg3 -- happy path, assert dispatch calls in order. (3) test_cooldown_not_recorded_when_stage_build_tg2_raises -- stage_build_tg2 raises, assert record_hit NOT called. (4) test_cooldown_recorded_only_after_tg3_dispatched -- happy path, assert record_hit called exactly once at end. (5) test_tg3_not_dispatched_when_match_returns_no_match -- stage_perform_match returns matched=False, assert dispatcher.dispatch was called twice (TG#1, TG#2) and NOT a third time for TG#3 (or: TG#3 dispatched but with empty body, depending on operator decision -- default: still dispatched with 'no_match' caption per spec item 11). Update existing tests to patch individual stage functions (e.g., patch('listener.daemon.stage_verify_class_vm1')) instead of the old pipeline.run mock.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": "ready",
+      "story_size_budget": "new test file + updates to 6 existing test files, ~280 lines net added"
+    },
+    {
+      "id": "US-050g",
+      "title": "24-hour runtime verification: TG#1 fires before VM2 in logs, 6 confirmed-tg events today (10:14-10:20) would have been delivered, no Stage 11+ exceptions block TG#1",
+      "story_type": "verification",
+      "scope": "logs/daemon.log, listener PID stats (no code changes)",
+      "assignee": "qa",
+      "depends_on": [
+        "US-050f"
+      ],
+      "estimated_lines": 0,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -cE 'tg-send: alert_id=.*TG#1 ' logs/daemon.log | python -c 'import sys; n=int(sys.stdin.read().strip()); assert n>=5, f\"expected >=5 TG#1 sends in 24h window, got {n}\"; print(\"OK TG#1 sends:\", n)' (at least 5 TG#1 fired)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import re; log=open(\"logs/daemon.log\").read(); alert_ids=set(re.findall(r\"alert_id=([a-f0-9]+) TG#1 \", log)); print(\"OK unique alerts with TG#1 fired:\", len(alert_ids))' (each alert has at most one TG#1 line, no duplicates from retry)",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import re; log=open(\"logs/daemon.log\").read(); lines=log.split(\"\\n\"); pairs=[]; [pairs.append((alert_id, [l for l in lines if alert_id in l])) for alert_id in set(re.findall(r\"alert_id=([a-f0-9]+) TG#1 \", log))]; bad=[(aid, ls) for aid,ls in pairs if any(\"/v1/chat/completions\" in l and ls.index(l) < max(i for i,x in enumerate(ls) if \"TG#1\" in x) for l in ls)]; assert not bad, f\"{len(bad)} alerts had VM2 calls BEFORE TG#1 dispatch\"; print(\"OK all TG#1 dispatches happened BEFORE VM2 httpx calls in the same alert\")' (TG#1 fired BEFORE VM2 for every alert in the window)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && grep -cE 'Exception on /alert \\[POST\\]' logs/daemon.log | python -c 'import sys; n=int(sys.stdin.read().strip()); assert n==0, f\"expected 0 /alert 500s, got {n}\"; print(\"OK:\", n, \"/alert 500s\")' (no /alert 500s -- daemon returns 200 even on stage failure)",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && grep -cE 'ValueError: vm2_result missing' logs/daemon.log | python -c 'import sys; n=int(sys.stdin.read().strip()); assert n==0, f\"expected 0 contract-mismatch ValueErrors (the detail.py:184 bug), got {n}\"; print(\"OK:\", n, \"contract errors\")' (the contract bug is fixed -- no more ValueError at detail.py:184)"
+      ],
+      "files_modified": [],
+      "notes": "No code changes. QA story: after US-050a-f land, leave the daemon running for 24 hours with the segmented pipeline applied and verify the dispatch order + survival invariants. If any AC fails, file a remediation card with concrete log excerpts. AC3 is the central proof: for every alert in the window, the log line 'tg-send: ... TG#1 ...' appears BEFORE any 'httpx POST ... /v1/chat/completions' line for the same alert_id. This proves the segmentation works in production, not just unit-test-shaped-right.",
+      "operator_approval_required": false,
+      "commit_required": false,
+      "status": "ready",
+      "story_size_budget": "verification only, zero code changes"
+    }
+  ]
+}
