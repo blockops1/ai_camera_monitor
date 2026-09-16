@@ -1,0 +1,227 @@
+{
+  "prd_id": "PHASE-V2-049-PRD-clean-rtsp-reconnect",
+  "title": "Replace watchdog+launchd-respawn RTSP reconnect with single-thread in-thread periodic teardown (Frigate/go2rtc pattern)",
+  "author": "jill (operator-directed 2026-09-16, post the hourly-restart diagnostic)",
+  "status": "proposal",
+  "phase": "v2",
+  "plan_section": null,
+  "trigger": "Operator 2026-09-16 (verbatim): 'It doesn't need a watchdog, it doesn't need to restart the listener, it just needs to tear down the RTSP stream and start a new one every hour. The watchdog and the listener restart are both problems that should not be in the code, they are lazy workarounds.' And: 'It is horrible design, and it is actually embarrassing.' Confirmed by 11-hour overnight audit: decoder threads wedge silently in libav C demux() (PyAV issue #700), the watchdog's 'completed (reconnects_total=1)' log is decorative (decode threads do not exit within 10s on every fire, six per daemon), and launchd KeepAlive=true then kills+restarts the entire listener 600ms later. The internal watchdog is a paper trail; launchd is the actual reconnect mechanism. Industry-canonical pattern (Frigate, go2rtc producer.go) owns the connect/decode/disconnect cycle on the single thread that consumes the frames -- no watchdog thread, no outer process restart. V1 design contract per operator 2026-09-16: tear down + reopen every hour from inside the decode loop.",
+  "background": "Current state in /Users/jill/farm-surveillance-v2/infra/frame_capture.py: PersistentRTSPReader.start() spawns TWO threads per camera: a decode thread (target=self._run_loop) AND a watchdog thread (target=self._scheduled_reconnect_watchdog). The watchdog sleeps on stop_event with timeout=scheduled_reconnect_seconds (default 3600), then calls _scheduled_reconnect_fire() which: (a) sets stop_event so the decode thread exits on next packet, (b) joins the decode thread with a 10s timeout, (c) closes the container, (d) spawns a NEW decode thread. In practice (overnight audit 2026-09-15 21:00 to 2026-09-16 08:00, logs/daemon.log): every fire logs 'decode thread did not exit within 10s' for ALL SIX cameras simultaneously, then 'scheduled_reconnect_fire: completed (reconnects_total=1)' -- the new decode threads spawn ALONGSIDE the wedged ones. launchctl then restarts the daemon 600ms later because the listener stops emitting output. Net effect: the watchdog is decorative, the hourly cadence is provided by launchd KeepAlive=true, and the system survives only because the daemon respawn is fast enough to not lose frames the alert pipeline cares about. V1 design knew the RTSP stream becomes unstable at ~6h. The fix is a periodic teardown from the thread that owns the libav context, not a layer of paper that the operator must trust blindly. Web research confirms go2rtc internal/streams/producer.go uses a single producer() goroutine with internal reconnect() method (no watchdog, no outer process), Frigate uses the same pattern, and PyAV #700 explicitly says demux() can wedge silently and must be torn down by the application. Phase 6B.13 / Phase 6B.39 baked in the bad design (defensive 'proceed anyway' branch that the V1 refactor never had); this PRD supersedes both.",
+  "goal": "PersistentRTSPReader owns its own lifecycle: a single decode thread that runs the decode loop, AND from inside the same loop tears down + reopens the libav container on a fixed cadence (every 3600s by default). No watchdog thread. No launchd KeepAlive. No defense layers. Daemon crashes fail loud; healthy hours progress silently.",
+  "operator_guarantees": {
+    "no_residue": "After all stories land, infra/frame_capture.py contains: zero references to _scheduled_reconnect_watchdog, _scheduled_reconnect_fire, _watchdog_thread, _resolve_scheduled_reconnect_seconds, FARMSV_RTSP_RECONNECT_SECONDS, SCHEDULED_RECONNECT_DEFAULT. The plist contains no KeepAlive key. .env / .env.example contain no FARMSV_RTSP_RECONNECT_SECONDS key.",
+    "tests_clean": "After all stories land, tests/test_rtsp_watchdog.py is deleted. The 5 watchdog-specific test cases are gone. tests/test_frame_capture.py is updated: keep the failure-driven reconnect tests, drop any test that asserts the watchdog spawns a sibling thread or that 'proceed-anyway' is logged. ADD new tests asserting in-thread periodic teardown fires at the configured cadence, the ring buffer survives teardown, and the failure-driven reconnect cap still fails loud at RECONNECT_MAX_ATTEMPTS_DEFAULT.",
+    "single_thread_per_camera": "grep proves: after all stories, exactly one threading.Thread(target=self._run_loop) construction per PersistentRTSPReader.start() call. No threading.Thread(target=self._scheduled_reconnect_watchdog) exists anywhere.",
+    "plist_has_no_keepalive": "After plist story lands, plutil -extract KeepAlive raw on the live plist returns 'does not exist' (operator-driven launchctl unload+load cycle to apply).",
+    "daemon_survives_24h": "Story US-049g runs the daemon for 24 hours with the new code, confirms zero launchd respawns (plist has no KeepAlive) and frames_decoded_total monotonically increases (in-thread teardown is firing).",
+    "cameras_off_limits": "Stories MUST NOT touch Reolink web-UI / camera-side configuration.",
+    "no_defensive_fallbacks": "Per operator 2026-09-15: 'I never ever ever want a defensive fallback.' The replacement teardown loop is fail-loud on unhandled exceptions. No 'proceed anyway' branches. No bare `except: pass` swallowed in the teardown path.",
+    "ascii_only": "No Unicode, em-dashes, or smart quotes in any file the PRD touches.",
+    "v1_refactor_out_of_scope": "The same antipattern exists in /Users/jill/farm-surveillance-refactor/infra/persistent_rtsp.py (lines 824-880). This PRD does NOT touch the refactor repo."
+  },
+  "shipping_definition": "(a) Operator runs the daemon for 24+ hours with the updated infra/frame_capture.py and the no-KeepAlive plist applied. (b) logs/daemon.log shows periodic in-thread teardowns (new log line, e.g. 'in_thread_teardown: starting' followed by 'in_thread_teardown: completed', at ~3600s intervals) and ZERO 'scheduled_reconnect_fire:' lines, ZERO 'decode thread did not exit within 10s' lines, ZERO launchd respawns. (c) All 4 camera readers emit frames throughout. (d) pytest -q --no-header returns at least the count after the previous passing baseline (no net-negative). (e) Each story lands as its own commit on main. (f) No watchdog / restarter leftovers in the codebase. (g) Operator reviews and pushes to Forgejo only (NOT GitHub).",
+  "scope_exclusions": [
+    "Do NOT touch /Users/jill/farm-surveillance-refactor/. Frozen archive.",
+    "Do NOT touch /Users/jill/farm-surveillance-internal/. Frozen archive.",
+    "Do NOT touch /Users/jill/farm-surveillance-public/. Out of scope.",
+    "Do NOT touch /Users/jill/farm-surveillance/ (v0). OFF and stays OFF.",
+    "Do NOT git push to forgejo or GitHub. Operator reviews and pushes.",
+    "Do NOT install new skills. Use existing skill set.",
+    "Do NOT touch any Reolink camera web-UI. Cameras OFF-LIMITS.",
+    "Do NOT touch camera-creds.env (already gitignored, already separate file).",
+    "Do NOT touch listener/daemon.py. The listener does not reference _scheduled_reconnect_* symbols.",
+    "Do NOT touch pyproject.toml / requirements*. No new dependencies.",
+    "Do NOT replace PyAV. PyAV is the right library for the canonical pattern.",
+    "Do NOT add a 'proceed anyway' branch anywhere. Operator 2026-09-15: 'no defensive fallbacks ever.'"
+  ],
+  "design_principles": [
+    "One thread per camera. The decode thread owns the libav container for its lifetime.",
+    "Periodic teardown happens INSIDE _decode_iteration -- NOT in a sibling thread.",
+    "Every reconnect (scheduled OR failure-driven) re-opens the container by re-entering _decode_iteration. The outer while loop in _run_loop is the single entry point.",
+    "Ring buffer survives ALL reconnects (scheduled teardown, failure-driven reconnect, cap-exhausted retry). PersistentRTSPReader._ring is owned by the PersistentRTSPReader.",
+    "Failure-driven reconnect stays capped at RECONNECT_MAX_ATTEMPTS_DEFAULT (10). After cap, log ERROR and exit the decode loop with healthy=False. is_healthy() returns False. No fallback path.",
+    "Tests live next to code. test_rtsp_watchdog.py is removed; its cases migrate to test_frame_capture.py under clearer names.",
+    "Story body <= 2500 chars enforced. Story <= 80 lines new code (most are deletion)."
+  ],
+  "stories": [
+    {
+      "id": "US-049a",
+      "title": "Delete FARMSV_RTSP_RECONNECT_SECONDS env var + _resolve_scheduled_reconnect_seconds resolver from infra/frame_capture.py",
+      "story_type": "deletion",
+      "scope": "infra/frame_capture.py (lines 67-100 region: SCHEDULED_RECONNECT_DEFAULT, _SCHEDULED_RECONNECT_ENV, _resolve_scheduled_reconnect_seconds)",
+      "assignee": "coder",
+      "depends_on": [],
+      "estimated_lines": -35,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && git grep -nE 'FARMSV_RTSP_RECONNECT_SECONDS|_SCHEDULED_RECONNECT_ENV|_resolve_scheduled_reconnect_seconds|SCHEDULED_RECONNECT_DEFAULT' infra/frame_capture.py | wc -l -> 0 (all four symbols absent from frame_capture.py)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && git grep -nE 'FARMSV_RTSP_RECONNECT_SECONDS' .env.example | wc -l -> 0 (no .env.example reference)",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -m py_compile infra/frame_capture.py && echo OK (module still imports)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from infra import frame_capture; print(\"_UNSET\" not in dir(frame_capture))' | grep -q True && echo OK (the _UNSET sentinel is also gone -- its sole user was the resolver)",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from infra.frame_capture import PersistentRTSPReader; import inspect; sig=inspect.signature(PersistentRTSPReader.__init__); print(sig)' 2>&1 | grep -v scheduled_reconnect_seconds | grep -q 'ring_size' && echo OK (constructor signature no longer takes scheduled_reconnect_seconds)"
+      ],
+      "files_modified": [
+        "infra/frame_capture.py"
+      ],
+      "notes": "Sole purpose: removal. No replacement yet. The constructor no longer accepts scheduled_reconnect_seconds; US-049c will add the in-thread teardown timer with a hardcoded 3600s default (no env override).",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": "ready",
+      "story_size_budget": "deletion-only, ~35 lines removed, fits in one commit"
+    },
+    {
+      "id": "US-049b",
+      "title": "Delete _scheduled_reconnect_watchdog, _scheduled_reconnect_fire, _watchdog_thread from PersistentRTSPReader",
+      "story_type": "deletion",
+      "scope": "infra/frame_capture.py (lines ~181 (self._watchdog_thread), ~239-244 (start() spawns it), ~253-261 (stop() joins it), lines 336-444 (_scheduled_reconnect_watchdog and _scheduled_reconnect_fire methods))",
+      "assignee": "coder",
+      "depends_on": [
+        "US-049a"
+      ],
+      "estimated_lines": -120,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && git grep -nE '_scheduled_reconnect_watchdog|_scheduled_reconnect_fire|_watchdog_thread' infra/frame_capture.py | wc -l -> 0 (all three symbols absent)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && git grep -nE 'scheduled_reconnect_fire:|scheduled_reconnect_watchdog:' -- '*.py' | wc -l -> 0 (no log string references either)",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -m py_compile infra/frame_capture.py && echo OK (module still imports)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && grep -nE 'threading.Thread\\(target=self\\._scheduled_reconnect_watchdog' infra/frame_capture.py | wc -l -> 0 (start() no longer spawns the watchdog thread)",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import ast; t=ast.parse(open(\"infra/frame_capture.py\").read()); cls=[n for n in ast.walk(t) if isinstance(n, ast.ClassDef) and n.name==\"PersistentRTSPReader\"][0]; methods=[m.name for m in cls.body if isinstance(m, ast.FunctionDef)]; assert \"_scheduled_reconnect_watchdog\" not in methods and \"_scheduled_reconnect_fire\" not in methods; print(\"OK methods:\", len(methods))' (AST: watchdog methods gone)"
+      ],
+      "files_modified": [
+        "infra/frame_capture.py"
+      ],
+      "notes": "After this story, PersistentRTSPReader has ONE decode thread (target=self._run_loop), no sibling. The 'proceed anyway on stuck decode thread' branch is GONE -- the in-thread teardown in US-049c handles the failure mode by being the thread that owns the libav C-land demux() call in the first place.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": "ready",
+      "story_size_budget": "deletion-only, ~120 lines removed, fits in one commit"
+    },
+    {
+      "id": "US-049c",
+      "title": "Implement in-thread periodic teardown in _decode_iteration: close+reopen container every 3600s, preserve ring buffer",
+      "story_type": "rewrite",
+      "scope": "infra/frame_capture.py::_decode_iteration (lines 562-592 region). Add a teardown deadline check between packet iterations. When elapsed, close+reopen the container IN-PLACE.",
+      "assignee": "coder",
+      "depends_on": [
+        "US-049b"
+      ],
+      "estimated_lines": 40,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && git grep -nE '_last_teardown_monotonic|TEARDOWN_INTERVAL_SECONDS|_periodic_teardown' infra/frame_capture.py | wc -l -> 3 (three new symbols introduced for the in-thread teardown cadence)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && git grep -nE '_decode_iteration' infra/frame_capture.py | wc -l -> 4 (one declaration, three usages in _run_loop, tests, stats -- in-thread teardown must be visible in stats())",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import ast; t=ast.parse(open(\"infra/frame_capture.py\").read()); cls=[n for n in ast.walk(t) if isinstance(n, ast.ClassDef) and n.name==\"PersistentRTSPReader\"][0]; methods=[m.name for m in cls.body if isinstance(m, ast.FunctionDef)]; assert \"_scheduled_reconnect_watchdog\" not in methods and \"_scheduled_reconnect_fire\" not in methods; print(\"OK methods:\", len(methods))' (AST: watchdog methods gone)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from infra.frame_capture import PersistentRTSPReader; import inspect; src = inspect.getsource(PersistentRTSPReader._decode_iteration); assert \"container.close()\" in src and \"av.open(\" in src and src.count(\"container.close()\") >= 2 and src.count(\"av.open(\") >= 2; print(\"OK: close+reopen in same method\")'",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/test_frame_capture.py -q --no-header 2>&1 | tail -3 (existing failure-driven reconnect tests still pass -- cap logic in _run_loop is unchanged)"
+      ],
+      "files_modified": [
+        "infra/frame_capture.py"
+      ],
+      "notes": "Pattern (model after go2rtc producer.go reconnect()): _decode_iteration loops on container.demux(stream). Between packet iterations, check (time.monotonic() - self._last_teardown_monotonic) >= TEARDOWN_INTERVAL_SECONDS (3600.0). On trigger: close container in a try/except that re-raises on real errors (no `except: pass`), reopen via av.open in this same frame, update self._last_teardown_monotonic, continue. self._ring is class-level -- persists across teardown by construction. stats() must expose last_teardown_monotonic and seconds_since_teardown.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": "ready",
+      "story_size_budget": "rewrite of _decode_iteration, ~40 net new lines, fits in one commit"
+    },
+    {
+      "id": "US-049d",
+      "title": "Remove launchd KeepAlive=true from com.farm.surveillance.v2.plist (worker documents the new plist; operator applies)",
+      "story_type": "config",
+      "scope": "~/Library/LaunchAgents/com.farm.surveillance.v2.plist (operator writes this -- worker proposes new XML in PRD)",
+      "assignee": "coder",
+      "depends_on": [
+        "US-049b"
+      ],
+      "estimated_lines": 5,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import plistlib; d=plistlib.load(open(\"/Users/jill/Library/LaunchAgents/com.farm.surveillance.v2.plist\",\"rb\")); assert \"KeepAlive\" not in d; print(\"OK plist has no KeepAlive\")' (plistlib confirms KeepAlive absent on operator's machine)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && git status --porcelain | wc -l -> 0 (worker's commit touched no repo files; plist is operator-side and applied manually)",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && launchctl list | grep -E 'com\\.farm\\.surveillance\\.v2' | awk '{print $1, $2}' | head -3 (daemon running with the new plist applied OR stopped for the plist swap)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import plistlib; d=plistlib.load(open(\"/Users/jill/Library/LaunchAgents/com.farm.surveillance.v2.plist\",\"rb\")); assert d.get(\"Label\")==\"com.farm.surveillance.v2\"; print(\"OK label intact\")' (label untouched)",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && git grep -nE 'KeepAlive' docs/PHASE-V2-049-PRD-clean-rtsp-reconnect.json | wc -l -> 3 (PRD references KeepAlive in three places: shipping_definition, operator_guarantees.plist_has_no_keepalive, operator_instructions_post_merge.plist_apply)"
+      ],
+      "files_modified": [
+        "docs/PHASE-V2-049-PRD-clean-rtsp-reconnect.json"
+      ],
+      "notes": "Worker does NOT touch ~/Library/LaunchAgents/com.farm.surveillance.v2.plist -- that is a system file under operator control. Worker commits the proposed new plist XML into the PRD's operator_instructions_post_merge block. Operator runs launchctl unload, edits the file (removing the <key>KeepAlive</key><true/> pair), and runs launchctl load. Without KeepAlive, a daemon crash stays crashed -- fail-loud.",
+      "operator_approval_required": true,
+      "commit_required": true,
+      "status": "ready",
+      "story_size_budget": "5-line plist edit, mostly operator-applied; worker commit is doc-only"
+    },
+    {
+      "id": "US-049e",
+      "title": "Delete tests/test_rtsp_watchdog.py (5 watchdog-specific cases); migrate cap-reached case into test_frame_capture.py",
+      "story_type": "test-removal",
+      "scope": "tests/test_rtsp_watchdog.py (5 tests across 3 classes), tests/test_frame_capture.py (add replacement case for failure-driven cap)",
+      "assignee": "coder",
+      "depends_on": [
+        "US-049c"
+      ],
+      "estimated_lines": -380,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && git ls-files tests/test_rtsp_watchdog.py | wc -l -> 0 (file deleted)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/test_rtsp_watchdog.py --collect-only -q 2>&1 | grep -E 'errors|ERROR' | wc -l -> 0 OR grep -q 'no such file' 2>&1 | head -1 (file gone, no collection errors)",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/test_frame_capture.py -q --no-header 2>&1 | tail -3 (existing frame_capture tests pass)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/ -q --no-header 2>&1 | tail -3 (no regression in the rest of the suite)",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && git grep -nE 'TestScheduledReconnectWatchdog|TestMaxReconnectAttemptsCap|TestWatchdogProceedAnywayOnStuckDecodeThread|test_watchdog_closes_container_and_respawns_decode_thread|test_cap_reached_logged_and_decode_iteration_halted|test_watchdog_proceeds_anyway_when_decode_thread_is_stuck|test_watchdog_logs_proceed_anyway_warning|test_watchdog_normal_path_still_works' -- 'tests/' | wc -l -> 0 (zero references to any old watchdog test name)"
+      ],
+      "files_modified": [
+        "tests/test_rtsp_watchdog.py"
+      ],
+      "notes": "The 5 test cases map: test_watchdog_closes_container_and_respawns_decode_thread + test_watchdog_proceeds_anyway_when_decode_thread_is_stuck + test_watchdog_logs_proceed_anyway_warning + test_watchdog_normal_path_still_works are REMOVED ENTIRELY. test_cap_reached_logged_and_decode_iteration_halted: cap logic in _run_loop is unchanged; migrate the case into test_frame_capture.py under a clearer name like test_cap_reached_failure_driven_only_logs_error_no_watchdog_dependency.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": "ready",
+      "story_size_budget": "deletion of a 414-line file; one migrate case; fits in one commit"
+    },
+    {
+      "id": "US-049f",
+      "title": "Add tests for in-thread periodic teardown: cadence fires at 3600s, ring buffer survives, failure-driven cap still fails loud",
+      "story_type": "test-add",
+      "scope": "tests/test_frame_capture.py (new TestPeriodicTeardown class)",
+      "assignee": "coder",
+      "depends_on": [
+        "US-049c",
+        "US-049e"
+      ],
+      "estimated_lines": 180,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/test_frame_capture.py -q --no-header -k 'TestPeriodicTeardown' 2>&1 | tail -3 (new class collects and passes -- 4-6 cases minimum)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/ -q --no-header 2>&1 | tail -3 (no regression in the rest of the suite)",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python -m pytest tests/test_frame_capture.py::TestPeriodicTeardown --collect-only -q 2>&1 | grep -cE '::' | awk '{print $1}' | python -c 'import sys; n=int(sys.stdin.read().strip()); assert n>=4, f\"expected >=4 periodic-teardown cases, got {n}\"'",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import ast; tree=ast.parse(open(\"tests/test_frame_capture.py\").read()); classes=[n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]; assert \"TestPeriodicTeardown\" in classes; print(\"OK new class present\")'"
+      ],
+      "files_modified": [
+        "tests/test_frame_capture.py"
+      ],
+      "notes": "Minimum case set: (1) test_teardown_fires_after_3600s -- monkeypatch time.monotonic to advance past the deadline, assert container.close()+av.open() called twice in the same frame. (2) test_ring_buffer_survives_teardown -- append 3 frames, monkeypatch teardown deadline, assert ring still holds the original 3 + new ones after reopen. (3) test_stats_exposes_last_teardown_monotonic -- assert stats() dict contains the new field. (4) test_failure_driven_cap_still_fails_loud_at_10 -- simulate 11 consecutive decode failures, assert ERROR log and loop exits (no silent proceed-anyway).",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": "ready",
+      "story_size_budget": "4-6 test cases, ~180 new lines, fits in one commit"
+    },
+    {
+      "id": "US-049g",
+      "title": "24-hour runtime verification: daemon survives without launchd respawn; in-thread teardown events fire at ~3600s cadence; frames_decoded_total monotonically increases",
+      "story_type": "verification",
+      "scope": "logs/daemon.log, listener PID stats (no code changes)",
+      "assignee": "qa",
+      "depends_on": [
+        "US-049d",
+        "US-049f"
+      ],
+      "estimated_lines": 0,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -cE 'scheduled_reconnect_fire:|scheduled_reconnect_watchdog:' logs/daemon.log | awk '{print $1}' | python -c 'import sys; n=int(sys.stdin.read().strip()); print(\"OK teardown-residue count:\", n)' (no scheduled_reconnect_fire log lines at all in the 24h window)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -cE 'in_thread_teardown:' logs/daemon.log | awk '{print $1}' | python -c 'import sys; n=int(sys.stdin.read().strip()); assert n>=20, f\"expected >=20 teardown events in 24h, got {n}\"; print(\"OK:\", n, \"teardowns\")' (at least 20 in-thread teardown events fired)",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import re; log=open(\"logs/daemon.log\").read(); frames=re.findall(r\"frames_decoded_total=(\\d+)\", log); latest=int(frames[-1]) if frames else 0; print(\"OK frames monotonically increasing: latest =\", latest) if all(int(frames[i]) <= int(frames[i+1]) for i in range(len(frames)-1)) else print(\"FAIL frames non-monotonic\")'",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && ps -ef | grep -E 'com.farm.surveillance.v2|listener.daemon' | grep -v grep | awk '{print $2}' | wc -l | python -c 'import sys; n=int(sys.stdin.read().strip()); assert 0<=n<=1, f\"expected 0 or 1 listener processes, got {n}\"; print(\"OK:\", n, \"listener process(es)\")' (zero or one listener process -- NOT multiple respawned copies)",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && grep -cE 'decode thread did not exit within 10s' logs/daemon.log | awk '{print $1}' | python -c 'import sys; n=int(sys.stdin.read().strip()); assert n==0, f\"expected 0 stuck-thread warnings, got {n}\"; print(\"OK:\", n, \"stuck warnings\")' (the libav wedge log line is GONE)"
+      ],
+      "files_modified": [],
+      "notes": "No code changes. QA story: after US-049a-f land, leave the daemon running for 24 hours with the new plist applied and verify. If any AC fails, file a remediation card with concrete log excerpts. This story proves the in-thread teardown path is actually executing -- not just code-shaped-right but also runtime-proven.",
+      "operator_approval_required": false,
+      "commit_required": false,
+      "status": "ready",
+      "story_size_budget": "verification only, zero code changes"
+    }
+  ]
+}
