@@ -20,6 +20,7 @@ Exclusions (whitelist):
   - .pytest_cache/ directories
   - scripts/check_no_private_data.py itself (its pattern definitions)
   - docs/PRIVACY.md (discusses what to look for)
+  - .mailmap (operator's identity mapping per git convention)
 
 Usage:
     python scripts/check_no_private_data.py
@@ -133,6 +134,10 @@ def _should_exclude(filepath: str, repo_root: Path) -> bool:
 
     # Exclude PRIVACY.md (discusses what to look for)
     if str(rel) == "docs/PRIVACY.md":
+        return True
+
+    # Exclude .mailmap (operator's identity mapping per git convention)
+    if str(rel) == ".mailmap":
         return True
 
     return False
