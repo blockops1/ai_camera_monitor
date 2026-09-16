@@ -95,12 +95,12 @@ class VisionAnalyzerError(Exception):
 
 # Mode dispatch — centralizes (response_format, prompt_builder) per mode.
 # Adding a new VM2 mode = add an entry here + create a prompt module.
-# The canonical mode set is exactly four (vm1 + 3 vm2). Anything else
-# raises VisionAnalyzerError loudly.
+# The canonical mode set is vm1 + 3 vm2 + unsure. Unknown modes raise.
 DISPATCH = {
     "vehicle": (_response_format(VEHICLE_SCHEMA, "vehicle"), build_vehicle_prompt),
     "person": (_response_format(PERSON_SCHEMA, "person"), build_person_prompt),
     "animal": (_response_format(ANIMAL_SCHEMA, "animal"), build_animal_prompt),
+    "unsure": (_response_format(VM1_SCHEMA, "vm1"), build_vm1_prompt),
 }
 
 
@@ -158,7 +158,19 @@ def detail_class(
     mode: str, crop_a: str, crop_b: str,
     motion_diff_image: str | None = None,
 ) -> dict:
-    """VM2: mode-specific detail call. Raises VisionAnalyzerError on unknown mode."""
+    """VM2: mode-specific detail call. Raises VisionAnalyzerError on unknown mode.
+
+    Handles 'unsure' mode by returning a no-op result dict instead of
+    dispatching to the llama-server — the VM1 classify already determined
+    the subject is unsure, so VM2 detail is unnecessary.
+    """
+    if mode == "unsure":
+        return {
+            "class_confirmed": False,
+            "class": "unsure",
+            "reason": "VM1 classified the subject as unsure; VM2 detail skipped",
+        }
+
     entry = DISPATCH.get(mode)
     if entry is None:
         raise VisionAnalyzerError(

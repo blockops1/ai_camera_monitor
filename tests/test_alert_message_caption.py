@@ -316,7 +316,8 @@ class TestTg2CaptionAlertMetadata:
         # Basic lines still present
         assert "Camera: Back Yard" in caption
         assert "Mode: person" in caption
-        assert "Class confirmed: person" in caption
+        # Mode-specific: clothing_upper is used as the class-confirmed proxy
+        assert "black hoodie" in caption
 
 
 # ---------------------------------------------------------------------------
