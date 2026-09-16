@@ -995,3 +995,95 @@ class TestFailureDrivenReconnectCap:
         assert not any("proceed" in m.lower() for m in all_msgs), (
             f"Found 'proceed' in log messages — old watchdog path should be gone: {all_msgs}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Test: in-thread periodic teardown cadence (US-049c / US-049f)
+# ---------------------------------------------------------------------------
+
+
+class TestPeriodicTeardown:
+    """Tests for the in-thread periodic teardown mechanism (US-049c)."""
+
+    def test_teardown_fires_after_3600s(
+        self, mock_av_stream, mock_av_frame, monkeypatch
+    ):
+        """AC: teardown fires when monotonic time advances past
+        TEARDOWN_INTERVAL_SECONDS (3600). Assert av.open() called >= 2x
+        (once at start, once at teardown).
+
+        The teardown check is at the START of _decode_iteration. To trigger
+        it, the first demux must raise (simulating RTSP disconnect) so
+        _run_loop retries _decode_iteration — on the retry the time is past
+        3600 and teardown fires.
+
+        NOTE: fc.time IS the stdlib time module, so monkeypatching fc.time.sleep
+        also patches stdlib time.sleep. We save a reference to the real sleep
+        BEFORE the monkeypatch.
+        """
+        from infra import frame_capture as fc
+
+        # Capture real time.sleep before monkeypatch (fc.time is stdlib time)
+        _real_sleep = fc.time.sleep
+
+        teardown_interval = fc.TEARDOWN_INTERVAL_SECONDS  # 3600.0
+        call_log = {"open": 0}
+
+        fake_time = [0.0]
+
+        def fake_monotonic():
+            return fake_time[0]
+
+        open_count = [0]
+
+        def fake_av_open(*args, **kwargs):
+            call_log["open"] += 1
+            open_count[0] += 1
+            container = MagicMock()
+            container.streams.video = [mock_av_stream]
+
+            def demux_gen(stream_arg):
+                if open_count[0] == 1:
+                    # First container: yield one frame then raise
+                    # to trigger _run_loop retry (which fires teardown).
+                    pkt = MagicMock()
+                    pkt.dts = 0
+                    pkt.decode.return_value = [mock_av_frame]
+                    yield pkt
+                    raise OSError("simulated RTSP disconnect")
+                # Post-teardown container: yield and raise (so stop works).
+                pkt = MagicMock()
+                pkt.dts = 0
+                pkt.decode.return_value = [mock_av_frame]
+                yield pkt
+                raise OSError("simulated disconnect after teardown")
+
+            container.demux = demux_gen
+            return container
+
+        monkeypatch.setattr(fc.time, "monotonic", fake_monotonic)
+        monkeypatch.setattr(fc.time, "sleep", lambda _s: None)
+
+        with patch("av.open", side_effect=fake_av_open):
+            reader = PersistentRTSPReader(
+                "rtsp://u:p@h:554/h",
+                max_reconnect_attempts=0,  # cap disabled, keep looping
+            )
+            reader.start()
+
+            # Yield to background thread using REAL sleep (saved before patch)
+            _real_sleep(0.05)
+
+            # Advance past teardown interval
+            fake_time[0] = teardown_interval + 1.0
+
+            # Yield to let teardown fire
+            _real_sleep(0.3)
+
+            # Stop reader
+            reader.stop(timeout=2.0)
+
+        # AC: av.open called at least twice (initial connect + teardown)
+        assert call_log["open"] >= 2, (
+            f"av.open() called {call_log['open']}x, expected >= 2"
+        )
