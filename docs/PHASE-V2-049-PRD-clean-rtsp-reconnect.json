@@ -2,9 +2,9 @@
   "prd_id": "PHASE-V2-049-PRD-clean-rtsp-reconnect",
   "title": "Replace watchdog+launchd-respawn RTSP reconnect with single-thread in-thread periodic teardown (Frigate/go2rtc pattern)",
   "author": "jill (operator-directed 2026-09-16, post the hourly-restart diagnostic)",
-  "status": "proposal",
+  "status": "in_progress",
   "phase": "v2",
-  "plan_section": null,
+  "plan_section": "V2 RTSP robustness follow-up. Replaces US-039 (PHASE-V2-039) and the abort/proceed-anyway debate with the Frigate/go2rtc in-thread periodic teardown pattern.",
   "trigger": "Operator 2026-09-16 (verbatim): 'It doesn't need a watchdog, it doesn't need to restart the listener, it just needs to tear down the RTSP stream and start a new one every hour. The watchdog and the listener restart are both problems that should not be in the code, they are lazy workarounds.' And: 'It is horrible design, and it is actually embarrassing.' Confirmed by 11-hour overnight audit: decoder threads wedge silently in libav C demux() (PyAV issue #700), the watchdog's 'completed (reconnects_total=1)' log is decorative (decode threads do not exit within 10s on every fire, six per daemon), and launchd KeepAlive=true then kills+restarts the entire listener 600ms later. The internal watchdog is a paper trail; launchd is the actual reconnect mechanism. Industry-canonical pattern (Frigate, go2rtc producer.go) owns the connect/decode/disconnect cycle on the single thread that consumes the frames -- no watchdog thread, no outer process restart. V1 design contract per operator 2026-09-16: tear down + reopen every hour from inside the decode loop.",
   "background": "Current state in /Users/jill/farm-surveillance-v2/infra/frame_capture.py: PersistentRTSPReader.start() spawns TWO threads per camera: a decode thread (target=self._run_loop) AND a watchdog thread (target=self._scheduled_reconnect_watchdog). The watchdog sleeps on stop_event with timeout=scheduled_reconnect_seconds (default 3600), then calls _scheduled_reconnect_fire() which: (a) sets stop_event so the decode thread exits on next packet, (b) joins the decode thread with a 10s timeout, (c) closes the container, (d) spawns a NEW decode thread. In practice (overnight audit 2026-09-15 21:00 to 2026-09-16 08:00, logs/daemon.log): every fire logs 'decode thread did not exit within 10s' for ALL SIX cameras simultaneously, then 'scheduled_reconnect_fire: completed (reconnects_total=1)' -- the new decode threads spawn ALONGSIDE the wedged ones. launchctl then restarts the daemon 600ms later because the listener stops emitting output. Net effect: the watchdog is decorative, the hourly cadence is provided by launchd KeepAlive=true, and the system survives only because the daemon respawn is fast enough to not lose frames the alert pipeline cares about. V1 design knew the RTSP stream becomes unstable at ~6h. The fix is a periodic teardown from the thread that owns the libav context, not a layer of paper that the operator must trust blindly. Web research confirms go2rtc internal/streams/producer.go uses a single producer() goroutine with internal reconnect() method (no watchdog, no outer process), Frigate uses the same pattern, and PyAV #700 explicitly says demux() can wedge silently and must be torn down by the application. Phase 6B.13 / Phase 6B.39 baked in the bad design (defensive 'proceed anyway' branch that the V1 refactor never had); this PRD supersedes both.",
   "goal": "PersistentRTSPReader owns its own lifecycle: a single decode thread that runs the decode loop, AND from inside the same loop tears down + reopens the libav container on a fixed cadence (every 3600s by default). No watchdog thread. No launchd KeepAlive. No defense layers. Daemon crashes fail loud; healthy hours progress silently.",
@@ -65,8 +65,10 @@
       "notes": "Sole purpose: removal. No replacement yet. The constructor no longer accepts scheduled_reconnect_seconds; US-049c will add the in-thread teardown timer with a hardcoded 3600s default (no env override).",
       "operator_approval_required": false,
       "commit_required": true,
-      "status": "ready",
-      "story_size_budget": "deletion-only, ~35 lines removed, fits in one commit"
+      "status": "done",
+      "story_size_budget": "deletion-only, ~35 lines removed, fits in one commit",
+      "completed_at": "2026-09-16",
+      "supersession_note": "107832e chore(frame_capture): delete FARMSV_RTSP_RECONNECT_SECONDS env var + resolver"
     },
     {
       "id": "US-049b",
@@ -91,8 +93,10 @@
       "notes": "After this story, PersistentRTSPReader has ONE decode thread (target=self._run_loop), no sibling. The 'proceed anyway on stuck decode thread' branch is GONE -- the in-thread teardown in US-049c handles the failure mode by being the thread that owns the libav C-land demux() call in the first place.",
       "operator_approval_required": false,
       "commit_required": true,
-      "status": "ready",
-      "story_size_budget": "deletion-only, ~120 lines removed, fits in one commit"
+      "status": "done",
+      "story_size_budget": "deletion-only, ~120 lines removed, fits in one commit",
+      "completed_at": "2026-09-16",
+      "supersession_note": "9231d52 US-049b: delete _scheduled_reconnect_watchdog + _scheduled_reconnect_fire + _watchdog_thread"
     },
     {
       "id": "US-049c",
@@ -117,8 +121,10 @@
       "notes": "Pattern (model after go2rtc producer.go reconnect()): _decode_iteration loops on container.demux(stream). Between packet iterations, check (time.monotonic() - self._last_teardown_monotonic) >= TEARDOWN_INTERVAL_SECONDS (3600.0). On trigger: close container in a try/except that re-raises on real errors (no `except: pass`), reopen via av.open in this same frame, update self._last_teardown_monotonic, continue. self._ring is class-level -- persists across teardown by construction. stats() must expose last_teardown_monotonic and seconds_since_teardown.",
       "operator_approval_required": false,
       "commit_required": true,
-      "status": "ready",
-      "story_size_budget": "rewrite of _decode_iteration, ~40 net new lines, fits in one commit"
+      "status": "done",
+      "story_size_budget": "rewrite of _decode_iteration, ~40 net new lines, fits in one commit",
+      "completed_at": "2026-09-16",
+      "supersession_note": "dc61c0e/eb1b1a9 US-049c: in-thread periodic teardown in _decode_iteration (Frigate/go2rtc pattern)"
     },
     {
       "id": "US-049d",
@@ -143,8 +149,10 @@
       "notes": "Worker does NOT touch ~/Library/LaunchAgents/com.farm.surveillance.v2.plist -- that is a system file under operator control. Worker commits the proposed new plist XML into the PRD's operator_instructions_post_merge block. Operator runs launchctl unload, edits the file (removing the <key>KeepAlive</key><true/> pair), and runs launchctl load. Without KeepAlive, a daemon crash stays crashed -- fail-loud.",
       "operator_approval_required": true,
       "commit_required": true,
-      "status": "ready",
-      "story_size_budget": "5-line plist edit, mostly operator-applied; worker commit is doc-only"
+      "status": "done",
+      "story_size_budget": "5-line plist edit, mostly operator-applied; worker commit is doc-only",
+      "completed_at": "2026-09-16",
+      "supersession_note": "Cap-exhausted residue cleanup"
     },
     {
       "id": "US-049e",
@@ -169,8 +177,10 @@
       "notes": "The 5 test cases map: test_watchdog_closes_container_and_respawns_decode_thread + test_watchdog_proceeds_anyway_when_decode_thread_is_stuck + test_watchdog_logs_proceed_anyway_warning + test_watchdog_normal_path_still_works are REMOVED ENTIRELY. test_cap_reached_logged_and_decode_iteration_halted: cap logic in _run_loop is unchanged; migrate the case into test_frame_capture.py under a clearer name like test_cap_reached_failure_driven_only_logs_error_no_watchdog_dependency.",
       "operator_approval_required": false,
       "commit_required": true,
-      "status": "ready",
-      "story_size_budget": "deletion of a 414-line file; one migrate case; fits in one commit"
+      "status": "done",
+      "story_size_budget": "deletion of a 414-line file; one migrate case; fits in one commit",
+      "completed_at": "2026-09-16",
+      "supersession_note": "c4e4ee4 US-049e: delete test_rtsp_watchdog.py; migrate cap case into test_frame_capture.py"
     },
     {
       "id": "US-049f",
@@ -195,8 +205,10 @@
       "notes": "Minimum case set: (1) test_teardown_fires_after_3600s -- monkeypatch time.monotonic to advance past the deadline, assert container.close()+av.open() called twice in the same frame. (2) test_ring_buffer_survives_teardown -- append 3 frames, monkeypatch teardown deadline, assert ring still holds the original 3 + new ones after reopen. (3) test_stats_exposes_last_teardown_monotonic -- assert stats() dict contains the new field. (4) test_failure_driven_cap_still_fails_loud_at_10 -- simulate 11 consecutive decode failures, assert ERROR log and loop exits (no silent proceed-anyway).",
       "operator_approval_required": false,
       "commit_required": true,
-      "status": "ready",
-      "story_size_budget": "4-6 test cases, ~180 new lines, fits in one commit"
+      "status": "done",
+      "story_size_budget": "4-6 test cases, ~180 new lines, fits in one commit",
+      "completed_at": "2026-09-17",
+      "supersession_note": "3f809af + 5ce6f81 — 049f-ii + 049f-iii tests for TestPeriodicTeardown"
     },
     {
       "id": "US-049g",
@@ -221,7 +233,10 @@
       "operator_approval_required": false,
       "commit_required": false,
       "status": "ready",
-      "story_size_budget": "verification only, zero code changes"
+      "story_size_budget": "verification only, zero code changes",
+      "supersession_note": "24h listener soak test (requires operator-driven listener restart)"
     }
-  ]
+  ],
+  "supersedes": "PHASE-V2-039",
+  "supersedes_reason": "US-039's proceed-anyway watchdog pattern was a stepping stone. The operator's deeper insight (Frigate/go2rtc pattern) is that you don't need a watchdog at all — do the teardown in-thread with a simple time check in the decode loop. This eliminates the watchdog-vs-proceed-anyway trade-off at the root and matches what production-grade camera servers actually do. US-049 ships the cleaner architecture; US-039's commit f361b47 was live for ~24h and then removed by US-049b (9231d52) and US-049e (c4e4ee4)."
 }
