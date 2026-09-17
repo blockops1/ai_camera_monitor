@@ -119,10 +119,10 @@ def _pipeline_result(classification="motion", camera_id="FRONT"):
 
 
 def _mock_pipeline():
-    """Create a mock pipeline.run + get_recent_frames for /alert tests.
+    """Create a mock _run_pipeline + get_recent_frames for /alert tests.
 
-    Returns (mock_run, mock_frames) for inspection by callers.
-    The pipeline mock preserves the classification from the alert dict.
+    Returns (mock_pipeline, mock_frames) for inspection by callers.
+    The mock preserves the classification from the alert dict.
     """
 
     def _run_side_effect(alert):
@@ -131,21 +131,21 @@ def _mock_pipeline():
             camera_id=alert.get("camera_id", "FRONT"),
         )
 
-    mock_run = MagicMock(side_effect=_run_side_effect)
+    mock_pipeline = MagicMock(side_effect=_run_side_effect)
     mock_frames = MagicMock(return_value=["/tmp/frame_001.jpg"])
-    return mock_run, mock_frames
+    return mock_pipeline, mock_frames
 
 
-def _apply_daemon_pipeline_mock(mock_run, mock_frames):
-    """Patch the daemon's pipeline reference directly.
+def _apply_daemon_pipeline_mock(mock_pipeline, mock_frames):
+    """Patch the daemon's _run_pipeline + get_recent_frames for /alert tests.
 
     Since listener.pipeline.run was deleted in US-050e, we attach
-    a mock directly to the daemon's module-level pipeline import.
+    a mock to the daemon's _run_pipeline function directly.
     Also patches infra.frame_capture.get_recent_frames.
     """
     from listener import daemon as daemon_mod
 
-    daemon_mod.pipeline.run = mock_run
+    daemon_mod._run_pipeline = mock_pipeline
     return patch("infra.frame_capture.get_recent_frames", mock_frames)
 
 
@@ -168,10 +168,10 @@ class TestAlertRoute:
                 "device": "Front Door Outside",
             },
         }
-        mock_run, mock_frames = _mock_pipeline()
+        mock_pipeline, mock_frames = _mock_pipeline()
         with (
             patch("infra.camera_creds.validate_source_ip", return_value=True),
-            _apply_daemon_pipeline_mock(mock_run, mock_frames),
+            _apply_daemon_pipeline_mock(mock_pipeline, mock_frames),
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
@@ -249,10 +249,10 @@ class TestAlertRoute:
                 "channelName": "Front Door Outside",
             },
         }
-        mock_run, mock_frames = _mock_pipeline()
+        mock_pipeline, mock_frames = _mock_pipeline()
         with (
             patch("infra.camera_creds.validate_source_ip", return_value=True),
-            _apply_daemon_pipeline_mock(mock_run, mock_frames),
+            _apply_daemon_pipeline_mock(mock_pipeline, mock_frames),
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
@@ -271,16 +271,16 @@ class TestAlertRoute:
                 "channelName": "Front Door Outside",
             },
         }
-        mock_run, mock_frames = _mock_pipeline()
+        mock_pipeline, mock_frames = _mock_pipeline()
         with (
             patch("infra.camera_creds.validate_source_ip", return_value=True),
-            _apply_daemon_pipeline_mock(mock_run, mock_frames),
+            _apply_daemon_pipeline_mock(mock_pipeline, mock_frames),
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
-        # Verify pipeline.run was called with a Reolink-normalized alert dict
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args[0][0]
+        # Verify _run_pipeline was called with a Reolink-normalized alert dict
+        mock_pipeline.assert_called_once()
+        call_args = mock_pipeline.call_args[0][0]
         assert call_args["camera_id"] == "Front Door Outside"
         assert call_args["classification"] == "vehicle"
 
@@ -295,10 +295,10 @@ class TestAlertRoute:
                 "channelName": "Front Door Outside",
             },
         }
-        mock_run, mock_frames = _mock_pipeline()
+        mock_pipeline, mock_frames = _mock_pipeline()
         with (
             patch("infra.camera_creds.validate_source_ip", return_value=True),
-            _apply_daemon_pipeline_mock(mock_run, mock_frames),
+            _apply_daemon_pipeline_mock(mock_pipeline, mock_frames),
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
@@ -347,10 +347,10 @@ class TestAlertRouteIntegration:
                 "device": "Back Door Inside",
             },
         }
-        mock_run, mock_frames = _mock_pipeline()
+        mock_pipeline, mock_frames = _mock_pipeline()
         with (
             patch("infra.camera_creds.validate_source_ip", return_value=True),
-            _apply_daemon_pipeline_mock(mock_run, mock_frames),
+            _apply_daemon_pipeline_mock(mock_pipeline, mock_frames),
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
@@ -379,11 +379,11 @@ class TestAlertRouteIntegration:
             result["frames"] = list(alert.get("frames", []))
             return result
 
-        mock_run = MagicMock(side_effect=_echo_frames)
+        mock_pipeline = MagicMock(side_effect=_echo_frames)
         mock_frames = MagicMock(return_value=expected_frames)
         with (
             patch("infra.camera_creds.validate_source_ip", return_value=True),
-            _apply_daemon_pipeline_mock(mock_run, mock_frames),
+            _apply_daemon_pipeline_mock(mock_pipeline, mock_frames),
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
@@ -414,11 +414,11 @@ class TestAlertRouteIntegration:
                 "reason": "low_conf",
             },
         }
-        mock_run = MagicMock(return_value=suppressed_result)
+        mock_pipeline = MagicMock(return_value=suppressed_result)
         mock_frames = MagicMock(return_value=["/tmp/frame_001.jpg"])
         with (
             patch("infra.camera_creds.validate_source_ip", return_value=True),
-            _apply_daemon_pipeline_mock(mock_run, mock_frames),
+            _apply_daemon_pipeline_mock(mock_pipeline, mock_frames),
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200

@@ -44,10 +44,10 @@ def client():
 
 def test_daemon_returns_200_on_dispatch_failure(client, mock_payload):
     """When dispatcher raises, /alert still returns HTTP 200."""
-    with patch("listener.daemon.pipeline") as mock_pipeline, \
+    with patch("listener.daemon._run_pipeline") as mock_run, \
          patch("listener.daemon.dispatcher") as mock_dispatcher, \
          patch("infra.camera_creds.validate_source_ip", return_value=True):
-        mock_pipeline.run.return_value = {
+        mock_run.return_value = {
             "tg1": {"caption": "x", "photos": []},
             "tg2": {},
             "tg3": {},
@@ -64,10 +64,10 @@ def test_daemon_returns_200_on_dispatch_failure(client, mock_payload):
 
 def test_daemon_logs_dispatch_success(client, mock_payload):
     """When dispatcher returns responses, daemon logs tg-dispatch lines."""
-    with patch("listener.daemon.pipeline") as mock_pipeline, \
+    with patch("listener.daemon._run_pipeline") as mock_run, \
          patch("listener.daemon.dispatcher") as mock_dispatcher, \
          patch("infra.camera_creds.validate_source_ip", return_value=True):
-        mock_pipeline.run.return_value = {
+        mock_run.return_value = {
             "tg1": {"caption": "alert", "photos": []},
             "tg2": {},
             "tg3": {},
@@ -87,10 +87,10 @@ def test_daemon_logs_dispatch_success(client, mock_payload):
 
 def test_daemon_logs_dispatch_config_error(client, mock_payload):
     """When ConfigError raised, daemon logs the error and still returns 200."""
-    with patch("listener.daemon.pipeline") as mock_pipeline, \
+    with patch("listener.daemon._run_pipeline") as mock_run, \
          patch("listener.daemon.dispatcher") as mock_dispatcher, \
          patch("infra.camera_creds.validate_source_ip", return_value=True):
-        mock_pipeline.run.return_value = {
+        mock_run.return_value = {
             "tg1": {"caption": "x", "photos": []},
             "tg2": {},
             "tg3": {},

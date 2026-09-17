@@ -11,7 +11,7 @@ INPUTS:
     - POST body: JSON dict — camera alert payload (flat or Reolink shape)
 
 OUTPUTS:
-    - HTTP 200 with JSON response from pipeline.run() (via /alert)
+    - HTTP 200 with JSON pipeline result (via /alert, segmented stages)
     - HTTP 202 with alert_id on /alert accept
     - generate_plist() returns a str: a launchd plist XML
 
@@ -37,7 +37,7 @@ CALLED BY:
     (external: Reolink camera sends POST /alert)
 
 CALLS INTO:
-    - listener.pipeline: run() for the 11-stage pipeline
+    - listener.pipeline: 10+ stage functions for segmented pipeline
     - flask: HTTP server + request parsing
     - infra.camera_creds: validate_source_ip() for anti-spoof
     - infra.frame_capture: get_recent_frames() for RTSP frame pull
@@ -58,9 +58,22 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request
 
-from infra import paths as infra_paths, tg_upload_cleanup
-from infra import pipeline_cooldown as infra_pipeline_cooldown
-from listener import pipeline
+from infra import (
+    paths as infra_paths,
+    pipeline_cooldown as infra_pipeline_cooldown,
+    tg_upload_cleanup,
+)
+from listener.pipeline import (
+    stage_build_tg1,
+    stage_build_tg2,
+    stage_build_tg3,
+    stage_cooldown_check,
+    stage_detail_class_vm2,
+    stage_load_frames,
+    stage_perform_match,
+    stage_prepare_artifacts,
+    stage_verify_class_vm1,
+)
 from telegram_formatter import codec, dispatcher
 from telegram_formatter.dispatcher import ConfigError, DeliveryError
 
@@ -182,7 +195,9 @@ def normalize_reolink(payload: dict, source_ip: str) -> dict | None:
     if outer_type and outer_type != event_type:
         event_type = outer_type
     if not isinstance(event_type, str):
-        raise TypeError(f"alarm 'type' must be a string, got {type(event_type).__name__}: {event_type!r}")
+        raise TypeError(
+            f"alarm 'type' must be a string, got {type(event_type).__name__}: {event_type!r}"
+        )
     event_type = event_type.lower()
 
     ts_key = alarm.get("time") or alarm.get("alarmTime")
@@ -199,6 +214,158 @@ def normalize_reolink(payload: dict, source_ip: str) -> dict | None:
         "classification": event_type,
         "frames": [],
         "timestamp": timestamp,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Segmented pipeline orchestrator
+# ---------------------------------------------------------------------------
+
+
+def _run_pipeline(alert: dict) -> dict:
+    """Orchestrate the 10+ stage functions into the original result shape.
+
+    This replaces the deleted monolithic ``run()`` from ``listener.pipeline``.
+    The return dict has the same keys the rest of the /alert route expects
+    (``status``, ``gate``, ``vm1_result``, ``tg1``, ``vm2_result``, ``tg2``,
+    ``match_result``, ``tg3``, ``classification``, ``camera_id``, ``frames``).
+    """
+    camera_id = alert.get("camera_id", "unknown")
+    alert_id = alert.get("id", camera_id)
+    classification = alert.get("classification", "motion")
+    camera_label = alert.get("camera_label", camera_id)
+
+    # Stage 3: load frames.
+    frames = stage_load_frames(alert)
+
+    # Stage 4: YOLO gate.
+    gate_result = _stage_gate(frames, camera_id, alert_id)
+    if gate_result["status"] == "dropped":
+        return {
+            "id": alert_id,
+            "status": "dropped",
+            "reason": gate_result["reason"],
+            "classification": "none",
+            "gate": gate_result["gsum"],
+        }
+
+    # Stage 7a: cooldown check.
+    cooldown_result = stage_cooldown_check(camera_id, classification)
+    if cooldown_result["status"] == "dropped":
+        return {
+            "id": alert_id,
+            "status": "dropped",
+            "reason": cooldown_result["reason"],
+            "classification": classification,
+        }
+
+    # Stage 7b: log proceeded past gate.
+    gsum = gate_result["gsum"]
+    log.info(
+        f"pipeline: proceeded alert_id={alert_id} "
+        f"camera={camera_id} classification={classification} "
+        f"top_class='{gsum['class_label']}' "
+        f"top_confidence={gsum['confidence']}"
+    )
+
+    # Stage 8: prepare artifacts.
+    art = stage_prepare_artifacts(
+        gate_result["gate_verdict"], frames, camera_id, alert_id
+    )
+    a_p = art["crop_a_path"]
+    b_p = art["crop_b_path"]
+
+    # Guard: gate must have produced crops.
+    if a_p is None or b_p is None:
+        raise RuntimeError(f"gate produced no crops for alert {alert.get('id')}")
+
+    # Stage 9: verify_class VM1.
+    vm1_result = stage_verify_class_vm1(a_p, b_p)
+
+    # Stage 10: build TG#1.
+    tg1 = stage_build_tg1(
+        gate_result["gate_verdict"], vm1_result, a_p, b_p,
+        art["composite_path"], art["full_frame_path"],
+        camera_label, alert,
+    )
+
+    # Stage 10b: detail_class VM2.
+    mode = vm1_result.get("class", "vehicle")
+    vm2_result = stage_detail_class_vm2(mode, a_p, b_p)
+
+    # Stage 11: build TG#2.
+    tg2 = stage_build_tg2(mode, vm2_result, a_p, b_p, camera_label, alert)
+
+    # Stage 12: per-class match.
+    match_result = stage_perform_match(mode, vm2_result)
+
+    # Stage 13: build TG#3 (text only; dispatch handled by caller).
+    tg3 = stage_build_tg3(
+        mode, match_result, vm2_result,
+        a_p, b_p, camera_label, alert,
+    )
+
+    return {
+        "id": alert_id,
+        "status": "ok",
+        "camera_id": camera_id,
+        "classification": classification,
+        "frames": frames,
+        "gate": gate_result["gsum"],
+        "vm1_result": vm1_result,
+        "tg1": tg1,
+        "vm2_result": vm2_result,
+        "tg2": tg2,
+        "match_result": match_result,
+        "tg3": tg3,
+    }
+
+
+def _stage_gate(frames, camera_id, alert_id):
+    """Stage 4: run YOLO gate on frames.
+
+    Thin wrapper around ``infra.gate.run`` to keep the orchestrator
+    import-free (avoids a circular import with listener.pipeline).
+    """
+    from infra.gate import run as run_gate
+
+    gate_verdict = run_gate(
+        frame_paths=frames,
+        camera_name=camera_id,
+        alert_id=alert_id,
+        output_dir=str(infra_paths.data_dir_for(camera_id, alert_id)),
+    )
+
+    if gate_verdict.is_none():
+        log.info(
+            f"pipeline: dropped alert_id={alert_id} "
+            f"camera={camera_id} classification=none "
+            f"top_class='{gate_verdict.top_class}' "
+            f"top_confidence={gate_verdict.top_confidence} "
+            f"reason=no_class"
+        )
+        return {
+            "status": "dropped",
+            "reason": "no_class",
+            "classification": "none",
+            "gate_verdict": gate_verdict,
+            "gsum": {
+                "classification": gate_verdict.classification,
+                "class_label": gate_verdict.class_label,
+                "confidence": gate_verdict.confidence,
+                "reason": gate_verdict.reason,
+            },
+        }
+
+    return {
+        "status": "ok",
+        "gate_verdict": gate_verdict,
+        "gsum": {
+            "classification": gate_verdict.classification,
+            "class_label": gate_verdict.class_label,
+            "confidence": gate_verdict.confidence,
+            "reason": gate_verdict.reason,
+        },
     }
 
 
@@ -273,11 +440,12 @@ def alert():
         camera_id, n=n_frames, offset_seconds=offset_seconds
     )
 
-    # Run the alert through the full pipeline
-    # (pipeline + dispatcher are imported at module top so tests can patch them)
+    # Run the alert through the full segmented pipeline
+    # (stage functions imported above so tests can inspect them; dispatcher
+    # imported at module top so tests can patch dispatcher.dispatch)
     try:
-        result = pipeline.run(alert_dict)
-    except Exception:  # noqa: BLE001
+        result = _run_pipeline(alert_dict)
+    except Exception:
         log.exception("pipeline.run failed for alert")
         return jsonify({"status": "error"}), 200
 
@@ -287,7 +455,7 @@ def alert():
 
     # US-050b: per-stage Telegram dispatch.
     # Each TG-producing stage (TG#1, TG#2, TG#3) is dispatched
-    # immediately after pipeline.run() returns. A failure at any
+    # immediately after _run_pipeline() returns. A failure at any
     # stage N+1 logs.exception and returns HTTP 200 (no retry storm)
     # but does NOT continue to subsequent stages. Earlier-sent TGs
     # are NOT rolled back. No defensive fallbacks.
@@ -298,21 +466,21 @@ def alert():
     # ---- TG#1 dispatch (after stage 10: build_tg1) ----
     try:
         _send_tg1(result.get("tg1"), alert_id, chat_id, bot_token)
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("TG#1 dispatch failed for alert_id=%s", alert_id)
         return jsonify(result), 200
 
     # ---- TG#2 dispatch (after stage 11: build_tg2) ----
     try:
         _send_tg2(result.get("tg2"), alert_id, chat_id, bot_token)
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("TG#2 dispatch failed for alert_id=%s", alert_id)
         return jsonify(result), 200
 
     # ---- TG#3 dispatch (after stage 13: build_tg3) ----
     try:
         _send_tg3(result.get("tg3"), alert_id, chat_id, bot_token)
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("TG#3 dispatch failed for alert_id=%s", alert_id)
         return jsonify(result), 200
 
@@ -320,8 +488,12 @@ def alert():
     # This is the ONLY call site for record_hit in the production tree.
     # Per spec item 12: cooldown starts only after TG#3 successfully dispatches.
     try:
-        infra_pipeline_cooldown.record_hit(alert_dict["camera_id"], result.get("classification", "unknown"), time.monotonic())
-    except Exception:  # noqa: BLE001
+        infra_pipeline_cooldown.record_hit(
+            alert_dict["camera_id"],
+            result.get("classification", "unknown"),
+            time.monotonic(),
+        )
+    except Exception:
         log.exception("record_hit failed for alert_id=%s", alert_id)
 
     # Sweep old cache dirs (24h retention) — after all per-stage dispatches.
@@ -346,14 +518,10 @@ def _convert_photos(alert_id: str, photo_paths: list[str]) -> list[str]:
     Returns the list of cached JPEG paths. Empty if none convert.
     """
     date_str = datetime.now(UTC).strftime("%Y-%m-%d")
-    msg_cache_dir = str(
-        Path(infra_paths.TG_UPLOADS_DIR) / date_str / alert_id
-    )
+    msg_cache_dir = str(Path(infra_paths.TG_UPLOADS_DIR) / date_str / alert_id)
     converted: list[str] = []
     for src_path in photo_paths:
-        jpg = codec.encode_jpeg(
-            src_path, msg_cache_dir, jpeg_quality=88, max_dim=1920
-        )
+        jpg = codec.encode_jpeg(src_path, msg_cache_dir, jpeg_quality=88, max_dim=1920)
         if jpg is not None:
             converted.append(jpg)
     return converted
@@ -363,79 +531,136 @@ def _send_tg1(tg_msg: dict | None, alert_id: str, chat_id: str, bot_token: str) 
     """Dispatch TG#1: alert message with photos."""
     if not tg_msg or not bot_token:
         if tg_msg and not bot_token:
-            log.warning("tg-send: alert_id=%s TG#1 missing TELEGRAM_BOT_TOKEN, skipping", alert_id)
+            log.warning(
+                "tg-send: alert_id=%s TG#1 missing TELEGRAM_BOT_TOKEN, skipping",
+                alert_id,
+            )
         return
     orig_photos = tg_msg.get("photos") or []
     if orig_photos:
         tg_msg["photos"] = _convert_photos(alert_id, orig_photos)
     try:
         responses = dispatcher.dispatch(
-            [tg_msg], bot_token=bot_token, chat_id=chat_id,
+            [tg_msg],
+            bot_token=bot_token,
+            chat_id=chat_id,
         )
         converted_photos = tg_msg.get("photos") or []
-        upload_bytes = sum(os.path.getsize(p) for p in converted_photos) if converted_photos else 0
+        upload_bytes = (
+            sum(os.path.getsize(p) for p in converted_photos) if converted_photos else 0
+        )
         method = "sendMediaGroup" if converted_photos else "sendMessage"
         log.info(
             "tg-send: alert_id=%s TG#1 chat=%s method=%s sources=%d converted=%d upload=%d response=HTTP %d",
-            alert_id, chat_id, method, len(orig_photos), len(converted_photos),
-            upload_bytes, responses[0].status_code if responses else 0,
+            alert_id,
+            chat_id,
+            method,
+            len(orig_photos),
+            len(converted_photos),
+            upload_bytes,
+            responses[0].status_code if responses else 0,
         )
     except (ConfigError, DeliveryError) as exc:
-        log.error("tg-send: alert_id=%s TG#1 error=%s: %s", alert_id, type(exc).__name__, exc)
+        log.error(
+            "tg-send: alert_id=%s TG#1 error=%s: %s", alert_id, type(exc).__name__, exc
+        )
     except Exception as exc:  # noqa: BLE001
-        log.error("tg-send: alert_id=%s TG#1 unexpected %s: %s", alert_id, type(exc).__name__, exc)
+        log.error(
+            "tg-send: alert_id=%s TG#1 unexpected %s: %s",
+            alert_id,
+            type(exc).__name__,
+            exc,
+        )
 
 
 def _send_tg2(tg_msg: dict | None, alert_id: str, chat_id: str, bot_token: str) -> None:
     """Dispatch TG#2: detail message with photos."""
     if not tg_msg or not bot_token:
         if tg_msg and not bot_token:
-            log.warning("tg-send: alert_id=%s TG#2 missing TELEGRAM_BOT_TOKEN, skipping", alert_id)
+            log.warning(
+                "tg-send: alert_id=%s TG#2 missing TELEGRAM_BOT_TOKEN, skipping",
+                alert_id,
+            )
         return
     orig_photos = tg_msg.get("photos") or []
     if orig_photos:
         tg_msg["photos"] = _convert_photos(alert_id, orig_photos)
     try:
         responses = dispatcher.dispatch(
-            [tg_msg], bot_token=bot_token, chat_id=chat_id,
+            [tg_msg],
+            bot_token=bot_token,
+            chat_id=chat_id,
         )
         converted_photos = tg_msg.get("photos") or []
-        upload_bytes = sum(os.path.getsize(p) for p in converted_photos) if converted_photos else 0
+        upload_bytes = (
+            sum(os.path.getsize(p) for p in converted_photos) if converted_photos else 0
+        )
         method = "sendMediaGroup" if converted_photos else "sendMessage"
         log.info(
             "tg-send: alert_id=%s TG#2 chat=%s method=%s sources=%d converted=%d upload=%d response=HTTP %d",
-            alert_id, chat_id, method, len(orig_photos), len(converted_photos),
-            upload_bytes, responses[0].status_code if responses else 0,
+            alert_id,
+            chat_id,
+            method,
+            len(orig_photos),
+            len(converted_photos),
+            upload_bytes,
+            responses[0].status_code if responses else 0,
         )
     except (ConfigError, DeliveryError) as exc:
-        log.error("tg-send: alert_id=%s TG#2 error=%s: %s", alert_id, type(exc).__name__, exc)
+        log.error(
+            "tg-send: alert_id=%s TG#2 error=%s: %s", alert_id, type(exc).__name__, exc
+        )
     except Exception as exc:  # noqa: BLE001
-        log.error("tg-send: alert_id=%s TG#2 unexpected %s: %s", alert_id, type(exc).__name__, exc)
+        log.error(
+            "tg-send: alert_id=%s TG#2 unexpected %s: %s",
+            alert_id,
+            type(exc).__name__,
+            exc,
+        )
 
 
 def _send_tg3(tg_msg: dict | None, alert_id: str, chat_id: str, bot_token: str) -> None:
     """Dispatch TG#3: match message (text-only)."""
     if not tg_msg or not bot_token:
         if tg_msg and not bot_token:
-            log.warning("tg-send: alert_id=%s TG#3 missing TELEGRAM_BOT_TOKEN, skipping", alert_id)
+            log.warning(
+                "tg-send: alert_id=%s TG#3 missing TELEGRAM_BOT_TOKEN, skipping",
+                alert_id,
+            )
         return
     # TG#3 is text-only (photos=[]), no conversion needed.
     try:
         responses = dispatcher.dispatch(
-            [tg_msg], bot_token=bot_token, chat_id=chat_id,
+            [tg_msg],
+            bot_token=bot_token,
+            chat_id=chat_id,
         )
         converted_photos = tg_msg.get("photos") or []
-        upload_bytes = sum(os.path.getsize(p) for p in converted_photos) if converted_photos else 0
+        upload_bytes = (
+            sum(os.path.getsize(p) for p in converted_photos) if converted_photos else 0
+        )
         method = "sendMediaGroup" if converted_photos else "sendMessage"
         log.info(
             "tg-send: alert_id=%s TG#3 chat=%s method=%s sources=%d converted=%d upload=%d response=HTTP %d",
-            alert_id, chat_id, method, 0, len(converted_photos),
-            upload_bytes, responses[0].status_code if responses else 0,
+            alert_id,
+            chat_id,
+            method,
+            0,
+            len(converted_photos),
+            upload_bytes,
+            responses[0].status_code if responses else 0,
         )
     except (ConfigError, DeliveryError) as exc:
-        log.error("tg-send: alert_id=%s TG#3 error=%s: %s", alert_id, type(exc).__name__, exc)
+        log.error(
+            "tg-send: alert_id=%s TG#3 error=%s: %s", alert_id, type(exc).__name__, exc
+        )
     except Exception as exc:  # noqa: BLE001
-        log.error("tg-send: alert_id=%s TG#3 unexpected %s: %s", alert_id, type(exc).__name__, exc)
+        log.error(
+            "tg-send: alert_id=%s TG#3 unexpected %s: %s",
+            alert_id,
+            type(exc).__name__,
+            exc,
+        )
 
 
 def generate_plist() -> str:
@@ -656,5 +881,6 @@ def _format_local_timestamp(utc_iso: str) -> str:
     See :py:func:`infra.format_ts.format_local_timestamp` for full docs.
     """
     return __import__("infra.format_ts").format_ts.format_local_timestamp(
-        utc_iso, tz_name=os.environ.get("DISPLAY_TZ"),
+        utc_iso,
+        tz_name=os.environ.get("DISPLAY_TZ"),
     )
