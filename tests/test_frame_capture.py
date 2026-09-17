@@ -1087,3 +1087,104 @@ class TestPeriodicTeardown:
         assert call_log["open"] >= 2, (
             f"av.open() called {call_log['open']}x, expected >= 2"
         )
+
+    def test_ring_buffer_survives_teardown(
+        self, mock_av_stream, mock_av_frame, monkeypatch
+    ):
+        """AC: frames appended before teardown survive teardown; post-teardown
+        frames are also appended — ring buffer (deque) is never cleared by
+        teardown. Total frames >= pre + post (bounded by ring_size).
+
+        The demux yields 3 frames then raises OSError. _run_loop catches and
+        retries (with capped backoff sleep). On retry, monotonic time is
+        past 3600 so teardown fires (closes + reopens container). The new
+        demux yields 3 more frames and raises. _run_loop catches, retries,
+        and on this retry _container is already set (from teardown), so
+        av.open() is NOT called again — the exhausted demux of the teardown
+        container is used. Each demux() call creates a new generator, so
+        frames continue to be appended. The ring grows past the initial
+        count and is bounded by ring_size=10. After stop() the thread exits
+        cleanly.
+        """
+        from infra import frame_capture as fc
+
+        _real_sleep = fc.time.sleep
+
+        teardown_interval = fc.TEARDOWN_INTERVAL_SECONDS  # 3600.0
+        fake_time = [0.0]
+        open_count = [0]
+
+        def fake_monotonic():
+            return fake_time[0]
+
+        def fake_av_open(*args, **kwargs):
+            open_count[0] += 1
+            container = MagicMock()
+            container.streams.video = [mock_av_stream]
+
+            def demux_gen(stream_arg):
+                # First container: yield 3 frames then raise (triggers retry)
+                if open_count[0] == 1:
+                    for i in range(3):
+                        pkt = MagicMock()
+                        pkt.dts = i
+                        pkt.decode.return_value = [mock_av_frame]
+                        yield pkt
+                    raise OSError("simulated RTSP disconnect")
+                # Post-teardown container: yield 3 frames then raise.
+                # Subsequent retries reuse this container (av.open not
+                # called again), but each call to demux() creates a new
+                # generator — so it yields 3 more frames each retry.
+                else:
+                    for i in range(3):
+                        pkt = MagicMock()
+                        pkt.dts = 100 + i
+                        pkt.decode.return_value = [mock_av_frame]
+                        yield pkt
+                    raise OSError("simulated RTSP disconnect")
+
+            container.demux = demux_gen
+            return container
+
+        monkeypatch.setattr(fc.time, "monotonic", fake_monotonic)
+        # sleep() uses _real_sleep but caps at 0.05s to keep the test fast.
+        # Without capping, backoff (1,2,4,8,16,30s) would make the test
+        # extremely slow. With max_reconnect_attempts=0 (retry forever),
+        # the backoff loop must not spin at full speed — capping at 50ms
+        # gives the main thread a chance to run.
+        monkeypatch.setattr(fc.time, "sleep", lambda _s: _real_sleep(min(_s or 0, 0.05)))
+
+        with patch("av.open", side_effect=fake_av_open):
+            reader = PersistentRTSPReader(
+                "rtsp://u:p@h:554/h",
+                ring_size=10,
+                max_reconnect_attempts=0,  # cap disabled, keep looping
+            )
+            reader.start()
+
+            # Wait for initial frames to be decoded.
+            _real_sleep(0.1)
+            frames_before = len(reader._ring)
+            assert frames_before >= 3, (
+                f"Expected at least 3 frames before teardown, got {frames_before}"
+            )
+
+            # Advance past teardown interval
+            fake_time[0] = teardown_interval + 1.0
+
+            # Wait for teardown to fire and post-teardown frames to be decoded.
+            _real_sleep(0.1)
+            frames_after = len(reader._ring)
+
+            # Ring should have grown (post-teardown frames appended) and
+            # be bounded by ring_size. Crucially, teardown does NOT clear
+            # the ring — old frames are preserved.
+            assert frames_after > frames_before, (
+                f"Ring should have more frames after teardown: "
+                f"before={frames_before}, after={frames_after}"
+            )
+            assert frames_after <= 10, (
+                f"Ring should not exceed ring_size=10, got {frames_after}"
+            )
+
+            reader.stop(timeout=2.0)
