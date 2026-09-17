@@ -107,7 +107,7 @@ def match_task_to_branch(branch_name, tasks):
     branch_prefix = branch_name.split("/")[-1].lower()
     for tid, task in tasks.items():
         title = (task.get("title") or "").lower()
-        body = task.get("body", "")
+        body = task.get("body") or ""
         if isinstance(body, bytes):
             body = body.decode("utf-8")
         body_lower = body.lower()
