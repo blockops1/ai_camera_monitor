@@ -11,7 +11,15 @@ OUTPUTS:
     - return dict: {status, camera_id, classification, frames, gate,
                      vm1_result, tg1, vm2_result, tg2, match_result, tg3}
 PUBLIC API:
-    run(alert: dict) -> dict
+    stage_load_frames(alert) -> list[str]
+    stage_cooldown_check(camera_id, classification) -> dict
+    stage_prepare_artifacts(gate_verdict, frames, camera_id, alert_id) -> dict
+    stage_verify_class_vm1(crop_a_path, crop_b_path) -> dict
+    stage_build_tg1(gate_verdict, vm1_result, ..., alert) -> dict
+    stage_detail_class_vm2(mode, crop_a_path, crop_b_path) -> dict
+    stage_build_tg2(mode, vm2_result, ..., alert) -> dict
+    stage_perform_match(mode, vm2_result) -> dict
+    stage_build_tg3(mode, match_result, ..., alert) -> dict
 
 DOES NOT DO:
     - Send Telegram messages (transport handled by listener)
@@ -41,7 +49,7 @@ from pathlib import Path
 
 from animal_matcher.match import match_animal
 from infra.alert_artifacts import prepare_alert_artifacts
-from infra.gate import GateVerdict, run as run_gate
+from infra.gate import GateVerdict
 from infra.paths import PERSON_KNOWN_FILE, VEHICLE_KNOWN_FILE, data_dir_for
 from infra.pipeline_cooldown import should_suppress
 from infra.vision_analyzer import detail_class, verify_class
@@ -52,15 +60,6 @@ from telegram_formatter.match_alert import build_match_message
 from vehicle_matcher import match_vehicle
 
 log = logging.getLogger(__name__)
-
-
-def _gsum(v: GateVerdict) -> dict:
-    return {
-        "classification": v.classification,
-        "class_label": v.class_label,
-        "confidence": v.confidence,
-        "reason": v.reason,
-    }
 
 
 def _load_candidates() -> list[dict]:
@@ -120,49 +119,6 @@ def stage_load_frames(alert: dict) -> list[str]:
             f"no frames captured from camera {camera_id}, refusing to process alert {alert.get('id')}"
         )
     return frames
-
-
-def stage_gate(
-    frames: list[str],
-    camera_id: str,
-    alert_id: str,
-) -> dict:
-    """Stage 4: run YOLO gate on frames.
-
-    Returns a dict with two keys:
-      - 'gate_verdict': the raw GateVerdict object (for downstream stages)
-      - 'gsum': the _gsum serialisable dict (for the run() return value)
-      - 'status': 'dropped' or 'ok'
-      - 'reason': present when status is 'dropped'
-    """
-    gate_verdict = run_gate(
-        frame_paths=frames,
-        camera_name=camera_id,
-        alert_id=alert_id,
-        output_dir=str(data_dir_for(camera_id, alert_id)),
-    )
-
-    if gate_verdict.is_none():
-        log.info(
-            f"pipeline: dropped alert_id={alert_id} "
-            f"camera={camera_id} classification=none "
-            f"top_class='{gate_verdict.top_class}' "
-            f"top_confidence={gate_verdict.top_confidence} "
-            f"reason=no_class"
-        )
-        return {
-            "status": "dropped",
-            "reason": "no_class",
-            "classification": "none",
-            "gate_verdict": gate_verdict,
-            "gsum": _gsum(gate_verdict),
-        }
-
-    return {
-        "status": "ok",
-        "gate_verdict": gate_verdict,
-        "gsum": _gsum(gate_verdict),
-    }
 
 
 def stage_cooldown_check(
@@ -328,105 +284,3 @@ def stage_build_tg3(
         camera_label=camera_label,
         alert=alert,
     )
-
-
-# ---------------------------------------------------------------------------
-# Orchestrator
-# ---------------------------------------------------------------------------
-
-def run(alert: dict) -> dict:
-    """Stages 1-12: orchestrate the 10 named stage functions.
-
-    Each stage function is a thin, testable unit. This orchestrator
-    wires them together in the original pipeline order and returns
-    the same dict shape as before.
-    """
-    camera_id = alert.get("camera_id", "unknown")
-    alert_id = alert.get("id", camera_id)
-    classification = alert.get("classification", "motion")
-    camera_label = alert.get("camera_label", camera_id)
-
-    # Stage 3: load frames.
-    frames = stage_load_frames(alert)
-
-    # Stage 4: YOLO gate.
-    gate_result = stage_gate(frames, camera_id, alert_id)
-    if gate_result["status"] == "dropped":
-        return {
-            "id": alert_id,
-            "status": "dropped",
-            "reason": gate_result["reason"],
-            "classification": "none",
-            "gate": gate_result["gsum"],
-        }
-
-    # Stage 7a: cooldown check.
-    cooldown_result = stage_cooldown_check(camera_id, classification)
-    if cooldown_result["status"] == "dropped":
-        return {
-            "id": alert_id,
-            "status": "dropped",
-            "reason": cooldown_result["reason"],
-            "classification": classification,
-        }
-
-    # Stage 7b: log proceeded past gate (operator signal).
-    gsum = gate_result["gsum"]
-    log.info(
-        f"pipeline: proceeded alert_id={alert_id} "
-        f"camera={camera_id} classification={classification} "
-        f"top_class='{gsum['class_label']}' "
-        f"top_confidence={gsum['confidence']}"
-    )
-
-    # Stage 8: prepare artifacts.
-    art = stage_prepare_artifacts(
-        gate_result["gate_verdict"], frames, camera_id, alert_id
-    )
-    a_p = art["crop_a_path"]
-    b_p = art["crop_b_path"]
-
-    # Guard: gate must have produced crops.
-    if a_p is None or b_p is None:
-        raise RuntimeError(f"gate produced no crops for alert {alert.get('id')}")
-
-    # Stage 9: verify_class VM1.
-    vm1_result = stage_verify_class_vm1(a_p, b_p)
-
-    # Stage 10: build TG#1.
-    tg1 = stage_build_tg1(
-        gate_result["gate_verdict"], vm1_result, a_p, b_p,
-        art["composite_path"], art["full_frame_path"],
-        camera_label, alert,
-    )
-
-    # Stage 10b: detail_class VM2.
-    mode = vm1_result.get("class", "vehicle")
-    vm2_result = stage_detail_class_vm2(mode, a_p, b_p)
-
-    # Stage 11: build TG#2.
-    tg2 = stage_build_tg2(mode, vm2_result, a_p, b_p, camera_label, alert)
-
-    # Stage 12: per-class match.
-    match_result = stage_perform_match(mode, vm2_result)
-
-    # Stage 13: build + send TG#3.
-    tg3 = stage_build_tg3(
-        mode, match_result, vm2_result,
-        a_p, b_p, camera_label, alert,
-    )
-
-    return {
-        "id": alert_id,
-        "status": "ok",
-        "camera_id": camera_id,
-        "classification": classification,
-        "frames": frames,
-        "gate": gate_result["gsum"],
-        "vm1_result": vm1_result,
-        "tg1": tg1,
-        "vm2_result": vm2_result,
-        "tg2": tg2,
-        "match_result": match_result,
-        "tg3": tg3,
-    }

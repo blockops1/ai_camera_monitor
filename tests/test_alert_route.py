@@ -93,7 +93,7 @@ class TestNormalizeReolink:
 # Shared pipeline mock — returns a minimal pipeline result dict
 # ---------------------------------------------------------------------------
 def _pipeline_result(classification="motion", camera_id="FRONT"):
-    """Return a minimal pipeline.run() result dict."""
+    """Return a minimal pipeline result dict."""
     return {
         "status": "ok",
         "camera_id": camera_id,
@@ -119,7 +119,7 @@ def _pipeline_result(classification="motion", camera_id="FRONT"):
 
 
 def _mock_pipeline():
-    """Patch pipeline.run + get_recent_frames for /alert tests.
+    """Create a mock pipeline.run + get_recent_frames for /alert tests.
 
     Returns (mock_run, mock_frames) for inspection by callers.
     The pipeline mock preserves the classification from the alert dict.
@@ -134,6 +134,19 @@ def _mock_pipeline():
     mock_run = MagicMock(side_effect=_run_side_effect)
     mock_frames = MagicMock(return_value=["/tmp/frame_001.jpg"])
     return mock_run, mock_frames
+
+
+def _apply_daemon_pipeline_mock(mock_run, mock_frames):
+    """Patch the daemon's pipeline reference directly.
+
+    Since listener.pipeline.run was deleted in US-050e, we attach
+    a mock directly to the daemon's module-level pipeline import.
+    Also patches infra.frame_capture.get_recent_frames.
+    """
+    from listener import daemon as daemon_mod
+
+    daemon_mod.pipeline.run = mock_run
+    return patch("infra.frame_capture.get_recent_frames", mock_frames)
 
 
 class TestAlertRoute:
@@ -158,8 +171,7 @@ class TestAlertRoute:
         mock_run, mock_frames = _mock_pipeline()
         with (
             patch("infra.camera_creds.validate_source_ip", return_value=True),
-            patch("listener.pipeline.run", mock_run),
-            patch("infra.frame_capture.get_recent_frames", mock_frames),
+            _apply_daemon_pipeline_mock(mock_run, mock_frames),
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
@@ -240,8 +252,7 @@ class TestAlertRoute:
         mock_run, mock_frames = _mock_pipeline()
         with (
             patch("infra.camera_creds.validate_source_ip", return_value=True),
-            patch("listener.pipeline.run", mock_run),
-            patch("infra.frame_capture.get_recent_frames", mock_frames),
+            _apply_daemon_pipeline_mock(mock_run, mock_frames),
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
@@ -263,8 +274,7 @@ class TestAlertRoute:
         mock_run, mock_frames = _mock_pipeline()
         with (
             patch("infra.camera_creds.validate_source_ip", return_value=True),
-            patch("listener.pipeline.run", mock_run),
-            patch("infra.frame_capture.get_recent_frames", mock_frames),
+            _apply_daemon_pipeline_mock(mock_run, mock_frames),
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
@@ -288,8 +298,7 @@ class TestAlertRoute:
         mock_run, mock_frames = _mock_pipeline()
         with (
             patch("infra.camera_creds.validate_source_ip", return_value=True),
-            patch("listener.pipeline.run", mock_run),
-            patch("infra.frame_capture.get_recent_frames", mock_frames),
+            _apply_daemon_pipeline_mock(mock_run, mock_frames),
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
@@ -341,8 +350,7 @@ class TestAlertRouteIntegration:
         mock_run, mock_frames = _mock_pipeline()
         with (
             patch("infra.camera_creds.validate_source_ip", return_value=True),
-            patch("listener.pipeline.run", mock_run),
-            patch("infra.frame_capture.get_recent_frames", mock_frames),
+            _apply_daemon_pipeline_mock(mock_run, mock_frames),
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
@@ -371,13 +379,11 @@ class TestAlertRouteIntegration:
             result["frames"] = list(alert.get("frames", []))
             return result
 
+        mock_run = MagicMock(side_effect=_echo_frames)
+        mock_frames = MagicMock(return_value=expected_frames)
         with (
             patch("infra.camera_creds.validate_source_ip", return_value=True),
-            patch(
-                "infra.frame_capture.get_recent_frames",
-                return_value=expected_frames,
-            ),
-            patch("listener.pipeline.run", side_effect=_echo_frames),
+            _apply_daemon_pipeline_mock(mock_run, mock_frames),
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
@@ -408,13 +414,11 @@ class TestAlertRouteIntegration:
                 "reason": "low_conf",
             },
         }
+        mock_run = MagicMock(return_value=suppressed_result)
+        mock_frames = MagicMock(return_value=["/tmp/frame_001.jpg"])
         with (
             patch("infra.camera_creds.validate_source_ip", return_value=True),
-            patch(
-                "infra.frame_capture.get_recent_frames",
-                return_value=["/tmp/frame_001.jpg"],
-            ),
-            patch("listener.pipeline.run", return_value=suppressed_result),
+            _apply_daemon_pipeline_mock(mock_run, mock_frames),
         ):
             r = c.post("/alert", json=payload)
         assert r.status_code == 200
