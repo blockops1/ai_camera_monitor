@@ -37,7 +37,7 @@ from typing import Any
 
 from infra.format_ts import format_local_timestamp
 
-_MODES = ("vehicle", "person", "animal")
+_MODES = ("vehicle", "person", "animal", "unsure")
 
 
 # ---------------------------------------------------------------------------
