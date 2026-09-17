@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from pathlib import Path
 
@@ -49,7 +48,7 @@ from infra.vision_analyzer import detail_class, verify_class
 from person_matcher.match import match_person
 from telegram_formatter.alert import build_alert_message
 from telegram_formatter.detail import build_detail_message
-from telegram_formatter.match_alert import build_match_message, send_match_alert
+from telegram_formatter.match_alert import build_match_message
 from vehicle_matcher import match_vehicle
 
 log = logging.getLogger(__name__)
@@ -315,40 +314,20 @@ def stage_build_tg3(
     camera_label: str,
     alert: dict,
 ) -> dict:
-    """Stage 13: build TG#3 match message and send it.
+    """Stage 13: build TG#3 match message.
 
-    Returns the tg3 dict. The inline send_match_alert stays here as
-    specified (US-050b removes it).
+    Returns the tg3 dict. The send_match_alert responsibility has been
+    moved to daemon.py (per-stage dispatch, US-050b).
     """
     if mode not in ("vehicle", "person", "animal"):
         return {}
 
-    tg3 = build_match_message(
+    return build_match_message(
         match_result,
         vm2_result,
         camera_label=camera_label,
         alert=alert,
     )
-
-    # Send text body + photo (pick_alert_image_path via send_match_alert).
-    try:
-        send_match_alert(
-            bot_token=os.environ["TELEGRAM_BOT_TOKEN"],
-            chat_id=os.environ.get("TELEGRAM_HOME_CHAT_ID", ""),
-            match_result=match_result,
-            vm2_result=vm2_result,
-            crop_a_path=crop_a_path,
-            crop_b_path=crop_b_path,
-            camera_label=camera_label,
-            alert=alert,
-        )
-    except Exception:
-        log.exception(
-            "pipeline: TG#3 send_match_alert failed for alert %s",
-            alert.get("id", "unknown"),
-        )
-
-    return tg3
 
 
 # ---------------------------------------------------------------------------
