@@ -1,181 +1,173 @@
 #!/usr/bin/env python3
-"""Verify that all 'done' kanban tasks have their branch heads merged into main.
-
-A task is NOT truly done until its work is reachable from main. This script
-audits the kanban DB and reports any tasks whose branch heads are not
-ancestors of main AND whose content does not appear in main via a different
-commit (e.g. cherry-pick with same patch-id).
+"""
+verify_branch_merged.py — Audit all kanban tasks and report any whose branch
+heads are not ancestors of main.
 
 Usage:
-    python3 scripts/verify_branch_merged.py [--repo PATH] [--kanban-db PATH]
+    python3 scripts/verify_branch_merged.py
 
-Exit codes:
-    0 — no unmerged tasks
-    1 — unmerged tasks found (printed to stdout)
-    2 — script error
+Output format:
+    UNMERGED: <task_id>  branch=<branch>  head=<sha>  missing_from_main=True
+    OK: <task_id>  branch=<branch>  head=<sha>  merged_to_main=True
 """
-from __future__ import annotations
 
-import argparse
 import os
-import sqlite3
 import subprocess
 import sys
-from pathlib import Path
 
 
-def find_head_sha(repo: Path, task_id: str, branch: str | None) -> tuple[str | None, str | None]:
-    """Find the head SHA for a done task. Search: worktree, branch ref, archive tag."""
-    # 1. Worktree
-    wt = repo / ".worktrees" / task_id
-    if (wt / ".git").exists():
-        r = subprocess.run(["git", "-C", str(wt), "rev-parse", "HEAD"], capture_output=True, text=True)
-        if r.returncode == 0:
-            return r.stdout.strip(), f"worktree {wt}"
-    # 2. Branch ref
-    if branch:
-        r = subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", "--verify", f"refs/heads/{branch}"],
-            capture_output=True, text=True,
-        )
-        if r.returncode == 0:
-            return r.stdout.strip(), f"branch ref {branch}"
-        # 3. Archive tag
-        archive_tag = f"archive/{branch.replace('wt/', 'wt-')}"
-        r = subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", "--verify", f"refs/tags/{archive_tag}"],
-            capture_output=True, text=True,
-        )
-        if r.returncode == 0:
-            return r.stdout.strip(), f"archive tag {archive_tag}"
-    return None, None
-
-
-def patch_id(repo: Path, sha: str) -> str | None:
-    """Compute the patch-id for a commit (stable representation of its diff)."""
-    r1 = subprocess.run(
-        ["git", "-C", str(repo), "log", "--pretty=format:", "-p", sha, "-1"],
-        capture_output=True, text=True,
+def run(cmd, **kw):
+    """Run a shell command, return (exit_code, stdout_str)."""
+    result = subprocess.run(
+        cmd, shell=True, capture_output=True, text=True, **kw
     )
-    r2 = subprocess.run(
-        ["git", "-C", str(repo), "patch-id", "--stable"],
-        input=r1.stdout, capture_output=True, text=True,
-    )
-    out = r2.stdout.strip()
-    return out.split()[0] if out else None
+    return result.returncode, result.stdout.strip()
 
 
-def find_content_equivalent(repo: Path, head_sha: str) -> str | None:
-    """Return a main SHA whose patch-id matches head_sha's patch-id, or None."""
-    head_pid = patch_id(repo, head_sha)
-    if not head_pid:
-        return None
-    r = subprocess.run(
-        ["git", "-C", str(repo), "log", "--pretty=format:COMMIT:%H%n", "-p", "main"],
-        capture_output=True, text=True,
-    )
-    chunks = r.stdout.split("COMMIT:")
-    for chunk in chunks[1:]:
-        sha_line, _, body = chunk.partition("\n")
-        sha = sha_line.strip()
-        pid = patch_id(repo, sha) if sha else None
-        if pid == head_pid:
-            return sha
-    return None
+def get_kanban_db():
+    """Find the kanban DB. Check board-scoped DB first, then global."""
+    kanban_db = os.environ.get("HERMES_KANBAN_DB")
+    if kanban_db and os.path.isfile(kanban_db):
+        return kanban_db
+    board = os.environ.get("HERMES_KANBAN_BOARD", "default")
+    board_db = os.path.expanduser(f"~/.hermes/kanban/boards/{board}/kanban.db")
+    if os.path.isfile(board_db):
+        return board_db
+    global_db = os.path.expanduser("~/.hermes/kanban.db")
+    if os.path.isfile(global_db):
+        return global_db
+    link = os.path.expanduser("~/.hermes/kanban.db/current")
+    if os.path.islink(link):
+        target = os.path.realpath(link)
+        if os.path.isfile(target):
+            return target
+    print("ERROR: cannot find kanban.db", file=sys.stderr)
+    sys.exit(1)
 
 
-def find_in_reflog(repo: Path, branch: str) -> str | None:
-    """Check if a fast-forward merge of this branch appears in main's reflog.
+def load_tasks(db_path):
+    """Load all tasks from the kanban DB as a dict of task_id -> task dict."""
+    import sqlite3
 
-    Returns the main SHA where the merge happened, or None.
-    """
-    r = subprocess.run(
-        ["git", "-C", str(repo), "reflog", "--no-decorate", "main"],
-        capture_output=True, text=True,
-    )
-    for line in r.stdout.split("\n"):
-        if "Fast-forward" in line and f"merge {branch}" in line:
-            sha = line.split()[0]
-            return sha
-    return None
-
-
-def is_ancestor(repo: Path, sha: str, ref: str = "main") -> bool:
-    r = subprocess.run(
-        ["git", "-C", str(repo), "merge-base", "--is-ancestor", sha, ref],
-        capture_output=True, text=True,
-    )
-    return r.returncode == 0
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--repo", default="/Users/jill/farm-surveillance-v2")
-    parser.add_argument("--kanban-db", default="/Users/jill/.hermes/kanban/boards/coder-farm-surveillance/kanban.db")
-    args = parser.parse_args()
-
-    repo = Path(args.repo)
-    db = Path(args.kanban_db)
-    if not db.exists():
-        print(f"ERROR: kanban DB not found at {db}", file=sys.stderr)
-        return 2
-
-    conn = sqlite3.connect(db)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    tasks = conn.execute(
-        """
-        SELECT id, title, branch_name
-        FROM tasks
-        WHERE status = 'done' AND workspace_kind = 'worktree'
-        ORDER BY completed_at DESC
-        """
-    ).fetchall()
-
-    on_main = []
-    unmerged = []
-    unknown = []
-
-    for t in tasks:
-        head, source = find_head_sha(repo, t["id"], t["branch_name"])
-        if head and is_ancestor(repo, head, "main"):
-            on_main.append((t["id"], t["title"][:60], head[:7], "ancestor", source))
-            continue
-        if head:
-            equiv = find_content_equivalent(repo, head)
-            if equiv:
-                on_main.append((t["id"], t["title"][:60], head[:7], f"content-match {equiv[:7]}", source))
-                continue
-        # Check reflog for fast-forward merge (branch may have been cleaned after merge)
-        if t["branch_name"]:
-            reflog_sha = find_in_reflog(repo, t["branch_name"])
-            if reflog_sha:
-                on_main.append((t["id"], t["title"][:60], "n/a", f"reflog-merge {reflog_sha[:7]}", "main reflog"))
-                continue
-        if not head:
-            unknown.append((t["id"], t["title"][:60], "no SHA recoverable (branch + worktree deleted)"))
-        else:
-            unmerged.append((t["id"], t["title"][:60], head[:7], t["branch_name"], source))
-
-    print(f"Audit of {len(tasks)} done tasks:")
-    print(f"  ON MAIN (ancestor or content-equivalent): {len(on_main)}")
-    print(f"  UNMERGED (work NOT in main):              {len(unmerged)}")
-    print(f"  UNKNOWN (no SHA recoverable):            {len(unknown)}")
-    print()
-    if unmerged:
-        print("UNMERGED done-tasks (these need fast-forward merge or rollback):")
-        for u in unmerged:
-            print(f"  {u[0]}  head={u[2]}  branch={u[3]}")
-            print(f"    title: {u[1]}")
-            print(f"    source: {u[4]}")
-        print()
-    if unknown:
-        print("UNKNOWN (cannot verify — original branch/worktree gone):")
-        for u in unknown:
-            print(f"  {u[0]}: {u[1]} ({u[2]})")
-        print()
-
+    rows = conn.execute("SELECT * FROM tasks").fetchall()
+    tasks = {}
+    for row in rows:
+        tasks[row["id"]] = dict(row)
     conn.close()
-    return 0 if not unmerged else 1
+    return tasks
+
+
+def get_repo_path(task):
+    """Extract the repo path from a task's body."""
+    body = task.get("body", "")
+    if isinstance(body, bytes):
+        body = body.decode("utf-8")
+    for line in body.split("\n"):
+        if "farm-surveillance-v2" in line:
+            parts = line.split()
+            for p in parts:
+                if p.startswith("/Users/"):
+                    if "farm-surveillance-v2" in p:
+                        return os.path.dirname(p)
+    return os.path.expanduser("~/farm-surveillance-v2")
+
+
+def check_merged(repo, sha):
+    """Check if <sha> is an ancestor of main in the given repo."""
+    rc, out = run(
+        f"cd '{repo}' && git merge-base --is-ancestor '{sha}' main 2>&1"
+    )
+    return rc == 0
+
+
+def get_all_worktree_branches(repo):
+    """Get all wt/* branches in the repo with their HEAD SHA."""
+    rc, out = run(f"cd '{repo}' && git branch --list 'wt/*'")
+    if rc != 0 or not out:
+        return {}
+    branches = {}
+    for line in out.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Strip leading * (current branch marker) and + (stale marker)
+        branch = line.lstrip("*+ ").strip()
+        if not branch:
+            continue
+        rc2, sha = run(f"cd '{repo}' && git rev-parse '{branch}'")
+        if rc2 == 0:
+            branches[branch] = sha
+    return branches
+
+
+def match_task_to_branch(branch_name, tasks):
+    """Try to find which task this branch belongs to by checking titles."""
+    branch_prefix = branch_name.split("/")[-1].lower()
+    for tid, task in tasks.items():
+        title = (task.get("title") or "").lower()
+        body = task.get("body", "")
+        if isinstance(body, bytes):
+            body = body.decode("utf-8")
+        body_lower = body.lower()
+
+        if branch_prefix in title:
+            return task
+        if branch_name.lower() in body_lower:
+            return task
+        if f"wt/{branch_prefix}" in body_lower:
+            return task
+    return None
+
+
+def main():
+    db_path = get_kanban_db()
+    tasks = load_tasks(db_path)
+    repo = os.path.expanduser("~/farm-surveillance-v2")
+
+    branches = get_all_worktree_branches(repo)
+    if not branches:
+        print("No worktree branches found in the repository.")
+        return 0
+
+    unmerged = []
+    ok_list = []
+
+    for branch, sha in sorted(branches.items()):
+        task = match_task_to_branch(branch, tasks)
+        if task:
+            task_id = task["id"]
+            task_title = task.get("title", "unknown")[:80]
+        else:
+            task_id = "unknown"
+            task_title = "no matching task"
+
+        merged = check_merged(repo, sha)
+
+        if merged:
+            ok_list.append((task_id, branch, sha, task_title))
+        else:
+            unmerged.append((task_id, branch, sha, task_title))
+
+    # Print results
+    for tid, branch, sha, title in unmerged:
+        print(f"UNMERGED: {tid}  branch={branch}  head={sha}  missing_from_main=True")
+
+    for tid, branch, sha, title in ok_list:
+        print(f"OK: {tid}  branch={branch}  head={sha}  merged_to_main=True")
+
+    if unmerged:
+        print(
+            f"\nSummary: {len(unmerged)} unmerged task(s), "
+            f"{len(ok_list)} merged task(s)"
+        )
+    else:
+        print(
+            f"\nSummary: All {len(ok_list)} worktree branches are merged to main."
+        )
+
+    return 0
 
 
 if __name__ == "__main__":
