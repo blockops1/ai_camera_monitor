@@ -120,12 +120,6 @@ def _patch_pipeline_for_person(monkeypatch, candidates, vm2_result):
         MagicMock(return_value=False),
     )
 
-    # Patch record_hit -> no-op.
-    monkeypatch.setattr(
-        "listener.pipeline.record_hit",
-        MagicMock(),
-    )
-
     # Patch prepare_alert_artifacts -> returns a fake artifacts object.
     fake_artifacts = MagicMock()
     fake_artifacts.crop_a_path = _SAMPLE_FRAMES[0]
