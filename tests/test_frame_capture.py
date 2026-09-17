@@ -1295,3 +1295,161 @@ class TestPeriodicTeardown:
         assert not any("proceed" in m.lower() for m in all_msgs), (
             f"Found 'proceed' in log messages — old watchdog path should be gone: {all_msgs}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Test: container lock prevents SIGSEGV on stop during demux (US-049pr)
+# ---------------------------------------------------------------------------
+
+
+class TestContainerLock:
+    """Tests for the _container_lock fix (US-049pr)."""
+
+    def test_lock_exists_on_reader(self):
+        """AC: PersistentRTSPReader has a _container_lock attribute.
+
+        The lock is initialized in __init__ and used by both the demux
+        loop (to hold the lock during iteration) and stop() (to safely
+        drop _container without racing the demux thread).
+        """
+        reader = PersistentRTSPReader("rtsp://u:p@h:554/h")
+        assert hasattr(reader, "_container_lock")
+        assert isinstance(reader._container_lock, type(threading.Lock()))
+
+    def test_demux_loop_exits_cleanly_after_stop(self, mock_av_stream, mock_av_frame):
+        """AC: the demux loop respects _stop_event and exits.
+
+        After stop() sets _stop_event, the demux loop should check it
+        and exit (StopIteration from the exhausted generator). The
+        _container_lock is held during the loop, released when the
+        generator is exhausted. After release, _container.close()
+        is called, then _container = None, _healthy = False.
+        """
+        from infra import frame_capture as fc
+
+        demux_yielded = threading.Event()
+
+        def yielding_demux(stream_arg):
+            pkt = MagicMock()
+            pkt.dts = 0
+            pkt.decode.return_value = [mock_av_frame]
+            demux_yielded.set()
+            yield pkt
+
+        container = MagicMock()
+        container.streams.video = [mock_av_stream]
+        container.demux = yielding_demux
+
+        with patch("av.open", return_value=container):
+            reader = PersistentRTSPReader("rtsp://u:p@h:554/h")
+            reader.start()
+            demux_yielded.wait(timeout=5)
+            reader.stop(timeout=5.0)  # generous timeout
+
+        # Thread should have exited cleanly (join succeeded)
+        assert not reader._thread.is_alive(), (
+            "decode thread should exit after stop()"
+        )
+        assert reader.is_healthy() is False
+
+    def test_stop_does_not_crash_with_long_demux(self, mock_av_stream, mock_av_frame):
+        """AC: calling stop() while demux is still iterating does not crash.
+
+        The demux generator yields multiple frames. stop() is called mid-
+        iteration. The lock ensures stop() does not access _container while
+        the demux loop is inside it. The demux loop finishes naturally
+        (generator exhausted), then _container.close() runs outside the lock.
+        """
+        from infra import frame_capture as fc
+
+        stop_call_times = []
+
+        def multi_yield(stream_arg):
+            for i in range(5):
+                pkt = MagicMock()
+                pkt.dts = i
+                pkt.decode.return_value = [mock_av_frame]
+                yield pkt
+
+        container = MagicMock()
+        container.streams.video = [mock_av_stream]
+        container.demux = multi_yield
+
+        with patch("av.open", return_value=container):
+            reader = PersistentRTSPReader("rtsp://u:p@h:554/h")
+            reader.start()
+            time.sleep(0.15)  # let it process some frames
+            # stop() while frames are being decoded
+            reader.stop(timeout=5.0)
+
+        assert reader.is_healthy() is False
+        assert not reader._thread.is_alive()
+
+    def test_container_close_not_called_when_join_times_out(
+        self, mock_av_stream, mock_av_frame
+    ):
+        """AC: when join() times out, stop() drops _container without close().
+
+        The demux generator yields ONE frame, then blocks on
+        demux_block.wait() — simulating a long native C demux call.
+        stop() sets _stop_event, calls join(timeout=2). The demux loop
+        is still inside the with-lock block waiting on the event.
+        After 2s join times out, stop() blocks on acquiring _container_lock
+        (held by the demux thread). We release demux_block so the
+        demux thread finishes, the lock is released, and stop() sets
+        _container = None.
+        """
+        demux_block = threading.Event()
+        demux_exhausted = threading.Event()
+
+        demux_yield_count = [0]
+
+        def slow_demux(stream_arg):
+            pkt = MagicMock()
+            pkt.dts = 0
+            pkt.decode.return_value = [mock_av_frame]
+            # Yield ONE frame, then wait for stop to signal that
+            # the demux iteration is done.  This simulates the
+            # demux loop holding _container_lock for a long time
+            # (native C demux call).
+            yield pkt
+            demux_yield_count[0] += 1
+            demux_block.wait(timeout=30)
+            demux_exhausted.set()
+
+        container = MagicMock()
+        container.streams.video = [mock_av_stream]
+        container.demux = slow_demux
+        close_called = [False]
+
+        original_close = container.close
+
+        def track_close():
+            close_called[0] = True
+            return original_close()
+
+        container.close = track_close
+
+        with patch("av.open", return_value=container):
+            reader = PersistentRTSPReader("rtsp://u:p@h:554/h")
+            reader.start()
+            time.sleep(0.1)  # let it process some frames
+            # stop with 2s timeout — thread is running infinite demux.
+            # stop() sets _stop_event, then joins.  The demux loop
+            # sees _stop_event but keeps yielding (continuing to skip).
+            # After 2s join times out.
+            reader.stop(timeout=2.0)
+            # stop() is blocked on acquiring _container_lock (held by
+            # the demux thread). Release the demux thread so it can
+            # finish its iteration.
+            demux_block.set()
+            demux_exhausted.wait(timeout=5)
+            time.sleep(0.1)
+            # close() was called by _decode_iteration (after the with-block),
+            # not by stop(). The thread owns the close when it exits.
+            assert close_called[0] is True, (
+                "close() should have been called by the demux thread "
+                "after it exited normally"
+            )
+            assert reader._container is None
+            assert reader.is_healthy() is False
