@@ -1188,3 +1188,110 @@ class TestPeriodicTeardown:
             )
 
             reader.stop(timeout=2.0)
+
+    def test_stats_exposes_teardown_counters(self, monkeypatch):
+        """AC: stats() dict contains 'teardowns_total' and 'seconds_since_teardown'
+        keys with correct values.
+
+        Before start(), teardowns_total == 0 and seconds_since_teardown is None
+        (_last_teardown_monotonic is not set yet). After start(), _last_teardown_
+        monotonic is set by start(), so seconds_since_teardown is a finite number.
+        """
+        from infra import frame_capture as fc
+
+        fake_time = [1000.0]
+
+        def fake_monotonic():
+            return fake_time[0]
+
+        monkeypatch.setattr(fc.time, "monotonic", fake_monotonic)
+
+        reader = PersistentRTSPReader("rtsp://u:p@h:554/h")
+        stats = reader.stats()
+
+        assert "teardowns_total" in stats
+        assert stats["teardowns_total"] == 0, (
+            f"Expected 0 teardowns on fresh reader, got {stats['teardowns_total']}"
+        )
+        assert "seconds_since_teardown" in stats
+        # Before start, _last_teardown_monotonic is None → None.
+        assert stats["seconds_since_teardown"] is None, (
+            "seconds_since_teardown should be None before start()"
+        )
+
+        # start() sets _last_teardown_monotonic = time.monotonic() internally.
+        reader.start()
+        stats_after = reader.stats()
+        assert stats_after["seconds_since_teardown"] is not None, (
+            "seconds_since_teardown should be set after start()"
+        )
+        assert stats_after["seconds_since_teardown"] >= 0
+        reader.stop(timeout=2.0)
+
+    def test_failure_driven_cap_still_fails_loud_at_10(
+        self, monkeypatch, caplog
+    ):
+        """AC: after hitting the reconnect cap, the reader logs ERROR, exits
+        the decode loop cleanly, and is_healthy() == False. The in-thread
+        teardown does NOT reset the consecutive failure counter, so the cap
+        still raises loudly.
+
+        Uses the same pattern as TestFailureDrivenReconnectCap but runs under
+        the teardown era to ensure US-049c didn't break this path.
+        """
+        from infra import frame_capture as fc
+
+        decode_calls = {"n": 0}
+
+        def always_fail_decode() -> None:
+            decode_calls["n"] += 1
+            raise RuntimeError("simulated RTSP decode failure")
+
+        # Patch Event.wait so it returns True immediately (simulating stop_event
+        # being set), which lets the cap block break the run loop cleanly.
+        def fake_wait(self, timeout=None):
+            self.set()
+            return True
+
+        monkeypatch.setattr(threading.Event, "wait", fake_wait)
+        monkeypatch.setattr(fc.time, "sleep", lambda _s: None)
+
+        reader = PersistentRTSPReader(
+            "rtsp://u:p@h:554/h",
+            max_reconnect_attempts=3,
+        )
+        reader._decode_iteration = always_fail_decode  # type: ignore[method-assign]
+
+        with caplog.at_level(logging.ERROR, logger="frame_capture"):
+            reader.start()
+            # Wait for the decode thread to hit the cap.
+            deadline = _time.monotonic() + 2.0
+            while _time.monotonic() < deadline and decode_calls["n"] < 3:
+                _time.sleep(0.01)
+            _time.sleep(0.1)
+            reader.stop(timeout=2.0)
+
+        # AC — exactly one ERROR log with cap-reached marker.
+        cap_logs = [
+            r for r in caplog.records
+            if "consecutive_reconnect_cap_reached" in r.getMessage()
+        ]
+        assert len(cap_logs) == 1, (
+            f"Expected exactly one consecutive_reconnect_cap_reached log, "
+            f"got {len(cap_logs)}: {[r.getMessage() for r in cap_logs]}"
+        )
+
+        # AC — is_healthy() is False after cap exhaustion.
+        assert reader.is_healthy() is False
+
+        # AC — exactly N decode calls (cap tipped on Nth failure).
+        assert decode_calls["n"] == 3, (
+            f"Expected 3 _decode_iteration calls (cap on 3rd failure), "
+            f"got {decode_calls['n']}"
+        )
+
+        # AC — no 'proceed' log line (old watchdog proceed-anyway path is gone).
+        all_msgs = [r.getMessage() for r in caplog.records]
+        assert not any("proceed" in m.lower() for m in all_msgs), (
+            f"Found 'proceed' in log messages — old watchdog path should be gone: {all_msgs}"
+        )
