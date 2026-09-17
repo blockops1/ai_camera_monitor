@@ -160,6 +160,7 @@ class PersistentRTSPReader:
         self._container: av.container.InputContainer | None = None
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        self._container_lock = threading.Lock()
         self._start_time: float | None = None
         self._last_frame_time: float | None = None
         self._consecutive_errors = 0
@@ -226,18 +227,29 @@ class PersistentRTSPReader:
             self._rtsp_url.split("@")[-1],
         )
 
-    def stop(self, timeout: float = 5.0) -> None:
+    def stop(self, timeout: float = 12.0) -> None:
+        """Stop the decode loop and drop the container reference.
+
+        After *timeout* seconds: the join has expired, the native
+        demux() thread may still be blocked inside PyAV's C demux()
+        call.  We DO NOT call _container.close() from this thread —
+        that would race the native thread and cause a SIGSEGV.  We
+        drop the reference only; the native thread will error out
+        and GC will reclaim the container.  The decode thread
+        itself closes the container when demux() naturally returns.
+        """
         if not self.is_running:
             return
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=timeout)
             self._thread = None
-        if self._container is not None:
-            try:
-                self._container.close()
-            except Exception:
-                log.exception("stop: container.close() failed")
+        # Post-join: the demux thread may still be inside the native
+        # C call.  Acquiring _container_lock ensures demux is not
+        # mid-iteration.  We drop the reference WITHOUT calling
+        # close() — the decode thread owns the close when demux
+        # exits (single-owner rule).
+        with self._container_lock:
             self._container = None
         self._healthy = False
 
@@ -445,24 +457,31 @@ class PersistentRTSPReader:
         stream = self._container.streams.video[0]
         self._consecutive_errors = 0
         self._healthy = True
-        for packet in self._container.demux(stream):
-            if self._stop_event.is_set() or packet.dts is None:
-                continue
-            for frame in packet.decode():
-                if self._stop_event.is_set() or frame is None:
+        # Hold _container_lock during demux() so stop() can safely
+        # drop the reference without racing a native C demux call.
+        with self._container_lock:
+            for packet in self._container.demux(stream):
+                if self._stop_event.is_set():
+                    break
+                if packet.dts is None:
                     continue
-                try:
-                    img = frame.to_image()
-                except Exception:
-                    log.exception(
-                        "_decode_iteration: frame.to_image() failed, "
-                        "discarding this frame"
-                    )
-                    raise
-                with self._ring_lock:
-                    self._ring.append(img)
-                self.frames_decoded_total += 1
-                self._last_frame_time = time.monotonic()
+                for frame in packet.decode():
+                    if self._stop_event.is_set():
+                        break
+                    if frame is None:
+                        continue
+                    try:
+                        img = frame.to_image()
+                    except Exception:
+                        log.exception(
+                            "_decode_iteration: frame.to_image() failed, "
+                            "discarding this frame"
+                        )
+                        raise
+                    with self._ring_lock:
+                        self._ring.append(img)
+                    self.frames_decoded_total += 1
+                    self._last_frame_time = time.monotonic()
         try:
             self._container.close()
         except Exception:
@@ -614,7 +633,7 @@ class CameraCaptureRegistry:
             for cid, dead_reader in dead:
                 if dead_reader.uptime_seconds() > 10.0:
                     log.warning("Reader %s unhealthy; reconnecting.", cid)
-                    dead_reader.stop(timeout=2.0)
+                    dead_reader.stop(timeout=12.0)
                     inst._readers.pop(cid, None)
                     new_reader = PersistentRTSPReader(dead_reader._rtsp_url)
                     new_reader.start()
