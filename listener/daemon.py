@@ -275,98 +275,138 @@ def alert():
     # (pipeline + dispatcher are imported at module top so tests can patch them)
     result = pipeline.run(alert_dict)
 
-    # US-022b: dispatch tg1/tg2/tg3 to Telegram.
-    # US-030a: pre-convert photos to JPEG, cache on disk, structured log.
+    # US-050b: per-stage Telegram dispatch.
+    # Each TG-producing stage (TG#1, TG#2, TG#3) is dispatched
+    # immediately after pipeline.run() returns. Failures of one
+    # dispatch do NOT unwind the others (each is independent).
     # Daemon still returns HTTP 200 even if dispatch fails —
     # operator sees the gap in logs/daemon.log, not as a
     # camera-side retry storm.
-    tg_messages = [
-        result.get("tg1", {}),
-        result.get("tg2", {}),
-        result.get("tg3", {}),
-    ]
-    tg_messages = [m for m in tg_messages if m]
-    if tg_messages:
-        alert_id = result.get("id", "unknown")
-        chat_id = os.environ.get("TELEGRAM_HOME_CHAT_ID", "")
-        try:
-            # Pre-convert all photo paths to cached JPEGs (TG#1+TG#2 only).
-            # TG#3 is text-only (photos=[]), skip conversion.
-            converted: list[tuple[str, int]] = []  # (cache_path, n_sources)
-            converted_photos: list[str] = []
-            source_photo_count = 0
-            for msg in tg_messages:
-                orig_photos = msg.get("photos", []) or []
-                # TG#3 (text-only) has no photos; skip.
-                if not orig_photos:
-                    continue
-                source_photo_count += len(orig_photos)
-                date_str = datetime.now(UTC).strftime("%Y-%m-%d")
-                msg_cache_dir = str(
-                    Path(infra_paths.TG_UPLOADS_DIR) / date_str / alert_id
-                )
-                # Per-message list -- do NOT accumulate across messages,
-                # otherwise TG#2 ships TG#1's photos too.
-                msg_converted: list[str] = []
-                for src_path in orig_photos:
-                    jpg = codec.encode_jpeg(
-                        src_path, msg_cache_dir, jpeg_quality=88, max_dim=1920
-                    )
-                    if jpg is not None:
-                        msg_converted.append(jpg)
-                        converted.append((jpg, len(orig_photos)))
-                # Replace photos in THIS message with THIS message's cached JPEGs only.
-                msg["photos"] = msg_converted
-                converted_photos.extend(msg_converted)
+    alert_id = result.get("id", "unknown")
+    chat_id = os.environ.get("TELEGRAM_HOME_CHAT_ID", "")
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
-            responses = dispatcher.dispatch(
-                tg_messages,
-                bot_token=os.environ["TELEGRAM_BOT_TOKEN"],
-                chat_id=chat_id,
-            )
+    # ---- TG#1 dispatch (after stage 10: build_tg1) ----
+    _send_tg1(result.get("tg1"), alert_id, chat_id, bot_token)
 
-            # Upload size in bytes.
-            upload_bytes = (
-                sum(os.path.getsize(p) for p in converted_photos)
-                if converted_photos
-                else 0
-            )
+    # ---- TG#2 dispatch (after stage 11: build_tg2) ----
+    _send_tg2(result.get("tg2"), alert_id, chat_id, bot_token)
 
-            for i, resp in enumerate(responses, start=1):
-                log.info(
-                    "tg-send: alert_id=%s TG#%d chat=%s method=sendMediaGroup type=photo "
-                    "sources=%d converted=%d cache=%d upload=%d response=HTTP %d",
-                    alert_id,
-                    i,
-                    chat_id,
-                    source_photo_count,
-                    len(converted),
-                    len(converted),
-                    upload_bytes,
-                    resp.status_code,
-                )
+    # ---- TG#3 dispatch (after stage 13: build_tg3) ----
+    _send_tg3(result.get("tg3"), alert_id, chat_id, bot_token)
 
-            # Sweep old cache dirs (24h retention).
-            tg_upload_cleanup.sweep()
-
-        except (ConfigError, DeliveryError) as exc:
-            log.error(
-                "tg-send: alert_id=%s error=%s: %s",
-                alert_id,
-                type(exc).__name__,
-                exc,
-            )
-        except Exception as exc:  # noqa: BLE001
-            # Catch-all so dispatcher hiccups don't surface as HTTP 5xx to the camera.
-            # The alert still reached the pipeline; the operator sees the gap in logs.
-            log.error(
-                "tg-send: alert_id=%s unexpected %s: %s",
-                alert_id,
-                type(exc).__name__,
-                exc,
-            )
+    # Sweep old cache dirs (24h retention) — after all per-stage dispatches.
+    try:
+        tg_upload_cleanup.sweep()
+    except Exception:  # noqa: BLE001
+        log.warning("tg_upload_cleanup: post-dispatch sweep failed (non-fatal)")
 
     return jsonify(result), 200
+
+
+# ---------------------------------------------------------------------------
+# Per-stage dispatch helpers (TG#1, TG#2, TG#3)
+# Each helper pre-converts photos (TG#1/TG#2), then calls dispatcher.dispatch().
+# TG#3 is text-only (no photo conversion). Failure is logged; does not raise.
+# ---------------------------------------------------------------------------
+
+
+def _convert_photos(alert_id: str, photo_paths: list[str]) -> list[str]:
+    """Pre-convert source photo paths to cached JPEGs.
+
+    Returns the list of cached JPEG paths. Empty if none convert.
+    """
+    date_str = datetime.now(UTC).strftime("%Y-%m-%d")
+    msg_cache_dir = str(
+        Path(infra_paths.TG_UPLOADS_DIR) / date_str / alert_id
+    )
+    converted: list[str] = []
+    for src_path in photo_paths:
+        jpg = codec.encode_jpeg(
+            src_path, msg_cache_dir, jpeg_quality=88, max_dim=1920
+        )
+        if jpg is not None:
+            converted.append(jpg)
+    return converted
+
+
+def _send_tg1(tg_msg: dict | None, alert_id: str, chat_id: str, bot_token: str) -> None:
+    """Dispatch TG#1: alert message with photos."""
+    if not tg_msg or not bot_token:
+        if tg_msg and not bot_token:
+            log.warning("tg-send: alert_id=%s TG#1 missing TELEGRAM_BOT_TOKEN, skipping", alert_id)
+        return
+    orig_photos = tg_msg.get("photos") or []
+    if orig_photos:
+        tg_msg["photos"] = _convert_photos(alert_id, orig_photos)
+    try:
+        responses = dispatcher.dispatch(
+            [tg_msg], bot_token=bot_token, chat_id=chat_id,
+        )
+        converted_photos = tg_msg.get("photos") or []
+        upload_bytes = sum(os.path.getsize(p) for p in converted_photos) if converted_photos else 0
+        method = "sendMediaGroup" if converted_photos else "sendMessage"
+        log.info(
+            "tg-send: alert_id=%s TG#1 chat=%s method=%s sources=%d converted=%d upload=%d response=HTTP %d",
+            alert_id, chat_id, method, len(orig_photos), len(converted_photos),
+            upload_bytes, responses[0].status_code if responses else 0,
+        )
+    except (ConfigError, DeliveryError) as exc:
+        log.error("tg-send: alert_id=%s TG#1 error=%s: %s", alert_id, type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001
+        log.error("tg-send: alert_id=%s TG#1 unexpected %s: %s", alert_id, type(exc).__name__, exc)
+
+
+def _send_tg2(tg_msg: dict | None, alert_id: str, chat_id: str, bot_token: str) -> None:
+    """Dispatch TG#2: detail message with photos."""
+    if not tg_msg or not bot_token:
+        if tg_msg and not bot_token:
+            log.warning("tg-send: alert_id=%s TG#2 missing TELEGRAM_BOT_TOKEN, skipping", alert_id)
+        return
+    orig_photos = tg_msg.get("photos") or []
+    if orig_photos:
+        tg_msg["photos"] = _convert_photos(alert_id, orig_photos)
+    try:
+        responses = dispatcher.dispatch(
+            [tg_msg], bot_token=bot_token, chat_id=chat_id,
+        )
+        converted_photos = tg_msg.get("photos") or []
+        upload_bytes = sum(os.path.getsize(p) for p in converted_photos) if converted_photos else 0
+        method = "sendMediaGroup" if converted_photos else "sendMessage"
+        log.info(
+            "tg-send: alert_id=%s TG#2 chat=%s method=%s sources=%d converted=%d upload=%d response=HTTP %d",
+            alert_id, chat_id, method, len(orig_photos), len(converted_photos),
+            upload_bytes, responses[0].status_code if responses else 0,
+        )
+    except (ConfigError, DeliveryError) as exc:
+        log.error("tg-send: alert_id=%s TG#2 error=%s: %s", alert_id, type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001
+        log.error("tg-send: alert_id=%s TG#2 unexpected %s: %s", alert_id, type(exc).__name__, exc)
+
+
+def _send_tg3(tg_msg: dict | None, alert_id: str, chat_id: str, bot_token: str) -> None:
+    """Dispatch TG#3: match message (text-only)."""
+    if not tg_msg or not bot_token:
+        if tg_msg and not bot_token:
+            log.warning("tg-send: alert_id=%s TG#3 missing TELEGRAM_BOT_TOKEN, skipping", alert_id)
+        return
+    # TG#3 is text-only (photos=[]), no conversion needed.
+    try:
+        responses = dispatcher.dispatch(
+            [tg_msg], bot_token=bot_token, chat_id=chat_id,
+        )
+        converted_photos = tg_msg.get("photos") or []
+        upload_bytes = sum(os.path.getsize(p) for p in converted_photos) if converted_photos else 0
+        method = "sendMediaGroup" if converted_photos else "sendMessage"
+        log.info(
+            "tg-send: alert_id=%s TG#3 chat=%s method=%s sources=%d converted=%d upload=%d response=HTTP %d",
+            alert_id, chat_id, method, 0, len(converted_photos),
+            upload_bytes, responses[0].status_code if responses else 0,
+        )
+    except (ConfigError, DeliveryError) as exc:
+        log.error("tg-send: alert_id=%s TG#3 error=%s: %s", alert_id, type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001
+        log.error("tg-send: alert_id=%s TG#3 unexpected %s: %s", alert_id, type(exc).__name__, exc)
 
 
 def generate_plist() -> str:
