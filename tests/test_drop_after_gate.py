@@ -113,7 +113,6 @@ class TestPersonClassification:
             patch("listener.pipeline.build_detail_message", return_value=tg2),
             patch("listener.pipeline._load_candidates", return_value=[]),
             patch("listener.pipeline.build_match_message", return_value=tg3),
-            patch("listener.pipeline.record_hit") as mock_record,
         ):
             result = run(alert)
 
@@ -123,9 +122,7 @@ class TestPersonClassification:
         assert "tg1" in result
         assert "vm2_result" in result
         assert "tg2" in result
-        # record_hit should be called since pipeline succeeded
-        mock_record.assert_called_once()
-        assert mock_record.call_args[0][:2] == ("CAM1", "person")
+        # run() no longer calls record_hit — that's daemon's job (US-050c).
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +167,6 @@ class TestAnimalClassification:
             patch("listener.pipeline.build_detail_message", return_value=tg2),
             patch("listener.pipeline._load_candidates", return_value=[]),
             patch("listener.pipeline.build_match_message", return_value=tg3),
-            patch("listener.pipeline.record_hit") as mock_record,
         ):
             result = run(alert)
 
@@ -180,9 +176,7 @@ class TestAnimalClassification:
         assert "tg1" in result
         assert "vm2_result" in result
         assert "tg2" in result
-        # record_hit should be called since pipeline succeeded
-        mock_record.assert_called_once()
-        assert mock_record.call_args[0][:2] == ("CAM1", "animal")
+        # run() no longer calls record_hit — that's daemon's job (US-050c).
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +205,6 @@ class TestNoneClassification:
             patch("listener.pipeline.run_gate", return_value=gate_v),
             patch("listener.pipeline.prepare_alert_artifacts") as mock_artifacts,
             patch("listener.pipeline.verify_class") as mock_verify,
-            patch("listener.pipeline.record_hit") as mock_record,
         ):
             result = run(alert)
 
@@ -221,7 +214,6 @@ class TestNoneClassification:
         assert result["classification"] == "none"
 
         # Stage 3 functions should NOT have been called
-        mock_record.assert_not_called()
         mock_artifacts.assert_not_called()
         mock_verify.assert_not_called()
 
@@ -249,7 +241,6 @@ class TestNoneClassification:
             patch("listener.pipeline.detail_class") as mock_detail,
             patch("listener.pipeline.build_detail_message") as mock_tg2,
             patch("listener.pipeline.build_match_message") as mock_match,
-            patch("listener.pipeline.record_hit") as mock_record,
         ):
             result = run(alert)
 
@@ -264,7 +255,6 @@ class TestNoneClassification:
         mock_detail.assert_not_called()
         mock_tg2.assert_not_called()
         mock_match.assert_not_called()
-        mock_record.assert_not_called()
 
     def test_none_classification_log_format(self, caplog):
         """The dropped alert is logged at INFO with the expected format."""

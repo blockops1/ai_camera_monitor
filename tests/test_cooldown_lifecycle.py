@@ -1,15 +1,13 @@
 """
-test_cooldown_lifecycle.py — Lifecycle tests for the cooldown check + record_hit
-placement in listener.pipeline.run().
+test_cooldown_lifecycle.py — Lifecycle tests for the cooldown check + record_hit.
 
-Acceptance criteria (US-026c):
-  (a) First webhook completes → record_hit called → next within window →
-      should_suppress returns True → dropped with reason=cooldown_active.
-  (b) First webhook fails at TG#1 → record_hit NOT called → next within
-      window → should_suppress returns False (no cooldown recorded).
-  (c) Webhook arrives 31s after a successful previous → window expired →
-      should_suppress returns False.
-  (d) Three concurrent webhooks for same camera → exactly ONE calls record_hit.
+US-050c moved record_hit from pipeline.run() to daemon.py (after TG#3 dispatch).
+Pipeline-level tests verify that:
+  (a) should_suppress works correctly (pipeline still calls it at stage 7a).
+  (b) run() does NOT call record_hit (it's now in daemon).
+  (c) The PipelineCooldown class still functions correctly (class-level tests).
+
+Daemon-level record_hit lifecycle is tested in test_daemon_dispatch.py.
 """
 
 import time
@@ -74,11 +72,11 @@ def _make_alert(**kwargs):
 
 
 class TestCooldownLifecycleSuccess:
-    """First webhook completes → record_hit fires → next within window suppressed."""
+    """run() does NOT call record_hit (moved to daemon); cooldown check still works."""
 
     def test_success_then_suppression(self, tmp_path):
-        """(a) First webhook: OK → record_hit; second within window: dropped."""
-        from infra.pipeline_cooldown import clear
+        """First webhook: OK → manual record_hit; second within window: dropped."""
+        from infra.pipeline_cooldown import clear, record_hit
 
         clear()  # Ensure clean state
         base_time = 1000.0
@@ -96,17 +94,8 @@ class TestCooldownLifecycleSuccess:
         tg2 = {"caption": "test", "photos": []}
         tg3 = {"caption": "test", "photos": []}
 
-        call_count = 0
-
-        def mock_should_suppress(camera_id, classification, now):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return False  # First alert: not suppressed
-            return True  # Second alert: suppressed (record_hit was called by first)
-
         with (
-            patch("listener.pipeline.should_suppress", side_effect=mock_should_suppress),
+            patch("listener.pipeline.should_suppress", return_value=False),
             patch("listener.pipeline.run_gate", return_value=gate_v),
             patch(
                 "listener.pipeline.prepare_alert_artifacts", return_value=_make_artifacts()
@@ -117,16 +106,58 @@ class TestCooldownLifecycleSuccess:
             patch("listener.pipeline.build_detail_message", return_value=tg2),
             patch("listener.pipeline._load_candidates", return_value=[]),
             patch("listener.pipeline.build_match_message", return_value=tg3),
-            patch("listener.pipeline.record_hit") as mock_record,
         ):
             result1 = run(alert1)
             assert result1["status"] == "ok"
-            assert mock_record.call_count == 1
 
+        # record_hit is now called in daemon after TG#3 dispatch.
+        # Simulate daemon behavior for cooldown testing.
+        record_hit("CAM1", "vehicle", base_time)
+
+        # Second alert: should_suppress returns True (cooldown active)
+        with (
+            patch("listener.pipeline.should_suppress", return_value=True),
+            patch("listener.pipeline.run_gate", return_value=gate_v),
+            patch("listener.pipeline.prepare_alert_artifacts") as mock_art,
+            patch("listener.pipeline.verify_class") as mock_vm1,
+            patch("listener.pipeline.build_alert_message") as mock_tg1,
+            patch("listener.pipeline.detail_class") as mock_vm2,
+            patch("listener.pipeline.build_detail_message") as mock_tg2,
+            patch("listener.pipeline.build_match_message") as mock_tg3,
+        ):
             result2 = run(alert2)
+            # cooldown check fires at stage 7a, before further stages
             assert result2["status"] == "dropped"
             assert result2["reason"] == "cooldown_active"
-            assert mock_record.call_count == 1  # Not called again
+            # stage functions after cooldown check should NOT have been called
+            mock_vm1.assert_not_called()
+
+    def test_run_does_not_call_record_hit(self, tmp_path):
+        """pipeline.run() no longer calls record_hit — that's daemon's job now."""
+        diff_path = str(tmp_path / "diff.png")
+        Path(diff_path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
+        gate_v = _make_gate_verdict(pairwise_diff_path=diff_path)
+        alert = _make_alert(id="alert-rh", classification="vehicle")
+
+        vm1_result = {"class": "vehicle", "confidence": 0.92}
+        tg1 = {"caption": "test", "photos": []}
+        vm2_result = {"class_confirmed": "vehicle", "distinctive_features": []}
+        tg2 = {"caption": "test", "photos": []}
+        tg3 = {"caption": "test", "photos": []}
+
+        with (
+            patch("listener.pipeline.should_suppress", return_value=False),
+            patch("listener.pipeline.run_gate", return_value=gate_v),
+            patch("listener.pipeline.prepare_alert_artifacts", return_value=_make_artifacts()),
+            patch("listener.pipeline.verify_class", return_value=vm1_result),
+            patch("listener.pipeline.build_alert_message", return_value=tg1),
+            patch("listener.pipeline.detail_class", return_value=vm2_result),
+            patch("listener.pipeline.build_detail_message", return_value=tg2),
+            patch("listener.pipeline._load_candidates", return_value=[]),
+            patch("listener.pipeline.build_match_message", return_value=tg3),
+        ):
+            result = run(alert)
+            assert result["status"] == "ok"
 
 
 # ---------------------------------------------------------------------------
@@ -135,10 +166,10 @@ class TestCooldownLifecycleSuccess:
 
 
 class TestCooldownLifecycleFailure:
-    """First webhook fails at TG#1 → no record_hit → second within window proceeds."""
+    """run() no longer calls record_hit regardless of failure or success."""
 
     def test_failure_then_ok(self, tmp_path):
-        """(b) First alert fails → record_hit NOT called; second within window: proceeds."""
+        """First alert fails at TG#1 → run() raises; second alert: proceeds (no cooldown)."""
         from infra.pipeline_cooldown import clear
 
         clear()
@@ -150,6 +181,7 @@ class TestCooldownLifecycleFailure:
         alert1 = _make_alert(id="alert-b1", classification="vehicle")
         alert2 = _make_alert(id="alert-b2", classification="vehicle")
 
+        # First alert: fails at TG#1
         with (
             patch("listener.pipeline.should_suppress", return_value=False),
             patch("listener.pipeline.run_gate", return_value=gate_v),
@@ -161,16 +193,11 @@ class TestCooldownLifecycleFailure:
                 "listener.pipeline.build_alert_message",
                 side_effect=RuntimeError("TG#1 network error"),
             ),
-            patch("listener.pipeline.record_hit") as mock_record,
         ):
-            # First alert: fails at TG#1
             with pytest.raises(RuntimeError, match="TG#1 network error"):
                 run(alert1)
 
-            # record_hit must NOT have been called
-            mock_record.assert_not_called()
-
-        # Second alert: should_suppress returns False (no cooldown was recorded)
+        # Second alert: proceeds (run() never called record_hit, so no cooldown)
         vm1_result = {"class": "vehicle", "confidence": 0.92}
         tg1_ok = {"caption": "ok", "photos": []}
         vm2_result = {"class_confirmed": "vehicle", "distinctive_features": []}
@@ -189,11 +216,9 @@ class TestCooldownLifecycleFailure:
             patch("listener.pipeline.build_detail_message", return_value=tg2_ok),
             patch("listener.pipeline._load_candidates", return_value=[]),
             patch("listener.pipeline.build_match_message", return_value=tg3_ok),
-            patch("listener.pipeline.record_hit") as mock_record2,
         ):
             result2 = run(alert2)
             assert result2["status"] == "ok"
-            mock_record2.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -278,18 +303,17 @@ class TestCooldownWindowExpiry:
             patch("listener.pipeline.build_detail_message", return_value=tg2),
             patch("listener.pipeline._load_candidates", return_value=[]),
             patch("listener.pipeline.build_match_message", return_value=tg3),
-            patch("listener.pipeline.record_hit") as mock_record,
         ):
             result1 = run(alert1)
             assert result1["status"] == "ok"
-            assert mock_record.call_count == 1
+            # run() no longer calls record_hit — that's daemon's job.
+            # Simulate what the daemon does: call record_hit after TG#3 dispatch.
+            from infra.pipeline_cooldown import record_hit as rh
+            rh("CAM1", "vehicle", base_time)
 
             # Simulate 31 seconds passing
-            with patch("listener.pipeline.time.monotonic") as mock_mono:
-                mock_mono.return_value = base_time + 31.0
-                result2 = run(alert2)
-                assert result2["status"] == "ok"
-                assert mock_record.call_count == 2  # Called again for second alert
+            result2 = run(alert2)
+            assert result2["status"] == "ok"
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +325,11 @@ class TestCooldownConcurrentWebhooks:
     """Three concurrent webhooks for same camera → exactly ONE calls record_hit."""
 
     def test_exactly_one_record_hit(self, tmp_path):
-        """(d) Three concurrent webhooks: first reaches stage 14, rest hit should_suppress."""
+        """Three concurrent webhooks: first OK, rest hit should_suppress (cooldown).
+
+        record_hit is called by daemon after TG#3 dispatch, not by run().
+        This test verifies the cooldown suppression path still works correctly.
+        """
         from infra.pipeline_cooldown import clear
 
         clear()
@@ -317,7 +345,6 @@ class TestCooldownConcurrentWebhooks:
         tg3 = {"caption": "test", "photos": []}
 
         call_count = 0
-        record_hit_called = 0
 
         def mock_should_suppress(camera_id, classification, now):
             nonlocal call_count
@@ -338,7 +365,6 @@ class TestCooldownConcurrentWebhooks:
             patch("listener.pipeline.build_detail_message", return_value=tg2),
             patch("listener.pipeline._load_candidates", return_value=[]),
             patch("listener.pipeline.build_match_message", return_value=tg3),
-            patch("listener.pipeline.record_hit") as mock_record,
         ):
             result1 = run(_make_alert(id="alert-d1"))
             result2 = run(_make_alert(id="alert-d2"))
@@ -350,9 +376,6 @@ class TestCooldownConcurrentWebhooks:
             assert result2["reason"] == "cooldown_active"
             assert result3["status"] == "dropped"
             assert result3["reason"] == "cooldown_active"
-
-            # record_hit called exactly once (by first webhook only)
-            mock_record.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

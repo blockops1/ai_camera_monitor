@@ -43,7 +43,7 @@ from animal_matcher.match import match_animal
 from infra.alert_artifacts import prepare_alert_artifacts
 from infra.gate import GateVerdict, run as run_gate
 from infra.paths import PERSON_KNOWN_FILE, VEHICLE_KNOWN_FILE, data_dir_for
-from infra.pipeline_cooldown import record_hit, should_suppress
+from infra.pipeline_cooldown import should_suppress
 from infra.vision_analyzer import detail_class, verify_class
 from person_matcher.match import match_person
 from telegram_formatter.alert import build_alert_message
@@ -415,9 +415,6 @@ def run(alert: dict) -> dict:
         mode, match_result, vm2_result,
         a_p, b_p, camera_label, alert,
     )
-
-    # record_hit — post-stages side effect (not a named stage).
-    record_hit(camera_id, classification, time.monotonic())
 
     return {
         "id": alert_id,

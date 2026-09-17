@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 import uuid
 from collections import deque
 from collections.abc import MutableMapping
@@ -58,6 +59,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request
 
 from infra import paths as infra_paths, tg_upload_cleanup
+from infra import pipeline_cooldown as infra_pipeline_cooldown
 from listener import pipeline
 from telegram_formatter import codec, dispatcher
 from telegram_formatter.dispatcher import ConfigError, DeliveryError
@@ -273,27 +275,54 @@ def alert():
 
     # Run the alert through the full pipeline
     # (pipeline + dispatcher are imported at module top so tests can patch them)
-    result = pipeline.run(alert_dict)
+    try:
+        result = pipeline.run(alert_dict)
+    except Exception:  # noqa: BLE001
+        log.exception("pipeline.run failed for alert")
+        return jsonify({"status": "error"}), 200
 
-    # US-050b: per-stage Telegram dispatch.
-    # Each TG-producing stage (TG#1, TG#2, TG#3) is dispatched
-    # immediately after pipeline.run() returns. Failures of one
-    # dispatch do NOT unwind the others (each is independent).
-    # Daemon still returns HTTP 200 even if dispatch fails —
-    # operator sees the gap in logs/daemon.log, not as a
-    # camera-side retry storm.
     alert_id = result.get("id", "unknown")
     chat_id = os.environ.get("TELEGRAM_HOME_CHAT_ID", "")
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
+    # US-050b: per-stage Telegram dispatch.
+    # Each TG-producing stage (TG#1, TG#2, TG#3) is dispatched
+    # immediately after pipeline.run() returns. A failure at any
+    # stage N+1 logs.exception and returns HTTP 200 (no retry storm)
+    # but does NOT continue to subsequent stages. Earlier-sent TGs
+    # are NOT rolled back. No defensive fallbacks.
+    #
+    # record_hit fires ONLY after TG#3 dispatch succeeds (spec item 12).
+    # Per-operator directive: "I never ever ever want a defensive fallback."
+
     # ---- TG#1 dispatch (after stage 10: build_tg1) ----
-    _send_tg1(result.get("tg1"), alert_id, chat_id, bot_token)
+    try:
+        _send_tg1(result.get("tg1"), alert_id, chat_id, bot_token)
+    except Exception:  # noqa: BLE001
+        log.exception("TG#1 dispatch failed for alert_id=%s", alert_id)
+        return jsonify(result), 200
 
     # ---- TG#2 dispatch (after stage 11: build_tg2) ----
-    _send_tg2(result.get("tg2"), alert_id, chat_id, bot_token)
+    try:
+        _send_tg2(result.get("tg2"), alert_id, chat_id, bot_token)
+    except Exception:  # noqa: BLE001
+        log.exception("TG#2 dispatch failed for alert_id=%s", alert_id)
+        return jsonify(result), 200
 
     # ---- TG#3 dispatch (after stage 13: build_tg3) ----
-    _send_tg3(result.get("tg3"), alert_id, chat_id, bot_token)
+    try:
+        _send_tg3(result.get("tg3"), alert_id, chat_id, bot_token)
+    except Exception:  # noqa: BLE001
+        log.exception("TG#3 dispatch failed for alert_id=%s", alert_id)
+        return jsonify(result), 200
+
+    # TG#3 dispatched successfully → record_hit (cooldown window starts).
+    # This is the ONLY call site for record_hit in the production tree.
+    # Per spec item 12: cooldown starts only after TG#3 successfully dispatches.
+    try:
+        infra_pipeline_cooldown.record_hit(alert_dict["camera_id"], result.get("classification", "unknown"), time.monotonic())
+    except Exception:  # noqa: BLE001
+        log.exception("record_hit failed for alert_id=%s", alert_id)
 
     # Sweep old cache dirs (24h retention) — after all per-stage dispatches.
     try:
