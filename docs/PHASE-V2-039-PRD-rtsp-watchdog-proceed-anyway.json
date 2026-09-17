@@ -2,9 +2,9 @@
   "prd_id": "PHASE-V2-039",
   "title": "RTSP watchdog: proceed-anyway on join timeout (port v1 semantics, remove abort path)",
   "author": "jill (operator-directed 2026-09-14, after v1 vs v2 RTSP watchdog investigation)",
-  "status": "active",
+  "status": "superseded",
   "phase": "v2",
-  "plan_section": "V2-017 follow-up; re-opens US-017d after 2026-09-14 evidence",
+  "plan_section": "V2-017 follow-up (now superseded by PHASE-V2-049 — in-thread periodic teardown, Frigate/go2rtc pattern). Historical reference only; do not file new work against this PRD.",
   "trigger": "Operator 2026-09-14: 'yeah, if it's just four lines then go ahead and make that change'. Investigation showed v1-refactor's persistent_rtsp.py closes container + spawns fresh thread on join-timeout (no abort) and has run 456 scheduled reconnects on production Reolink streams with 0 join-timeouts and 0 SIGSEGV. v2's abort-and-die path (US-017d, 2026-09-08) was a defensive over-correction that breaks v2's daemon every ~1 hour when a single camera's demux thread doesn't return within 10s (observed 2026-09-14 08:55:05, PID 841 → 2005).",
   "background": "US-017d (2026-09-08) introduced the abort-and-die watchdog after operator + author reasoned that closing _container while a decode thread is stuck in libavformat's C demux() would dereference a freed AVFormatContext (offset 0x20) and SIGSEGV. The reasoning was sound in theory but unsupported in observation: v1-refactor has been running the same PyAV 18.1.0 with the same watchdog semantics on the same cameras for months (verified 2026-09-14: 456 scheduled_reconnect_fire: completed events across rotated listener.log + listener.log.1, 0 SIGSEGV markers in any rotated log, 0 'decode thread did not exit within 10s' warnings). v1's path: bounded 10s join → on timeout close _container (in try/except) → spawn fresh decode thread alongside the stuck one → advance reconnects_total → the stuck thread continues until it eventually returns from libavformat and exits, by which point nobody touches the AVFormatContext. v2's path: bounded 10s join → on timeout set _watchdog_thread = None → return (no close, no respawn) → launchd restarts the whole daemon. The 'safe recovery' framing of v2's path was a defense-in-depth that has not paid out — instead it kills v2 every ~1 hour with no observed SIGSEV mitigation value, because v1's pattern is observably safe on the same version of PyAV.",
   "operator_guarantees": [
@@ -35,7 +35,8 @@
       "target_file": "infra/frame_capture.py",
       "estimated_lines": 35,
       "status": "done",
-      "completed_at": "2026-09-15"
+      "completed_at": "2026-09-15",
+      "note": "Code landed in commit f361b47 (US-039d integration, 2026-09-15). Later deleted in commit 9231d52 (US-049b, 2026-09-16) when the entire _scheduled_reconnect_fire method was removed."
     },
     {
       "id": "US-039b",
@@ -45,7 +46,8 @@
       "target_file": "tests/test_rtsp_watchdog.py",
       "estimated_lines": 60,
       "status": "done",
-      "completed_at": "2026-09-15"
+      "completed_at": "2026-09-15",
+      "note": "Tests landed in commit f361b47 (US-039d integration, 2026-09-15). Later deleted in commit c4e4ee4 (US-049e, 2026-09-16) when tests/test_rtsp_watchdog.py was removed and the cap case was migrated to test_frame_capture.py."
     },
     {
       "id": "US-039c",
@@ -53,7 +55,24 @@
       "description": "**Story (PHASE-V2-039 / US-039c).** Update the US-017d acceptance criteria in the existing PHASE-V2-017 PRD JSON so the spec matches the new (now-correct) behavior. Cite the 2026-09-14 evidence and the v1 reference.\n\n**PRD:** docs/PHASE-V2-039-PRD-rtsp-watchdog-proceed-anyway.json. **Type:** docs. **Assignee:** coder. **Depends:** US-039a (the code must land first so the docs reflect reality), US-039b (test file docstring context is part of the same story as the tests).\n\n**File in scope:** `docs/PHASE-V2-017-PRD-rtsp-robustness-and-delivery.json` (US-017d entry). Single story, single file. PRD JSON shape should be preserved (same `prd_id`, `stories` key, schema). Only the US-017d `title`/`description`/`acceptanceCriteria` fields get updated.\n\n**Concrete changes:** US-017d acceptance criteria currently read: 'Proactive close+respawn every N seconds. Bounded 10s join on decode thread. If join times out → abort and let launchd restart.' Replace with: 'Proactive close+respawn every N seconds. Bounded 10s join on decode thread. If join times out, proceed with reconnect anyway: close _container (try/except) + spawn fresh decode thread alongside the stuck one. This matches v1-refactor's persistent_rtsp.py _scheduled_reconnect_fire pattern, which has run 456 fires on the same PyAV 18.1.0 / same cameras with 0 SIGSEVG and 0 join-timeouts (verified 2026-09-14 against rotated listener.log + listener.log.1). The 2026-09-08 abort-and-restart-launchd path was a defensive over-correction and is removed by PHASE-V2-039 / US-039a.' Also update the US-017d `rationale` field (or wherever the SIGSEVG-offset-0x20 line lives in this PRD) to cite the v1 evidence and note the corrective amendment.\n\n## Acceptance (6 ACs — each re-runnable)\n\n- AC1: git -C /Users/jill/farm-surveillance-v2 grep -nE 'abort and let launchd restart' -- docs/PHASE-V2-017-PRD-rtsp-robustness-and-delivery.json | wc -l → 0 (old US-017d AC wording gone)\n- AC2: git -C /Users/jill/farm-surveillance-v2 grep -nE 'proceed with reconnect anyway|proceed-anyway' -- docs/PHASE-V2-017-PRD-rtsp-robustness-and-delivery.json | wc -l → 1 (new proceed-anyway language present in the US-017d entry)\n- AC3: git -C /Users/jill/farm-surveillance-v2 grep -nE '456 fires|v1-refactor' -- docs/PHASE-V2-017-PRD-rtsp-robustness-and-delivery.json | wc -l → 1 (2026-09-14 evidence cited)\n- AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'import json; prd = json.load(open(\"docs/PHASE-V2-017-PRD-rtsp-robustness-and-delivery.json\")); print(len(prd.get(\"stories\", prd.get(\"userStories\", []))))' | awk -F: '{print $2}' | tr -d ' ' → ≥1 (PRD JSON still parses, stories array non-empty)\n- AC5: cd /Users/jill/farm-surveillance-v2 && git diff main..HEAD -- docs/PHASE-V2-017-PRD-rtsp-robustness-and-delivery.json | grep -cE '^[+-]' | awk '$1 > 0' → 1 (only this file changed in the story's branch)\n- AC6: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_rtsp_watchdog.py -q --no-header 2>&1 | tail -3 → '4 passed' (test suite still green after PRD amendment — sanity check that nothing in docs was loaded as code)\n\n## Files\n- `docs/PHASE-V2-017-PRD-rtsp-robustness-and-delivery.json`\n\n## Guarantees\n- Git: commit on main BEFORE this card flips to done.\n- Code actually written: docs are code for the operator-facing PRD contract; reviewer runs every AC verbatim.\n- No fallback/residue: US-017d entry is updated once, in this card. No 'kept for historical reference' appendices.\n\n## Limits\n- Do NOT modify OTHER stories in PHASE-V2-017 (US-017a, US-017b, US-017c, US-017e are unchanged). Only US-017d is touched.\n- Do NOT create a new PRD file — this amends an existing one.\n- Do NOT touch any other PRD.\n- Do NOT push.\n\n**Note:** Docs-closing card. After this lands, PHASE-V2-039 sweep is complete (a → b → c); v2 listener will be restarted by operator.",
       "acceptanceCriteria": [],
       "target_file": "docs/PHASE-V2-017-PRD-rtsp-robustness-and-delivery.json",
-      "estimated_lines": 8
+      "estimated_lines": 8,
+      "status": "superseded",
+      "superseded_by": "US-039d",
+      "superseded_at": "2026-09-15",
+      "superseded_reason": "US-039c proposed amending the US-017d entry in PHASE-V2-017 PRD JSON. US-039d (filed and completed the same day) handled the PRD amendment as step 6 of the integration commit f361b47, so 039c became redundant."
+    },
+    {
+      "id": "US-039d",
+      "title": "Integrate proceed-anyway RTSP watchdog onto main; revert f3c365a defensive abort",
+      "description": "**Story (PHASE-V2-039 / US-039d).** Integrate US-039a/b onto main and remove the f3c365a defensive abort. The 039a/b work was developed on branch code/v2-039x-watchdog-proceed-anyway and approved, but the worktree was stranded — code never landed on main. Commit f3c365a (\"abort watchdog reconnect on stuck decode thread\") was added to main as a defensive fallback that the operator does NOT want (\"I never ever ever want a defensive fallback...\"). US-039c (PRD amendment) was filed separately and superseded by this card.\n\n**PRD:** docs/PHASE-V2-039-PRD-rtsp-watchdog-proceed-anyway.json. **Type:** integration. **Assignee:** coder. **Depends:** US-039a, US-039b (already done).\n\n**Action:** restore orphan branch from bundle, cherry-pick the 3 approved commits (09f372c, 26c96ab, b93ee4a) onto a fresh branch off main, revert f3c365a, amend US-017d entry in PHASE-V2-017 PRD JSON with the 2026-09-14 v1 evidence (456 fires, 0 SIGSEGV).",
+      "acceptanceCriteria": [],
+      "target_file": "infra/frame_capture.py + tests/test_rtsp_watchdog.py + docs/PHASE-V2-017-PRD-rtsp-robustness-and-delivery.json",
+      "estimated_lines": 100,
+      "status": "done",
+      "completed_at": "2026-09-15T18:40",
+      "kanban_task_id": "t_9dddb66e",
+      "merge_commit": "f361b47",
+      "note": "Code itself was later removed by US-049b (commit 9231d52) and US-049e (commit c4e4ee4). US-039's proceed-anyway watchdog pattern was superseded by US-049's in-thread periodic teardown (Frigate/go2rtc pattern), which doesn't have the watchdog-vs-proceed-anyway trade-off at all. f3c365a's defensive abort was never explicitly reverted because the abort path it added no longer exists in the codebase — the whole method it lived in was removed."
     }
   ],
   "depends_on_story_index": [
@@ -65,5 +84,8 @@
     "US-039a",
     "US-039b",
     "US-039c"
-  ]
+  ],
+  "superseded_by": "PHASE-V2-049",
+  "superseded_at": "2026-09-16",
+  "superseded_reason": "Operator decided to ditch the scheduled_reconnect watchdog pattern entirely. US-049 replaced it with in-thread periodic teardown (Frigate/go2rtc pattern), which eliminates the watchdog-vs-proceed-anyway trade-off at the root. US-039's proceed-anyway code landed on main in f361b47 (2026-09-15) and was live for ~24h, but US-049b (commit 9231d52, 2026-09-16) deleted _scheduled_reconnect_watchdog, _scheduled_reconnect_fire, and _watchdog_thread from infra/frame_capture.py; US-049e (commit c4e4ee4, 2026-09-16) deleted tests/test_rtsp_watchdog.py entirely. f3c365a's defensive abort was never explicitly reverted because the abort path it added no longer exists in the codebase — the whole method it lived in was removed."
 }
