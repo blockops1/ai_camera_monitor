@@ -13,7 +13,7 @@ OUTPUTS:
 PUBLIC API:
     stage_load_frames(alert) -> list[str]
     stage_cooldown_check(camera_id, classification) -> dict
-    stage_prepare_artifacts(gate_verdict, frames, camera_id, alert_id) -> dict
+    stage_prepare_artifacts(gate_verdict, camera_id, alert_id) -> dict
     stage_verify_class_vm1(crop_a_path, crop_b_path) -> dict
     stage_build_tg1(gate_verdict, vm1_result, ..., alert) -> dict
     stage_detail_class_vm2(mode, crop_a_path, crop_b_path) -> dict
@@ -145,26 +145,22 @@ def stage_cooldown_check(
 
 def stage_prepare_artifacts(
     gate_verdict: GateVerdict,
-    frames: list[str],
     camera_id: str,
     alert_id: str,
 ) -> dict:
     """Stage 8: prepare alert artifacts (crops + composite).
 
-    Returns a dict with crop_a_path, crop_b_path, composite_path,
-    full_frame_path keys.
+    Returns a dict with crop_a_path, crop_b_path, composite_path keys.
     """
     output_dir = str(data_dir_for(camera_id, alert_id))
     artifacts = prepare_alert_artifacts(
         gate_verdict=gate_verdict,
-        frame_paths=frames,
         output_dir=output_dir,
     )
     return {
         "crop_a_path": artifacts.crop_a_path,
         "crop_b_path": artifacts.crop_b_path,
         "composite_path": artifacts.composite_path,
-        "full_frame_path": artifacts.full_frame_path,
     }
 
 
@@ -185,7 +181,6 @@ def stage_build_tg1(
     crop_a_path: str,
     crop_b_path: str,
     composite_path: str | None,
-    full_frame_path: str,
     camera_label: str,
     alert: dict,
 ) -> dict:
@@ -200,7 +195,6 @@ def stage_build_tg1(
         crop_a_path=crop_a_path,
         crop_b_path=crop_b_path,
         composite_path=composite_path,
-        full_frame_path=full_frame_path,
     )
     return build_alert_message(
         verdict=gate_verdict,

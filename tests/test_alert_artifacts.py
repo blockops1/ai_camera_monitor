@@ -84,14 +84,13 @@ def test_prepare_writes_three_files():
                          "/fake/frame_3.jpg", "/fake/frame_4.jpg"],
         )
 
-        artifacts = prepare_alert_artifacts(verdict, verdict.frame_paths, tmpdir)
+        artifacts = prepare_alert_artifacts(verdict, tmpdir)
 
         # Verify structure.
         assert isinstance(artifacts, AlertArtifacts)
         assert artifacts.crop_a_path is not None
         assert artifacts.crop_b_path is not None
         assert artifacts.composite_path is not None
-        assert artifacts.full_frame_path == "/fake/frame_2.jpg"
 
         # Verify files exist on disk.
         assert Path(artifacts.crop_a_path).is_file()
@@ -133,7 +132,7 @@ def test_prepare_returns_None_for_missing_bbox():
                          "/fake/frame_3.jpg", "/fake/frame_4.jpg"],
         )
 
-        artifacts = prepare_alert_artifacts(verdict, verdict.frame_paths, tmpdir)
+        artifacts = prepare_alert_artifacts(verdict, tmpdir)
 
         assert artifacts.crop_a_path is not None
         assert artifacts.crop_b_path is None
@@ -169,7 +168,7 @@ def test_prepare_with_no_motion_returns_no_crops():
                          "/fake/frame_3.jpg", "/fake/frame_4.jpg"],
         )
 
-        artifacts = prepare_alert_artifacts(verdict, verdict.frame_paths, tmpdir)
+        artifacts = prepare_alert_artifacts(verdict, tmpdir)
 
         assert artifacts.crop_a_path is None
         assert artifacts.crop_b_path is None
