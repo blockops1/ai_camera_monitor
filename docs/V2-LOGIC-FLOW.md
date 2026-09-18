@@ -54,8 +54,8 @@ POST /alert (Flask)
 │           return 403 {"reason": "IP validation failed"}
 │
 ├─ alert_dict["frames"] = get_recent_frames(
-│       camera_id, n=4, offset_seconds=6
-│   )                                             ← /tmp/frame_001.jpg..frame_004.jpg
+│       camera_id, n=4, output_dir=alert_dir
+│   )                                             ← 4 PNGs in per-alert dir
 │
 └─ result = pipeline.run(alert_dict) → return 200 JSON
 
@@ -116,7 +116,7 @@ json
 ## E. FRAME PULL — `infra/frame_capture.py`
 
 
-get_recent_frames(camera_id, n=4, offset_seconds=6) -> [path1, path2, path3, path4]
+get_recent_frames(camera_id, n=4, output_dir) -> [path1, path2, path3, path4]
 │
 ├─ reader = CameraCaptureRegistry.get(camera_id)
 │     → singleton, lazy-boots a PersistentRTSPReader if not present
@@ -124,11 +124,8 @@ get_recent_frames(camera_id, n=4, offset_seconds=6) -> [path1, path2, path3, pat
 │
 ├─ if not reader.is_healthy() → return []   ← warmup window guard
 │
-├─ reader.get_recent_frames(n=4, output_dir=FRAMES_DIR/<cam>)  
-│     → grabs last-4 PIL frames from ring deque, saves to JPEGs,
-│        cleans old frame_*.jpg first
-│
-└─ filter by mtime:  keep only frames whose file mtime ≥ now - offset_seconds=6
+├─ reader.get_recent_frames(n=4, output_dir=output_dir)  
+│     → grabs last-4 PIL frames from ring deque, saves to PNGs
 
 
 ### `PersistentRTSPReader` lifecycle

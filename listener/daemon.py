@@ -446,9 +446,8 @@ def alert():
     from infra.frame_capture import get_recent_frames
 
     n_frames = 4
-    offset_seconds = 6
     alert_dict["frames"] = get_recent_frames(
-        camera_id, n=n_frames, offset_seconds=offset_seconds, output_dir=alert_dir
+        camera_id, n=n_frames, output_dir=alert_dir
     )
 
     # Run the alert through the full segmented pipeline
