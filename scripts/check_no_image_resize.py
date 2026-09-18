@@ -22,6 +22,9 @@ Exclusions:
 
 Known false positives (intentional resize/encode operations):
   - telegram_formatter/codec.py:86 — US-030a: img.resize() for JPEG downscale
+  - infra/quick_classifier.py:655 — YOLO letterbox PIL .resize() (input
+    padding to 640x640 multiples of 32 before YOLO inference; required by
+    the model, not a transport-time resize)
 
 Usage:
     python scripts/check_no_image_resize.py
@@ -73,6 +76,7 @@ _SKIP_PARTS: tuple[str, ...] = (
 # Known false positives: (relative_path, line_number) — intentional ops.
 _KNOWN_FP: set[tuple[str, int]] = {
     ("telegram_formatter/codec.py", 86),  # US-030a: img.resize() for JPEG downscale
+    ("infra/quick_classifier.py", 655),  # YOLO letterbox: img.resize() into 640-multiple-32 input
 }
 
 
