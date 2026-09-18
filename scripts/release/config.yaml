@@ -55,6 +55,8 @@ tests_to_strip:
     why: "REAL_CANDIDATES loader reads operator's known_vehicles.json"
   - path: tests/test_yolo_dynamic_export.py
     why: "loads models/yolov8n.onnx for inference verification — file isn't shipped"
+  - path: tests/test_camera_creds.py
+    why: "loads camera-creds.env with operator RTSP credentials — file isn't shipped"
 
 # Files that REQUIRE a fix-up before they ship on public. The script
 # applies each rule and verifies the resulting file passes any

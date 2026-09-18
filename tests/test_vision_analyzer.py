@@ -87,8 +87,13 @@ class TestDetailClass:
     """Tests for detail_class()."""
 
     def test_detail_class_dispatch_keys_match_mode_names(self):
-        """DISPATCH keys are exactly 'vehicle', 'person', 'animal'."""
-        assert sorted(DISPATCH.keys()) == ["animal", "person", "vehicle"]
+        """DISPATCH keys are exactly 'vehicle', 'person', 'animal', 'unsure'.
+
+        Updated for v0.6.3 (2026-09-18): PRD-V2-051 added 'unsure' as a 4th
+        mode (vision_analyzer.DISPATCH maps to unsure_prompt when the model
+        cannot classify with confidence).
+        """
+        assert sorted(DISPATCH.keys()) == ["animal", "person", "unsure", "vehicle"]
 
     def test_detail_class_raises_on_unknown_mode(self, sample_frames):
         """detail_class raises VisionAnalyzerError on an unknown mode."""
