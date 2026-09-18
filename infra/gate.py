@@ -678,7 +678,17 @@ def _route_decision(
     top = high_conf[0]
 
     # Rule 1: ANY crop high-conf vehicle-class → vehicle
+    # Phase 6B.197 (US-055b): when subjects is set and 'vehicle' is NOT in it,
+    # suppress the vehicle even in the Rule 1 path (perimeter cameras keep
+    # the old behavior).
     if top.top_class in VEHICLE_CLASSES:
+        if subjects is not None and "vehicle" not in subjects:
+            return (
+                "none",
+                top.top_class,
+                top.top_confidence,
+                f"top_class_{top.top_class}_not_in_subjects",
+            )
         return ("vehicle", top.top_class, top.top_confidence, "high_conf_vehicle")
 
     # Rule 2: Person pipeline
@@ -737,17 +747,17 @@ def _route_decision(
                 "v2_person_present_low_vehicle_override_none",
             )
 
-    # Catchall: at this point we have ≥1 high-conf verdict with a class
+    # Catchall: at this point we have >=1 high-conf verdict with a class
     # that is not in VEHICLE_CLASSES (rule 1 missed), not "person"
     # falling under rule 2, and not in ANIMAL_CLASSES (rule 3 missed).
-    # Per PLAN §11.37 Q2/Q3, the LEGITIMATE rule 5 case is "vehicle
-    # somewhere in the mix" — that's `vehicle_top is not None` below.
+    # Per PLAN section 11.37 Q2/Q3, the LEGITIMATE rule 5 case is "vehicle
+    # somewhere in the mix" -- that's `vehicle_top is not None` below.
     #
-    # Phase 6B.137 (§11.59): the prior catchall unconditionally returned
+    # Phase 6B.137 (section 11.59): the prior catchall unconditionally returned
     # decision="vehicle" regardless of whether a vehicle-class detection
     # was actually present. That meant a single high-conf person, or
     # train, bench, zebra, or any other non-vehicle COCO class with no
-    # vehicle anywhere in the mix, was routed to the vehicle pipeline —
+    # vehicle anywhere in the mix, was routed to the vehicle pipeline --
     # which then crashed because the vehicle pipeline requires a vehicle
     # shape (color/make/model) and emits Telegram messages that read as
     # "Vehicle in motion: <bench>". 225 such occurrences in the listener
@@ -758,10 +768,23 @@ def _route_decision(
     # names the class observed, so postmortem analysis can distinguish
     # "rule 5 mixed" from "rule 4 no-object" suppressions.
     if vehicle_top is not None:
-        # Phase 6B.197 (§V2-055b): per-camera subject allowlist.
+        # Phase 6B.197 (section V2-055b): per-camera subject allowlist.
         # When subjects is set and 'vehicle' is NOT in it, suppress the
         # vehicle even in the mixed_vehicle_wins path.
         if subjects is not None and "vehicle" not in subjects:
+            # Check if any subject-class detection is in the mix.
+            # If so, route to the subject pipeline instead of suppressing.
+            subject_in_mix = next(
+                (v for v in high_conf if v.top_class in subjects),
+                None,
+            )
+            if subject_in_mix is not None:
+                return (
+                    "person" if subject_in_mix.top_class == "person" else "animal",
+                    subject_in_mix.top_class,
+                    subject_in_mix.top_confidence,
+                    "subject_allowed",
+                )
             return (
                 "none",
                 top.top_class,
