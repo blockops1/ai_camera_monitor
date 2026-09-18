@@ -50,6 +50,7 @@ import httpx
 
 from infra.animal_prompt import SCHEMA_JSON as ANIMAL_SCHEMA, build_animal_prompt
 from infra.person_prompt import SCHEMA_JSON as PERSON_SCHEMA, build_person_prompt
+from infra.unsure_prompt import SCHEMA_JSON as UNSURE_SCHEMA, build_unsure_prompt
 from infra.vehicle_prompt import SCHEMA_JSON as VEHICLE_SCHEMA, build_vehicle_prompt
 from infra.vm1_prompt import SCHEMA_JSON as VM1_SCHEMA, build_vm1_prompt
 
@@ -98,9 +99,10 @@ class VisionAnalyzerError(Exception):
 # The canonical mode set is exactly four (vm1 + 3 vm2). Anything else
 # raises VisionAnalyzerError loudly.
 DISPATCH = {
-    "vehicle": (_response_format(VEHICLE_SCHEMA, "vehicle"), build_vehicle_prompt),
-    "person": (_response_format(PERSON_SCHEMA, "person"), build_person_prompt),
     "animal": (_response_format(ANIMAL_SCHEMA, "animal"), build_animal_prompt),
+    "person": (_response_format(PERSON_SCHEMA, "person"), build_person_prompt),
+    "unsure": (_response_format(UNSURE_SCHEMA, "unsure"), build_unsure_prompt),
+    "vehicle": (_response_format(VEHICLE_SCHEMA, "vehicle"), build_vehicle_prompt),
 }
 
 
