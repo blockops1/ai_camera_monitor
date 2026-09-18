@@ -205,3 +205,56 @@ def test_message_no_alert_metadata():
     caption = result["caption"]
     assert "Alert 3 of 3" not in caption
     assert "Alert ID:" not in caption
+
+
+# ---------------------------------------------------------------------------
+# AC (US-056a port): flat match-result dict shape (the actual runtime shape)
+# ---------------------------------------------------------------------------
+
+
+def test_body_flat_match_result_shape():
+    """Match result is a FLAT dict (dict(best_candidate)), no known_vehicle envelope.
+
+    match_vehicle() returns dict(best_candidate) with matched/score/all_scores
+    merged on top. The old buggy code did match_result.get("known_vehicle")
+    and got None, so all fields rendered as "?". After the fix, the body
+    correctly reads the flat dict.
+    """
+    flat_match = {
+        "id": "v_flat",
+        "label": "Flat Truck",
+        "color": "blue",
+        "make": "Chevy",
+        "model": "Silverado",
+        "owner": "Bob",
+        "type": "pickup",
+        "matched": True,
+        "score": 7.5,
+        "all_scores": [("v_flat", 7.5), ("v_other", 3.0)],
+    }
+    body = build_match_alert_body(flat_match, {}, score=7.5, gap=4.5,
+                                   runner_ups=[("v_other", 3.0)])
+    assert "Flat Truck" in body, f"label missing from body: {body!r}"
+    assert "v_flat" in body, f"id missing: {body!r}"
+    assert "Color: blue" in body
+    assert "Owner: Bob" in body
+    assert "Make/Model: Chevy Silverado" in body
+    assert "Body: pickup" in body
+    # CRITICAL: the bug rendered "?" when flat dict was passed. Make sure
+    # that "?" is NOT in label/id positions.
+    assert "Match \u2014 ?" not in body, f"label collapsed to ?: {body!r}"
+
+
+def test_body_flat_no_match():
+    """Flat dict with matched=False still produces a body (caller decides routing).
+
+    build_match_alert_body is the MATCHED body builder. The dispatcher only
+    calls it when match_result['matched'] is True. If a caller passes
+    matched=False, the body still renders (with '?' fields) but the caller
+    should route to the no-match path. This test pins the contract:
+    the function does not raise and returns a string.
+    """
+    flat_no_match = {"matched": False}
+    body = build_match_alert_body(flat_no_match, {}, score=0.0, gap=0.0)
+    assert isinstance(body, str)
+    # Confirmed: function doesn't crash on flat no-match shape.
