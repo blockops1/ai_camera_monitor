@@ -15,6 +15,7 @@ the Telegram client (not as downloadable files).
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -129,7 +130,7 @@ def _send_media_group(
         files.append((f"photo_{i}", (f"photo_{i}{suffix}", data, mime)))
     return client.post(
         url,
-        data={"chat_id": chat_id, "media": str(media).replace("'", '"')},
+        data={"chat_id": chat_id, "media": json.dumps(media)},
         files=files,
     )
 
