@@ -17,6 +17,9 @@ Exclusions:
   - .venv/, .git/
   - _b64() mime-fallback at infra/vision_analyzer.py:111
     (defensive: image/jpeg is a non-PNG fallback, not a JPEG producer)
+  - _sniff_mime() byte-sniffer at telegram_formatter/dispatcher.py:40,51
+    (defensive: detects JPG/JPEG magic bytes for send_media_group fallback,
+     does not produce JPEGs)
 
 Usage:
     python scripts/check_no_jpeg.py
@@ -67,8 +70,13 @@ _EXCLUDE_DIRS: set[str] = {
 # Known false positives: (relative_path, line_number)
 _KNOWN_FP: set[tuple[str, int]] = {
     ("infra/vision_analyzer.py", 111),   # mime fallback, not JPEG producer
-    ("telegram_formatter/dispatcher.py", 39),  # _sniff_mime docstring mentions .jpg
-    ("telegram_formatter/dispatcher.py", 50),  # _sniff_mime returns image/jpeg, .jpg
+    # _sniff_mime() in dispatcher.py is a generic byte-magic sniffer used by
+    # the send_media_group fallback path: when Telegram refuses a PNG upload
+    # it must be able to identify a JPEG header and rename .jpg so the
+    # fallback message succeeds. Not a JPEG producer - a JPEG detector.
+    # Mirrors the same exclusion pattern as _b64() above.
+    ("telegram_formatter/dispatcher.py", 40),  # _sniff_mime docstring lists .png/.jpg/.bin
+    ("telegram_formatter/dispatcher.py", 51),  # _sniff_mime returns image/jpeg, .jpg
     # V2-030 EXCEPTION: Telegram photo delivery uses JPEG q88 1920px.
     # Authorized by operator (Rolfe) on 2026-09-13: this is the one permitted
     # JPEG producer path. Compression + cache + retention are wired per the
