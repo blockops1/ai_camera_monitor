@@ -133,7 +133,14 @@ def build_match_alert_body(
     Returns:
         Formatted body string.
     """
-    kv = match_result.get("known_vehicle") or {}
+    # FIX (US-056a port from refactor commit 0dbd258):
+    # match_vehicle() returns a FLAT dict (dict(best_candidate)), NOT
+    # a {known_vehicle: {...}} envelope. Older callers passed the wrapped
+    # shape -- keep both for backward compatibility.
+    if isinstance(match_result, dict) and "known_vehicle" in match_result:
+        kv = match_result.get("known_vehicle") or {}
+    else:
+        kv = match_result if isinstance(match_result, dict) else {}
     lines: list[str] = [f"✅ Match \u2014 {kv.get('label', '?')}"]
     lines.append("")
     parts: list[str] = [
