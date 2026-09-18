@@ -17,14 +17,12 @@ from telegram_formatter.alert import _CAPTION_MAX_LENGTH, build_alert_message
 
 def _make_artifacts(
     composite_path: str | None = "/mock/composite.png",
-    full_frame_path: str = "/mock/frame004.jpg",
 ) -> AlertArtifacts:
     """Build an AlertArtifacts dataclass for testing."""
     return AlertArtifacts(
         crop_a_path="/mock/crop_a.png",
         crop_b_path="/mock/crop_b.png",
         composite_path=composite_path,
-        full_frame_path=full_frame_path,
     )
 
 

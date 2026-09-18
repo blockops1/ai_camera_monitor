@@ -276,7 +276,7 @@ def _run_pipeline(alert: dict) -> dict:
 
     # Stage 8: prepare artifacts.
     art = stage_prepare_artifacts(
-        gate_result["gate_verdict"], frames, camera_id, alert_id
+        gate_result["gate_verdict"], camera_id, alert_id
     )
     a_p = art["crop_a_path"]
     b_p = art["crop_b_path"]
@@ -291,7 +291,7 @@ def _run_pipeline(alert: dict) -> dict:
     # Stage 10: build TG#1.
     tg1 = stage_build_tg1(
         gate_result["gate_verdict"], vm1_result, a_p, b_p,
-        art["composite_path"], art["full_frame_path"],
+        art["composite_path"],
         camera_label, alert,
     )
 
@@ -437,13 +437,18 @@ def alert():
         camera_id = matched_cam_id
 
     # Pull recent frames from the persistent RTSP reader.
-    # `get_recent_frames` is imported from `infra.frame_capture`.
+    # Generate alert_id first so frames land in a per-alert directory,
+    # preventing the shared-filename collision that caused TG#1 time-skew.
+    alert_id = alert_dict.get("id") or str(uuid.uuid4())
+    alert_dict["id"] = alert_id
+    alert_dir = str(infra_paths.data_dir_for(camera_id, alert_id))
+
     from infra.frame_capture import get_recent_frames
 
     n_frames = 4
     offset_seconds = 6
     alert_dict["frames"] = get_recent_frames(
-        camera_id, n=n_frames, offset_seconds=offset_seconds
+        camera_id, n=n_frames, offset_seconds=offset_seconds, output_dir=alert_dir
     )
 
     # Run the alert through the full segmented pipeline

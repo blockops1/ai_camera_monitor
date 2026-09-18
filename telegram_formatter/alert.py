@@ -61,11 +61,9 @@ def build_alert_message(
 ) -> dict[str, Any]:
     """Build a TG#1 Telegram message dict.
 
-    Returns photos = [composite_path, full_frame_path] if composite_path
-    is not None.  If composite_path is None (gate returned no bbox),
-    returns photos = [full_frame_path] only -- single photo.
+    Returns photos = [composite_path] if composite_path is not None.
+    If composite_path is None (gate returned no bbox), returns photos = [].
     """
-    full_frame_path = artifacts.full_frame_path
     composite_path = artifacts.composite_path
 
     cls = vm1_result["class"]
@@ -89,11 +87,10 @@ def build_alert_message(
     if notes:
         lines.append(notes)
 
-    # Photos: composite + full frame, or full frame only.
+    # Photos: composite only.
     photos: list[str] = []
     if composite_path is not None:
         photos.append(composite_path)
-    photos.append(full_frame_path)
 
     caption = "\n".join(lines)
     caption = _truncate_caption(caption)
