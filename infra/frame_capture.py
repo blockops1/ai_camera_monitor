@@ -48,7 +48,7 @@ from PIL import Image
 
 log = logging.getLogger("frame_capture")
 
-RING_SIZE_DEFAULT = 180
+RING_SIZE_DEFAULT = 12
 RECONNECT_BACKOFF_INITIAL = 1.0   # seconds
 RECONNECT_BACKOFF_MAX = 30.0
 RECONNECT_BACKOFF_MULT = 2.0
