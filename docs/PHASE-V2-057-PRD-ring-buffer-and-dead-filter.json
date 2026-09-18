@@ -1,0 +1,34 @@
+{
+  "id": "PHASE-V2-057",
+  "title": "Ring buffer sizing + dead-code filter removal",
+  "status": "approved",
+  "context": "PRD-V2-056 had a side investigation into wrong_frame_count events. The investigation confirmed: (a) all 6 Reolink cameras decode at exactly 2 fps; (b) the ring buffer default of 180 frames (= 90s at 2fps, holding ~2.8 GB of PNGs) is wildly over-provisioned because the only consumer (alert handler) asks for n=4 frames; (c) the offset_seconds=6 mtime filter in frame_capture.get_recent_frames() is dead code because mtime is save-time (set inside _save_frames within microseconds), not decode-time. Note: this PRD does NOT change the gate's behavior when fewer than 4 frames are returned - the gate still rejects the alert at line 879 with wrong_frame_count. Operator decision (2026-09-18): shrink the ring and drop the dead filter; gate contract stays.",
+  "in_scope": [
+    "infra/frame_capture.py: change RING_SIZE_DEFAULT from 180 to 12, keep gate contract (4-frame minimum) untouched.",
+    "infra/frame_capture.py: remove the dead offset_seconds mtime filter in module-level get_recent_frames().",
+    "listener/daemon.py: drop the now-meaningless offset_seconds kwarg in the alert handler.",
+    "tests/test_frame_capture.py: update / remove tests that assert the offset_seconds filter behavior, and any test that consumes ring-size directly via PersistentRTSPReader(ring_size=...).",
+    "tests/test_frame_capture.py: keep the existing get_recent_frames tests that only assert n-frame tail semantics."
+  ],
+  "out_of_scope": [
+    "infra/gate.py: NO change. 4-frame minimum stays. wrong_frame_count still rejects the alert.",
+    "Decoder / RTSP transport logic: NO change.",
+    "Per-camera subjects: NO change (PRD-V2-055 separate)."
+  ],
+  "stories": [
+    {
+      "id": "US-057a",
+      "title": "Shrink ring buffer from 180 to 12 frames",
+      "target_file": "infra/frame_capture.py",
+      "branch": "code/v2-057a-ring-buffer-size-12",
+      "description": "Reduce RING_SIZE_DEFAULT constant from 180 to 12. Each PIL.Image in the deque occupies ~2.64 MB raw bytes (1280x720 RGB), so shrinking 180 -> 12 reclaims ~440 MB per camera. Across 6 cameras (BACK, FRONT, OUTSIDE_BACK_SOLAR, OUTSIDE_FRONT_GARAGE, OUTSIDE_FRONT_POWER, OUTSIDE_FRONT_SOLAR) that is ~2.5 GB total. The gate contract (4 frames minimum) stays unchanged at infra/gate.py. Justification: 2 fps decode rate * 12 frames = 6 seconds of buffer, which is 2 seconds more than the 4-frame minimum the gate requires. Verified via /debug/rtsp that all 6 cameras decode at 2.0 fps. No production code path reads deeper than 4 frames from the ring."
+    },
+    {
+      "id": "US-057b",
+      "title": "Remove dead offset_seconds=6 mtime filter",
+      "target_file": "infra/frame_capture.py",
+      "branch": "code/v2-057b-drop-dead-offset-filter",
+      "description": "Module-level get_recent_frames() (infra/frame_capture.py:680-704) filters PNG paths by os.path.getmtime(p) >= now - 6. But mtime is set inside _save_frames when the PNG is written to disk, and all 4 paths are written in the same call within microseconds. So mtimes are effectively identical, and the cutoff check 'ages >=6s' always passes. Drop the filter and the offset_seconds parameter entirely. Update the alert handler call site at listener/daemon.py:444."
+    }
+  ]
+}
