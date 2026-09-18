@@ -1,13 +1,28 @@
 # farm-surveillance-v2
 
-Linear-pipeline webhook consumer for farm IP cameras. Receives
-Reolink motion alerts, runs an 11-stage processing pipeline, fires
-Telegram notifications on subject detection and match results.
+Most consumer IP-camera systems treat every motion alert as worth showing
+you. They flood Telegram with branches moving in the wind, headlights
+sweeping across a driveway, IR glare flickering off a fence. The result
+is the same as no notification at all: you silence the channel.
 
-> **Status:** v2 daemon live on port 8090; delivering real alerts.
-> Current PRD ([PHASE-V2-017](docs/PHASE-V2-017-PRD-rtsp-robustness-and-delivery.json))
-> complete as of 2026-09-08 — registry prefix key, telegram env loading,
-> scheduled_reconnect_watchdog, max_reconnect_attempts cap.
+**farm-surveillance-v2** is the opposite. It runs a small vision pipeline
+on each motion event — a YOLO first-pass gate to filter obvious noise, a
+vision-LLM (Qwen3-VL) to verify the subject and pull structured attributes
+(color, body, make/model, breed), and a motion-aware crop so only the
+**moving** subject ends up in the alert, not every vehicle visible in
+frame. Per-camera confidence thresholds let you tune a windy porch camera
+to demand 0.85 before an alert fires while a quiet driveway camera alerts
+at 0.50.
+
+The pipeline delivers up to three Telegram messages per event: a
+wide-frame alert with the motion box, a cropped close-up of just the
+moving subject, and (if recognized) a structured match result. The crop
+is the part that earns its keep — it's the difference between "a dog
+crossed the driveway" and "a small fluffy dog crossed the driveway, here
+is just the dog."
+
+Built for Reolink IP cameras; runs as a single Python daemon under
+`launchd` on macOS. Phase PRDs in [`docs/`](docs/).
 
 ## What this is
 
@@ -47,8 +62,8 @@ Example: a dark gray Ford F-150 driving down the gravel driveway.
 The crop is the part of the pipeline that earns its keep: when multiple
 vehicles are visible in the wide frame (parked + moving), the crop
 selector only sends the **moving** one to Telegram, not every vehicle
-in frame. Same for animals — the pipeline crops to the animal, not
-the whole scene.
+in frame. Same for animals — the pipeline crops to the animal, not the
+whole scene.
 
 Example: a small fluffy dog crossing the gravel.
 
@@ -122,69 +137,58 @@ committed). Template:
 
 ```bash
 # Front door camera
-FRONT_IP=192.168.1.39
+FRONT_IP=192.168.1.50
 FRONT_HTTP_USER=admin
-FRONT_HTTP_PASS=<admin password>
+FRONT_HTTP_PASS=<from-camera-web-ui>
 FRONT_RTSP_USER=admin
-FRONT_RTSP_PASS=<camera admin password>
-FRONT_RTSP_URL=rtsp://admin:<password>@192.168.1.39:554/h264Preview_01_main
+FRONT_RTSP_PASS=<from-camera-web-ui>
+FRONT_RTSP_URL=rtsp://${FRONT_RTSP_USER}:${FRONT_RTSP_PASS}@${FRONT_IP}:554/Preview_01_main
 ```
 
-The camera's friendly name in the OSD must match one of the
-recognized keys: `FRONT, BACK, OUTSIDE_FRONT_GARAGE,
-OUTSIDE_FRONT_POWER, OUTSIDE_FRONT_SOLAR, OUTSIDE_BACK_SOLAR`.
-To add a custom name, edit the `_CAMERA_MAP` dict in
-`infra/camera_creds.py`.
+`camera-creds.env.example` at the repo root is the template. Copy it,
+fill in real values, mode 600, never commit.
 
-### 5. Verify the webhook is firing
+Verify each stanza is reachable: `curl -s -o /dev/null -w "%{http_code}\n"
+-u <HTTP_USER>:<HTTP_PASS> http://<camera-ip>/cgi-bin/api.cgi?cmd=GetDevInfo`
+should return `200`. If you get `401`, the HTTP user/pass in
+`camera-creds.env` doesn't match the camera's actual credentials.
 
-From the daemon host:
+### 5. Restart and verify
 
-```bash
-tail -f logs/daemon.log
-```
-
-Then walk in front of the camera. Within ~20s (the default push
-interval), you should see:
-
-```
-POST /alert from <camera-ip>
-```
-
-If you see `IP mismatch`, the daemon recognized the camera name
-but the source IP didn't match — check `FRONT_IP` in
-`camera-creds.env` matches the camera's actual LAN IP.
+After all four steps are wired, bounce the daemon (see
+[Daemon management](#daemon-management) below) and trigger a test
+motion event on the camera. The pipeline should deliver a Telegram
+alert within 5-10 seconds. If nothing arrives, check
+`logs/daemon.log` for connection errors against the camera IP.
 
 ## RTSP robustness
 
-Each camera has its own `PersistentRTSPReader` (in
-[`infra/frame_capture.py`](infra/frame_capture.py)) with two defense-in-depth
-watchdogs (US-017d / US-017e):
+Each camera has its own RTSP reader with two layers of recovery:
 
-| Mechanism | Cadence | Source |
+| Mechanism | Cadence | What it does |
 |---|---|---|
-| `scheduled_reconnect_watchdog` | every `FARMSV_RTSP_RECONNECT_SECONDS` (default 3600s) | proactive close+respawn |
-| `max_reconnect_attempts` cap | after `FARMSV_RTSP_MAX_RETRIES` (default 10) consecutive failures | cap-and-defer to watchdog |
+| Scheduled reconnect | every `FARMSV_RTSP_RECONNECT_SECONDS` (default 3600s) | proactive close + respawn of the RTSP stream |
+| Reconnect attempt cap | after `FARMSV_RTSP_MAX_RETRIES` (default 10) consecutive failures | back off and let the scheduled reconnect take over |
 
-Plus the existing `CameraCaptureRegistry._reconnect_loop` for
-cross-reader registry-level recoveries. Ported from v1 refactor `<V1_REPO_PATH>/infra/persistent_rtsp.py`.
+Together these prevent two failure modes: silent decoder stalls
+(triggered when no frames arrive for too long) and infinite reconnect
+loops when a camera is genuinely offline.
 
 ## Diagnostics
 
 - `GET /debug/rtsp` — per-reader ring size, decoded total, last-frame age,
   container-open, health flag, error count
-- Unified log: `logs/daemon.log` (single stream, plist routes stdout here)
-- `pytest tests/ -x --tb=short` — 122 tests passing
+- Unified log: `logs/daemon.log` (single stream, daemon writes here)
 
 ## Layout
 
 ```
 infra/                   # shared modules: gate, frame_capture, cooldown, schemas
-listener/                # webhook receiver + linear pipeline (live, port 8090)
+listener/                # webhook receiver + linear pipeline
 vehicle_position/        # trajectory + crop extraction
 telegram_formatter/      # Telegram stage formatters
-tests/                   # pytest (122 tests)
-docs/                    # PLAN.md, V2-LIFT-PLAN.md, PHASE-V2-*.json
+tests/                   # pytest
+docs/                    # PLAN.md, architecture diagrams
 camera-creds.env.example # template for camera credentials
 telegram-creds.env.example # template for Telegram credentials
 llm-creds.env.example    # template for vision-LLM endpoint
@@ -198,7 +202,7 @@ boot from these locations:
 | File | What | Loaded by |
 |---|---|---|
 | `camera-creds.env` (repo root) | per-camera IP / HTTP user+pass / RTSP user+pass+url | `infra/camera_creds.py` |
-| `~/.env` (user home) | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_HOME_CHAT_ID`, plus 26 other keys | `listener/daemon.py::_load_home_env` (added in US-017b) |
+| `~/.env` (user home) | Telegram credentials + runtime flags (see `.env.example`) | `listener/daemon.py` |
 
 `*.env.example` files at the repo root are the templates. Copy,
 fill in real values, mode 600, never commit.
@@ -211,22 +215,22 @@ Other env vars honored at runtime:
 | `LISTEN_PORT` | `8090` | webhook bind |
 | `VISION_LLM_URL` | `http://127.0.0.1:8080` | Qwen3-VL endpoint |
 | `LOG_LEVEL` | `INFO` | log level |
-| `FARMSV_RTSP_RECONNECT_SECONDS` | `3600` | US-017d watchdog cadence |
-| `FARMSV_RTSP_MAX_RETRIES` | `10` | US-017e cap-and-defer threshold |
+| `FARMSV_RTSP_RECONNECT_SECONDS` | `3600` | scheduled reconnect cadence |
+| `FARMSV_RTSP_MAX_RETRIES` | `10` | reconnect attempt cap before deferring |
 
 ## Daemon management
 
-The v2 daemon runs under launchd as `com.farm.surveillance.v2`. Plist:
-`<HOME_DIR>/Library/LaunchAgents/com.farm.surveillance.v2.plist`.
+The daemon runs under launchd as `com.farm.surveillance.v2`. Plist:
+`~/Library/LaunchAgents/com.farm.surveillance.v2.plist`.
 
 ```bash
 # view status
 launchctl list | grep com.farm.surveillance.v2
 tail -f logs/daemon.log
 
-# bounce (requires explicit operator approval at the moment of bounce)
-kill <PID>
-launchctl load <HOME_DIR>/Library/LaunchAgents/com.farm.surveillance.v2.plist
+# bounce
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.farm.surveillance.v2.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.farm.surveillance.v2.plist
 ```
 
 `KeepAlive: true` in the plist means launchd respawns automatically on
@@ -242,33 +246,14 @@ Requires Python 3.11. Setup:
 ./.venv/bin/python3.11 -m pytest tests/ -x --tb=short
 ```
 
-The 122-test suite covers:
+The test suite covers:
 
-- `/alert` route (with IP validation, payload shape, motion gate hookup)
-- Camera registry prefix-key fix (single reader per camera)
-- `~/.env` loading at daemon boot
-- `scheduled_reconnect_watchdog` lifecycle (mock container, advance time)
-- `max_reconnect_attempts` cap-and-defer (always-raise mock decoder)
-
-## PRDs
-
-Each phase is a numbered PRD in `docs/PHASE-V2-*.json`. Current state:
-
-| PRD | Phase | Status |
-|---|---|---|
-| PHASE-V2-CORE | pipeline buildout | done |
-| PHASE-V2-014 | camera webhook activation | done |
-| PHASE-V2-016 | diagnostic visibility + boot hardening | done |
-| PHASE-V2-017 | rtsp robustness + telegram delivery | done |
+- `/alert` route (IP validation, payload shape, motion gate hookup)
+- Per-camera RTSP reader lifecycle (mock container, advance time)
+- Decoder failure handling (always-raise mock decoder)
+- Crop selector and trajectory extraction
+- Telegram formatting stages
 
 ## License
 
-Operator-private for now. License TBD before public squash release.
-
-
-## Telegram home chat env var name
-The canonical env var name is `TELEGRAM_HOME_CHAT_ID`, **not** `TELEGRAM_CHAT_ID`. If your `~/.env` has the wrong name, the dispatcher will raise `ConfigError` with the exact rename step on every alert. Verify with:
-```bash
-python3 -c 'from dotenv import dotenv_values; from pathlib import Path; print(bool(dotenv_values(Path.home() / ".env").get("TELEGRAM_HOME_CHAT_ID")))'
-```
-If this prints `False`, rename `TELEGRAM_CHAT_ID` to `TELEGRAM_HOME_CHAT_ID` in `~/.env`.
+This project is licensed under the MIT License — see [`LICENSE`](LICENSE).
