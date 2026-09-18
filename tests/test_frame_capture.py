@@ -406,7 +406,7 @@ class TestModuleGetRecentFrames:
         """Module-level get_recent_frames returns [] for empty ring."""
         from infra.frame_capture import get_recent_frames
 
-        frames = get_recent_frames("front_gate", n=4, offset_seconds=6)
+        frames = get_recent_frames("front_gate", n=4)
         assert frames == []
 
     def test_respects_n_limit(self, mock_av_stream, mock_av_frame, tmp_path):
@@ -435,43 +435,8 @@ class TestModuleGetRecentFrames:
         mock_reader.get_recent_frames.side_effect = mock_get_recent
 
         with patch("infra.frame_capture._get_healthy_reader", return_value=mock_reader):
-            frames = get_recent_frames("test_cam", n=3, offset_seconds=60)
+            frames = get_recent_frames("test_cam", n=3)
             assert len(frames) <= 3
-
-    def test_ages_out_frames_beyond_offset(
-        self, mock_av_stream, mock_av_frame, tmp_path
-    ):
-        """get_recent_frames filters frames older than offset_seconds."""
-        output_dir = str(tmp_path / "frames")
-        from infra.frame_capture import CameraCaptureRegistry, get_recent_frames
-
-        CameraCaptureRegistry.clear()
-
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        # Create frames directly in the output dir
-        for i in range(2):
-            img_path = os.path.join(output_dir, f"frame_{i + 1:03d}.png")
-            Image.new("RGB", (640, 480), color="red").save(img_path, format="PNG", optimize=True)
-
-        # Make frame_001 old (>6s)
-        old_time = time.time() - 10
-        os.utime(os.path.join(output_dir, "frame_001.png"), (old_time, old_time))
-
-        # Mock the reader path — the module-level func calls _get_healthy_reader
-        # which checks CameraCaptureRegistry. We mock it to return a reader
-        # whose get_recent_frames just returns our pre-made frames.
-        mock_reader = MagicMock()
-        mock_reader.is_healthy.return_value = True
-        mock_reader.get_recent_frames.return_value = [
-            os.path.join(output_dir, "frame_001.png"),
-            os.path.join(output_dir, "frame_002.png"),
-        ]
-
-        with patch("infra.frame_capture._get_healthy_reader", return_value=mock_reader):
-            result = get_recent_frames("test_cam", n=2, offset_seconds=6)
-            # frame_001 is >6s old, so only frame_002 should pass
-            assert len(result) == 1
-            assert os.path.basename(result[0]) == "frame_002.png"
 
     def test_multi_camera_isolation(self, mock_av_stream, mock_av_frame, tmp_path):
         """Two cameras' frames go to different directories."""

@@ -307,7 +307,6 @@ class TestAlertRoute:
         call_args = mock_frames.call_args
         assert call_args[0][0] == "Front Door Outside"
         assert call_args[1]["n"] == 4
-        assert call_args[1]["offset_seconds"] == 6
 
     def test_unknown_route_returns_404(self):
         """POST to an unregistered path returns 404."""

@@ -680,12 +680,11 @@ def _get_healthy_reader(camera_id: str):
 def get_recent_frames(
     camera_id: str,
     n: int = 4,
-    offset_seconds: int = 6,
     output_dir: str | None = None,
 ) -> list[str]:
-    """Get recent frames for *camera_id*, aged within *offset_seconds*.
+    """Get the *n* most recent frames for *camera_id*.
 
-    When *output_dir* is provided, 4 PNGs land in ``output_dir/frame_NNN.png``
+    When *output_dir* is provided, *n* PNGs land in ``output_dir/frame_NNN.png``
     (per-alert directory).  When *output_dir* is *None*, defaults to the
     legacy per-camera ``FRAMES_DIR/<camera_id>`` path (preserved for
     backward compatibility).
@@ -696,18 +695,7 @@ def get_recent_frames(
     from infra.paths import FRAMES_DIR
 
     dir_to_use = output_dir if output_dir is not None else os.path.join(FRAMES_DIR, camera_id)
-    frame_paths = reader.get_recent_frames(n, dir_to_use)
-    now = time.time()
-    cutoff = now - offset_seconds
-    aged: list[str] = []
-    for p in frame_paths:
-        try:
-            if os.path.getmtime(p) >= cutoff:
-                aged.append(p)
-        except OSError:
-            log.exception("get_recent_frames: stat failed for %s", p)
-            continue
-    return aged
+    return reader.get_recent_frames(n, dir_to_use)
 
 
 def get_frames_by_offset(
