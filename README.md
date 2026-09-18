@@ -15,7 +15,7 @@ A small Python service that:
 
 1. Listens on `:8090/alert` for Reolink motion webhooks (IP-validated)
 2. Captures 4 frames around the motion event from a continuous per-camera
-   RTSP ring buffer (180-frame lossless-ish JPEG ring per camera)
+   RTSP ring buffer (12-frame lossless PNG ring per camera)
 3. Runs a YOLO gate to filter noise vs real subjects
 4. Verifies subject class via vision-LLM (Qwen3-VL on `:8080`)
 5. Asks vision-LLM for class-specific detail
