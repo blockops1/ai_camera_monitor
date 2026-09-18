@@ -1,0 +1,122 @@
+{
+  "prd_id": "PHASE-V2-051-PRD-unsure-mode-vm2",
+  "title": "VM1 'unsure' mode: route to a wide-ranging VM2 prompt, send TG#2, terminate flow (operator 2026-09-18: 'create a PRD that would do that process')",
+  "author": "jill (operator-directed 2026-09-18, post US-050d landing)",
+  "status": "proposal",
+  "phase": "v2",
+  "plan_section": null,
+  "trigger": "Operator 2026-09-18 (verbatim): 'I like that there's an unsure mode. VM two can do a best guess at what it is. The prompt would need to be pretty wide ranging to give VM to the ability to use. It's full capabilities to identify what it is that is moving in the frame then that output should be provided for TG two and the flow dropped at that point. So create a PRD, that would do that process. I don't think card 50 G needs to be run.' US-050d (done) added 'unsure' as a valid gate-output mode in infra/vm1_prompt.py:14 and rendered an unsure-friendly caption in telegram_formatter/detail.py:181-185, but the live listener crashes on this branch with `VisionAnalyzerError: unknown detail_class mode 'unsure'; expected one of ['animal', 'person', 'vehicle']` at infra/vision_analyzer.py:100-103 (DISPATCH table missing 'unsure'). Two tracebacks in logs/daemon.log: 2026-09-18 01:44:04 and 04:59:53. The crash swallows VM2 output, drops TG#2, and the alert is silently lost. Per operator, the unsure flow's correct behavior is: (a) VM2 receives a wide-ranging prompt (full latitude to identify what's moving in the frame — no forced class constraints), (b) VM2 output goes to TG#2, (c) flow terminates at TG#2 (no VM3, no per-class matching, no TG#3, no record_hit unless we want it for unsure — see goal).",
+  "background": "Current state in /Users/jill/farm-surveillance-v2: VM1 emits 'unsure' as a valid gate mode (infra/vm1_prompt.py:14, US-050d). VM2 dispatch is a strict dispatch table in infra/vision_analyzer.py:100-103 mapping mode -> (response_format, prompt_fn) for {vehicle, person, animal}. The 'unsure' key is absent, so detail_class() raises VisionAnalyzerError. The error is caught one frame up in listener/daemon.py:294 (try/except around the pipeline stages) which logs `error=str(e)` and returns HTTP 200 to the camera. The alert is fully dropped: no VM2 output, no TG#2, no TG#3, no record_hit. Operator's directive: instead of crashing, the unsure flow should produce a best-guess identification via a wide-ranging VM2 prompt and send TG#2 with that output, then terminate. There is no further dispatch because unsure cannot meaningfully be matched to enrolled vehicles/persons/animals — the class is by definition uncertain. Per US-050d, telegram_formatter/detail.py:181-185 already renders the unsure branch of build_detail_message(). Once vision_analyzer.py is fixed to dispatch unsure, that renderer is reachable. The flow-termination requirement means listener/daemon.py:295-310 must skip stage_perform_match and stage_build_tg3 when mode='unsure'.",
+  "goal": "When VM1 returns class='unsure': (1) VM2 receives a wide-ranging prompt with no forced schema class constraint — VM2 has full latitude to describe what it sees (species/breed/color/object/activity) in free-form text plus structured fields it considers useful (class_guess, confidence, reason, description); (2) VM2's output is rendered to TG#2 via telegram_formatter/detail.py:181-185 (already done by US-050d); (3) the flow TERMINATES at TG#2 — stage_perform_match is skipped (no vehicle/person/animal matching candidates apply), stage_build_tg3 is skipped, no record_hit fires; (4) the existing /alert route still returns HTTP 200 to the camera so we don't trigger retry storms; (5) the daemon logs `flow_terminated reason=unsure` at INFO level for operator audit. The 'unsure' branch is the ONLY mode that terminates at TG#2; vehicle/person/animal continue to TG#3 as today.",
+  "operator_guarantees": {
+    "no_residue": "After all stories land: infra/vision_analyzer.py:100-103 DISPATCH table has an 'unsure' entry alongside vehicle/person/animal. infra/unsure_prompt.py exists with build_unsure_prompt() + SCHEMA_JSON exported, mirroring the shape of vehicle_prompt.py/person_prompt.py/animal_prompt.py. listener/daemon.py:295-310 has an explicit `if mode == 'unsure': flow terminates at TG#2` branch with stage_perform_match + stage_build_tg3 gated off. No `from infra.vehicle_prompt import` accidentally routes unsure-mode to vehicle. No `_MODES` constant in detail.py is missing 'unsure'.",
+    "behavior": "Given VM1 emits mode='unsure', the listener sends TG#2 with VM2's free-form identification, returns HTTP 200 to the camera, does NOT call stage_perform_match, does NOT call stage_build_tg3, does NOT call record_hit. Vehicle/person/animal modes are unchanged. Verified by tests/test_unsure_v2_dispatch.py (US-051c).",
+    "schema_match": "infra/unsure_prompt.SCHEMA_JSON is a JSON Schema dict compatible with the _response_format(...) wrapper used by all other VM2 prompts. Top-level keys: class_guess (string|null), confidence (number|null), reason (string|null), description (string|null), notable_details (array of strings|null). All fields nullable; VM2 never invents fields, sets null on unobservable values (mirrors vehicle/person/animal conventions).",
+    "prompt_shape": "build_unsure_prompt() returns a prompt that gives VM2 wide latitude: it describes the cropped frame pair, mentions the motion-diff overlay is also attached, and instructs VM2 to provide its best identification without forcing a class constraint. The prompt explicitly says 'you may return null for fields you cannot determine' to prevent fabrication. No enum constraint on class_guess — the model picks any word it considers best.",
+    "termination_audit": "Every unsure-mode alert leaves exactly one INFO log line in logs/daemon.log: `flow_terminated reason=unsure alert_id=<id> camera_id=<cid> vm2_class_guess=<...|null>` so the operator can grep for the new behavior end-to-end. The line is emitted AFTER TG#2 is dispatched."
+  },
+  "shipping_definition": {
+    "all_stories_done": "Every story in stories[] has status='done' in this PRD JSON AND `hermes kanban --board coder-farm-surveillance list --status done` shows the corresponding t_<hex> id. Verified by Step 6 verifier: kanban:done + PRD:done + main:code (the worker commits land on a code/v2-051* branch which ff-merges into main before the card flips done).",
+    "smoke_test": "scripts/smoke_alert_native.py exits 0 with classification=vehicle|person|animal (no regression on existing paths). A new scripts/smoke_alert_unsure.py runs an artificial 'unsure' webhook and asserts (a) HTTP 200 returned, (b) one Telegram TG#2 message dispatched, (c) zero stage_perform_match calls, (d) zero stage_build_tg3 calls, (e) one INFO log line matching `flow_terminated reason=unsure`. The smoke_alert_unsure.py script is committed.",
+    "no_fallback": "If the worker hits a context-window overflow, schema-validation failure, or any other runtime block, the dispatch path does NOT silently substitute CPU for CoreML, does NOT default to vehicle mode for unsure alerts, does NOT skip VM2 and dispatch TG#2 with no payload. The listener must either (a) succeed with a real VM2 result OR (b) raise the existing VisionAnalyzerError so the operator sees the failure.",
+    "branch_hygiene": "The card lands a single code/v2-051x-<slug> branch per story. Squash-merge is forbidden; ff-merge into main is required. No uncommitted scratch files (_verify_*.py, _min_*.py) on the worktree at handoff. Verified by `git status --porcelain` returning 0 rows post-merge."
+  },
+  "dispatch_order": [
+    "US-051a: add 'unsure' to DISPATCH table + create infra/unsure_prompt.py (wide-ranging prompt + schema)",
+    "US-051b: gate stage_perform_match + stage_build_tg3 on mode != 'unsure' in listener/daemon.py (flow terminates at TG#2)",
+    "US-051c: tests/test_unsure_v2_dispatch.py (4 tests: detail_class dispatches, flow terminates at TG#2, no match/tg3 calls, INFO log line emitted)",
+    "US-051d: scripts/smoke_alert_unsure.py committed end-to-end smoke test"
+  ],
+  "branch_naming": "code/v2-051a-unsure-dispatch, code/v2-051b-daemon-flow-terminate, code/v2-051c-tests-unsure-v2-dispatch, code/v2-051d-smoke-alert-unsure",
+  "low_priority": false,
+  "stories": [
+    {
+      "id": "US-051a",
+      "title": "Add 'unsure' to infra/vision_analyzer.py DISPATCH + create infra/unsure_prompt.py",
+      "story_type": "code",
+      "scope": "infra/vision_analyzer.py:100-103 (DISPATCH entry), infra/unsure_prompt.py (new file)",
+      "assignee": "coder",
+      "depends_on": [],
+      "estimated_lines": 90,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -nE '^\\s*\"unsure\":\\s*\\(' infra/vision_analyzer.py | wc -l → 1",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -nE '^from infra\\.unsure_prompt import' infra/vision_analyzer.py | wc -l → 1",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && test -f infra/unsure_prompt.py && wc -l infra/unsure_prompt.py → ≥30 lines",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c \"from infra.unsure_prompt import SCHEMA_JSON, build_unsure_prompt; assert 'class_guess' in SCHEMA_JSON['properties']; assert 'confidence' in SCHEMA_JSON['properties']; assert 'reason' in SCHEMA_JSON['properties']; assert 'description' in SCHEMA_JSON['properties']; print('OK')\" → OK",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && python3 -c \"from infra.vision_analyzer import detail_class; import json; print(json.dumps(list(detail_class.__globals__['DISPATCH'].keys())))\" → contains 'unsure'",
+        "AC6: cd /Users/jill/farm-surveillance-v2 && git show main:infra/vision_analyzer.py | grep -nE 'unknown detail_class mode' | wc -l → 0 (no more ValueError text in the main code path)"
+      ],
+      "files_modified": ["infra/vision_analyzer.py", "infra/unsure_prompt.py"],
+      "notes": "Mirror the shape of infra/vehicle_prompt.py and infra/person_prompt.py: module-level SCHEMA_JSON dict + PROMPT_TEXT string + build_<mode>_prompt() builder function. The DISPATCH entry tuple is (response_format, prompt_fn) just like the other three entries. Import in vision_analyzer.py follows the alphabetical order convention (animal, person, unsure, vehicle). The unsure schema is wider than vehicle/person/animal: no enum on class_guess (free string), nullable confidence (number 0-1), reason and description free text, notable_details as array of nullable strings.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": null,
+      "story_size_budget": 2500
+    },
+    {
+      "id": "US-051b",
+      "title": "Gate stage_perform_match + stage_build_tg3 on mode != 'unsure' in listener/daemon.py",
+      "story_type": "code",
+      "scope": "listener/daemon.py:295-310",
+      "assignee": "coder",
+      "depends_on": ["US-051a"],
+      "estimated_lines": 25,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -nE 'if mode == \"unsure\"' listener/daemon.py | wc -l → ≥1",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -nE 'flow_terminated reason=unsure' listener/daemon.py | wc -l → ≥1",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && grep -nE 'stage_perform_match' listener/daemon.py | wc -l → ≥1 (still called for non-unsure modes; the call site is wrapped in if mode != 'unsure')",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -m py_compile listener/daemon.py && echo OK → OK",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && python3 -c \"import ast, pathlib; src = pathlib.Path('listener/daemon.py').read_text(); tree = ast.parse(src); print('parsed', sum(1 for _ in ast.walk(tree)), 'nodes')\" → ≥ 200 nodes"
+      ],
+      "files_modified": ["listener/daemon.py"],
+      "notes": "Insertion point: between stage_build_tg2 (line ~297) and stage_perform_match (line ~300). Wrap both stage_perform_match and stage_build_tg3 in `if mode != 'unsure':`. After the if-block, when mode=='unsure' and TG#2 has dispatched, emit `logger.info('flow_terminated reason=unsure alert_id=%s camera_id=%s vm2_class_guess=%s', alert.get('id'), camera_id, vm2_result.get('class_guess'))`. The /alert route still returns HTTP 200 — daemon.py:294 try/except already wraps the whole flow. Do NOT call record_hit() in the unsure branch.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": null,
+      "story_size_budget": 2500
+    },
+    {
+      "id": "US-051c",
+      "title": "tests/test_unsure_v2_dispatch.py — 4 tests covering unsure dispatch + flow termination",
+      "story_type": "test",
+      "scope": "tests/test_unsure_v2_dispatch.py (new file)",
+      "assignee": "coder",
+      "depends_on": ["US-051a", "US-051b"],
+      "estimated_lines": 110,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_unsure_v2_dispatch.py -v 2>&1 | tail -30 → '4 passed'",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -nE '^def test_' tests/test_unsure_v2_dispatch.py | wc -l → 4",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -m py_compile tests/test_unsure_v2_dispatch.py && echo OK → OK",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_unsure_v2_dispatch.py -q --no-header 2>&1 | grep -E 'passed|failed' → '4 passed'"
+      ],
+      "files_modified": ["tests/test_unsure_v2_dispatch.py"],
+      "notes": "Tests: (1) test_detail_class_unsure_dispatches — patches _post_vision, calls detail_class('unsure', ...), asserts the prompt contains 'wide' or 'class_guess' or 'best identification' (the wide-ranging wording) and the response_format wraps SCHEMA_JSON. (2) test_daemon_terminates_after_tg2_for_unsure — patches stage_perform_match and stage_build_tg3, runs the /alert route with mode='unsure', asserts stage_perform_match NOT called and stage_build_tg3 NOT called and HTTP 200 returned. (3) test_daemon_runs_match_and_tg3_for_vehicle — same harness but mode='vehicle' to ensure no regression. (4) test_unsure_mode_emits_info_log — captures logger output, asserts the line `flow_terminated reason=unsure alert_id=` is emitted at INFO level.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": null,
+      "story_size_budget": 2500
+    },
+    {
+      "id": "US-051d",
+      "title": "scripts/smoke_alert_unsure.py — end-to-end smoke test for unsure flow",
+      "story_type": "smoke",
+      "scope": "scripts/smoke_alert_unsure.py (new file)",
+      "assignee": "coder",
+      "depends_on": ["US-051a", "US-051b", "US-051c"],
+      "estimated_lines": 60,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python scripts/smoke_alert_unsure.py → exit 0",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -nE 'class.*unsure|wide.flow_terminated' scripts/smoke_alert_unsure.py | wc -l → ≥ 2",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && grep -nE 'TELEGRAM_BOT_TOKEN|TELEGRAM_HOME_CHAT_ID' scripts/smoke_alert_unsure.py | wc -l → ≥ 1 (test config)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -m py_compile scripts/smoke_alert_unsure.py && echo OK → OK",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && tail -50 logs/daemon.log | grep -E 'flow_terminated reason=unsure' | wc -l → ≥ 1 after running AC1"
+      ],
+      "files_modified": ["scripts/smoke_alert_unsure.py"],
+      "notes": "Mirror the structure of scripts/smoke_alert_native.py: posts a synthetic alert to http://127.0.0.1:8090/alert with motion fields that force VM1 to return mode='unsure' (small bbox, low motion). Asserts: (a) HTTP 200 returned, (b) exactly one TG#2 message dispatched (count via patched sendPhoto or by parsing logs/daemon.log for the TG#2 send line), (c) zero stage_perform_match + stage_build_tg3 calls (verify by grepping logs/daemon.log for the absence of `tg3_dispatch` lines for this alert id), (d) one INFO log line `flow_terminated reason=unsure` emitted. If Qwen is not running, the script skips with `SKIP: qwen-local not available`. The script must not require external network.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": null,
+      "story_size_budget": 2500
+    }
+  ]
+}
