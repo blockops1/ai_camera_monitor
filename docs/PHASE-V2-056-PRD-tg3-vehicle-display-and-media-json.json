@@ -1,0 +1,84 @@
+{
+  "id": "PHASE-V2-056",
+  "title": "TG#3 vehicle display + sendMediaGroup JSON encoding",
+  "created": "2026-09-18",
+  "owner": "default",
+  "status": "active",
+  "scope": "Fix two related Telegram-delivery bugs surfaced in the 2026-09-18 log review: TG#3 vehicle-match renders garbage labels (every TG#3 today); sendMediaGroup occasionally fails with 'can't parse media JSON object' on TG#2.",
+  "background": [
+    "Operator 2026-09-18: reviewed the last 24h of daemon.log and noted 'none of the vehicles are getting identified by the matcher'. Two distinct bugs.",
+    "Bug 1: vehicle_matcher.match.match_vehicle() returns the candidate dict spread directly (vehicle_matcher/match.py:379 'result = dict(best_candidate)') -- no 'known_vehicle' wrapper. telegram_formatter.match_alert.build_match_alert_body() line 136 does 'kv = match_result.get(\"known_vehicle\") or {}' which returns {} every time. TG#3 prints 'Match -- ?', 'ID: ?', 'Label: ?'. Reproduced live with real known_vehicles.json: matched=True, score=4.0, id='v_white_silverado_helper_a', label='Operator-owned white pickup' -- but caption is 'Match -- ?'. 100% of TG#3 vehicle matches today.",
+    "Bug 2: telegram_formatter.dispatcher.send_media_group() line 132: data={'chat_id': chat_id, 'media': str(media).replace(\"'\", '\"')}. str() + replace is not JSON. The moment the caption contains a double quote, the result is unparseable. Telegram returns 400 'Bad Request: can't parse media JSON object'. TG#1 captions don't carry OCR text so they never trigger; TG#2 captions carry license-plate OCR which often has quotes. 4 incidents today: alert_ids 1b9f2edd, b5bae261, 1b831304, ad572802. Reproduced live: json.loads of str(media).replace(...) with caption='Plate: \"ABC 123\"' raises Expecting ',' delimiter.",
+    "Bug 3 (related, NEW today): infra/gate.py motion_gate returns wrong_frame_count when webhook delivers 3 of 4 frames. 3 incidents in last hour (86b39e13, 9d834772, 955e4a42). NOT in scope for this PRD -- would require a different design (accept N-of-4 fallback or hold the gate). Flagged in operator review but excluded as a separate concern."
+  ],
+  "scope_in": [
+    "telegram_formatter/match_alert.py -- fix build_match_alert_body to read match_result directly (it IS the candidate dict, no wrapper).",
+    "telegram_formatter/dispatcher.py -- replace str().replace() JSON hack with json.dumps() in send_media_group.",
+    "tests/ -- new test file covering both fixes with synthetic inputs.",
+    "scripts/smoke_ -- optional smoke script that exercises the fixes end-to-end against real known_vehicles.json."
+  ],
+  "scope_out": [
+    "telegram_formatter/match_alert.py build_animal_alert_body -- same-shape bug (match_result.get('candidate')) but match_animal() is currently a stub that always returns {'matched': False}, so the path is dead. US-045d will refactor the animal producer when implemented.",
+    "infra/gate.py wrong_frame_count race -- flagged, not in this PRD.",
+    "dispatcher.py httpx.Client(timeout=10.0) for TG#1 -- known issue, operator moved on 2026-09-18.",
+    "match_result envelope design changes (e.g. wrap as {known_vehicle: candidate, ...}) -- the existing flat shape is fine; only the consumer was wrong."
+  ],
+  "design_decisions": [
+    "D1: Fix the CONSUMER, not the producer. match_vehicle() correctly returns the candidate dict spread flat -- the docstring at match_alert.py:127 is the lie. Update build_match_alert_body to read fields directly. Score, gap, runner_ups all already read from match_result directly elsewhere (lines 266-269), so this is consistent.",
+    "D2: json.dumps() in dispatcher.py -- proper JSON serialization escapes inner quotes correctly. One-character fix (str -> json.dumps).",
+    "D3: Independent cards. No parent link. Dispatcher cap=1 means US-056a runs first, US-056b next.",
+    "D4: Tests cover both fixes in one file (tests/test_tg3_and_media_json.py). Each test is independent."
+  ],
+  "operational_notes": [
+    "After US-056a ships, every TG#3 vehicle-match alert will show the matched label/ID instead of '?'.",
+    "After US-056b ships, no more 'can't parse media JSON object' 400s -- every TG#2 with a quoted caption will send.",
+    "Existing test_smoke_alert_roundtrip.py uses match_vehicle() -- verify it still passes.",
+    "memory is at 81% -- no new lessons to save; the SOUL/bundle carries the procedure."
+  ],
+  "stories": [
+    {
+      "id": "US-056a",
+      "title": "Fix build_match_alert_body to read match_result directly (TG#3 vehicle display)",
+      "scope": "Replace kv = match_result.get('known_vehicle') or {} with kv = match_result or {}. Every kv.get('label', '?') call then resolves to the actual candidate fields (label, id, owner, color, make, model, type). Update docstring at line 127 to match.",
+      "files": [
+        "telegram_formatter/match_alert.py",
+        "tests/test_tg3_and_media_json.py (new)"
+      ],
+      "dependencies": [],
+      "estimated_loc": 5
+    },
+    {
+      "id": "US-056b",
+      "title": "Replace str(media).replace() with json.dumps() in send_media_group",
+      "scope": "Single-line change: data={'chat_id': chat_id, 'media': str(media).replace(\"'\", '\"')} -> data={'chat_id': chat_id, 'media': json.dumps(media)}. Add 'import json' at top if absent. Update the inline comment about input_media_photo to note json.dumps is required because Telegram parses 'media' as JSON in multipart form data.",
+      "files": [
+        "telegram_formatter/dispatcher.py",
+        "tests/test_tg3_and_media_json.py (additions)"
+      ],
+      "dependencies": [],
+      "estimated_loc": 4
+    },
+    {
+      "id": "US-056c",
+      "title": "tests/test_tg3_and_media_json.py + smoke end-to-end",
+      "scope": "New test file with mechanical tests covering: (1) matched vehicle TG#3 caption contains the real label and id, no '?'; (2) no-match caption renders top candidates + thresholds; (3) build_match_message with a quoted caption still produces a string dict (pre-fix: produces unparseable JSON); (4) send_media_group with caption containing \"Plate: 'ABC 123'\" builds data dict whose json.loads is valid. Plus scripts/smoke_tg3_and_media_json.py that imports telegram_formatter.match_alert.build_match_message + telegram_formatter.dispatcher.send_media_group (mocked httpx) and exercises both fixes against real data/vehicles/known_vehicles.json.",
+      "files": [
+        "tests/test_tg3_and_media_json.py (new)",
+        "scripts/smoke_tg3_and_media_json.py (new)"
+      ],
+      "dependencies": ["US-056a", "US-056b"],
+      "estimated_loc": 120
+    }
+  ],
+  "verification": [
+    "All three stories' ACs run mechanically (per verifiable-acs skill).",
+    "Existing tests still pass: tests/test_smoke_alert_roundtrip.py uses match_vehicle().",
+    "After US-056a multi: grep show main TG#3 against a real vehicle alert produces 'Match - <real label>', not 'Match - ?'.",
+    "After US-056b multi: replay the 4 today's failed alert_ids through send_media_group with the caption format that broke them -- they all return HTTP 200 (mocked)."
+  ],
+  "discovered": [
+    "BUG-056-1: match_alert.py:136 reads wrong key (known_vehicle).",
+    "BUG-056-2: dispatcher.py:132 str().replace() produces invalid JSON when caption has quotes.",
+    "BUG-056-3 (out of scope, flagged): infra/gate.py wrong_frame_count for 3/4 frame webhooks."
+  ]
+}
