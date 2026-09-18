@@ -134,7 +134,7 @@ get_recent_frames(camera_id, n=4, offset_seconds=6) -> [path1, path2, path3, pat
 ### `PersistentRTSPReader` lifecycle
 - One thread per camera, daemon=True.
 - PyAV over RTSP/TCP (`rtsp_transport: tcp`, `fflags: +genpts`, buffer 20MB, timeout 10s).
-- 180-frame rolling buffer (`deque(maxlen=180)`).
+- 12-frame rolling buffer (`deque(maxlen=12)`).
 - Reconnect loop: every 5s, scan readers; if `uptime > 10s` and
   `is_healthy(stale_seconds=5.0)` is False → stop, re-instantiate, restart.
 - Exponential backoff for decode failures: 1s → 2s → 4s … capped at 30s.
