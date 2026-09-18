@@ -28,7 +28,7 @@ PUBLIC API:
   - THRESHOLDS_BY_CLASS: per-class default confidence thresholds (module-level)
   - ANIMAL_CLASSES: set of COCO classes considered "animal"
   - VEHICLE_CLASSES: set of COCO classes considered "vehicle"
-  - load_thresholds(camera_name: str) -> dict[str, float]
+  - load_thresholds(camera_name: str) -> tuple[dict[str, float], list[str] | None]
   - run(ctx: AlertContext) -> GateVerdict
   - is_v2_enabled() -> bool (Phase 6B.109 — gates V2 fallback behavior)
 DOES NOT DO:
@@ -98,7 +98,7 @@ Routing decision tree (LOCKED §11.37 + V2 §11.39 + §11.59 catchall fix):
   5. Mixed (vehicle somewhere in the high-conf mix) → vehicle pipeline
      ("mixed_vehicle_wins")
   5b. High-conf non-vehicle class with no vehicle anywhere in the mix →
-      none ("high_conf_<class>_not_vehicle").
+      none ("top_class_<class>_not_in_subjects").
       §11.59 split: the prior catchall unconditionally emitted
       ("vehicle", <class>, ..., "mixed_vehicle_wins") regardless of
       whether a vehicle was present. That produced classification=vehicle
@@ -106,6 +106,8 @@ Routing decision tree (LOCKED §11.37 + V2 §11.39 + §11.59 catchall fix):
       225 occurrences in logs/launchctl-stderr.log
       between 2026-08-23 and 2026-08-27. Now routed to none with the
       observed class named in the reason for postmortem clarity.
+      V2-055b: per-camera 'subjects' allowlist further restricts which
+      classes pass the gate (FRONT/BACK: person+animal only).
   V2 §11.39: rule 5 requires vehicle conf >= 0.6 to override person conf >= 0.4.
 
 V2 fixes (Phase 6B.109 §11.39, 2026-08-24 — opt-in via MOTION_GATE_V2=1):
@@ -524,20 +526,22 @@ def is_gate_enabled(camera_name: str, event_type: str) -> bool:
     return bool(gate_enabled.get(key, True))
 
 
-def load_thresholds(camera_name: str) -> dict[str, float]:
-    """Resolve the effective thresholds for a given camera.
+def load_thresholds(camera_name: str) -> tuple[dict[str, float], list[str] | None]:
+    """Resolve the effective thresholds + subjects for a given camera.
 
     Lookup order (most-specific wins):
       1. Per-camera + per-class in config/motion_gate_thresholds.json
       2. Per-class default in THRESHOLDS_BY_CLASS (module constant)
       3. DEFAULT_OTHER_COCO_THRESHOLD for any COCO class not covered
 
-    Returns dict mapping COCO class name → confidence threshold (0.0-1.0).
+    Returns (dict mapping COCO class name → confidence threshold, subjects_list).
+    subjects_list is the per-camera 'subjects' key (e.g. ["person", "animal"])
+    when present in config, or None when absent (default: no subject filter).
 
-    Phase 6B.167 §13.4 (revised 2026-09-08 per operator directive): JSON keys
-    are camera PREFIXES (FRONT, BACK, OUTSIDE_FRONT_GARAGE, ...), not
-    CAM{N} codes. The pipeline passes camera_id directly as camera_name;
-    no translation layer required. infra.cameras.code_for dropped.
+    Phase 6B.167 §13.4 (revised 2026-09-08): JSON keys are camera PREFIXES.
+    Phase 6B.197 (§V2-055b): added 'subjects' extraction for per-camera subject
+    allowlist routing (FRONT/BACK only).
+
     """
     global _cached_thresholds
     if _cached_thresholds is None:
@@ -552,13 +556,20 @@ def load_thresholds(camera_name: str) -> dict[str, float]:
     # "float() argument must be a string or a real number, not 'dict'"
     # whenever a camera config contained a dict-valued field.
     effective = dict(THRESHOLDS_BY_CLASS)
+    subjects = None
     for cls, threshold in camera_overrides.items():
         if cls.startswith("_"):
             continue
         if not isinstance(threshold, (int, float)):
             continue  # skip dicts / lists / strings (gate_cooldown etc.)
         effective[cls] = float(threshold)
-    return effective
+    # Phase 6B.197 (§V2-055b): 'subjects' is a list of class-name strings
+    # (e.g. ["person", "animal"]). It is NOT a threshold, so the loop above
+    # skips it (isinstance(list, (int, float)) is False). Extract it here.
+    subj = camera_overrides.get("subjects")
+    if isinstance(subj, list) and len(subj) > 0:
+        subjects = subj
+    return effective, subjects
 
 
 # ---------------------------------------------------------------------------
@@ -624,6 +635,7 @@ def _route_decision(
     verdict_b: QuickVerdict,
     thresholds: dict[str, float],
     v2: bool = False,
+    subjects: list[str] | None = None,
 ) -> tuple[DecisionType, str | None, float, str]:
     """Apply routing decision tree (LOCKED §11.37 + V2 tightening in §11.39).
 
@@ -631,6 +643,9 @@ def _route_decision(
       verdict_a, verdict_b: QuickVerdict from classify_frame on each crop.
       thresholds: per-camera threshold overrides (forwarded for compatibility).
       v2: if True, apply tighter rule 5 (Phase 6B.109 §11.39 F3).
+      subjects: per-camera subject allowlist (e.g. ["person", "animal"]).
+        When None, default vehicle-priority behavior applies (perimeter cameras).
+        When set, only classes in subjects pass the gate; others are suppressed.
 
     Returns (decision, class_label, confidence, reason).
     """
@@ -743,17 +758,52 @@ def _route_decision(
     # names the class observed, so postmortem analysis can distinguish
     # "rule 5 mixed" from "rule 4 no-object" suppressions.
     if vehicle_top is not None:
+        # Phase 6B.197 (§V2-055b): per-camera subject allowlist.
+        # When subjects is set and 'vehicle' is NOT in it, suppress the
+        # vehicle even in the mixed_vehicle_wins path.
+        if subjects is not None and "vehicle" not in subjects:
+            return (
+                "none",
+                top.top_class,
+                top.top_confidence,
+                f"top_class_{top.top_class}_not_in_subjects",
+            )
         return (
             "vehicle",
             vehicle_top.top_class,
             vehicle_top.top_confidence,
             "mixed_vehicle_wins",
         )
+
+    # No vehicle in the mix — Route based on subjects allowlist.
+    # Phase 6B.197 (§V2-055b): when subjects is set, only classes in
+    # subjects pass. When subjects is None (perimeter cameras), keep
+    # the OLD catchall behavior for backward compatibility.
+    if subjects is not None:
+        if top.top_class in subjects:
+            # Top class is in the allowlist → it wins
+            # (person or animal for FRONT/BACK)
+            return (
+                "person" if top.top_class == "person" else "animal",
+                top.top_class,
+                top.top_confidence,
+                "subject_allowed",
+            )
+        # Top class NOT in subjects → suppress
+        return (
+            "none",
+            top.top_class,
+            top.top_confidence,
+            f"top_class_{top.top_class}_not_in_subjects",
+        )
+    # subjects is None (perimeter cameras): same suppress-with-class-name
+    # behavior as before, using the new reason format so existing
+    # log-grep patterns work and AC1 (zero hits for the old string) passes.
     return (
         "none",
         top.top_class,
         top.top_confidence,
-        f"high_conf_{top.top_class}_not_vehicle",
+        f"top_class_{top.top_class}_not_in_subjects",
     )
 
 
@@ -889,7 +939,7 @@ def run(
             _cached_classifier = QuickClassifier()
         classifier = _cached_classifier
 
-    thresholds = load_thresholds(camera_name)
+    thresholds, subjects = load_thresholds(camera_name)
 
     # ---- diff(2,3) → bbox_a → crop_a ----
     bbox_a, count_a, _mask_a = diff_pair_with_bbox(
@@ -971,7 +1021,7 @@ def run(
 
     # ---- route decision ----
     decision, class_label, confidence, reason = _route_decision(
-        verdict_a, verdict_b, thresholds, v2=is_v2_enabled()
+        verdict_a, verdict_b, thresholds, v2=is_v2_enabled(), subjects=subjects
     )
     # Pick the higher-confidence verdict's raw top_class/top_confidence
     # for the debug fields on GateVerdict.

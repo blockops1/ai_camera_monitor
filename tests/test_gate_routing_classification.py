@@ -122,7 +122,7 @@ class TestClassificationRouting:
             top_class="person", top_confidence=0.85, decision="pass_with_hint"
         )
         classifier = FakeClassifier()
-        thresholds = load_thresholds("TEST_CAM")
+        thresholds, _ = load_thresholds("TEST_CAM")
         verdict_a = classifier.classify_frame("fake_crop_a")
         verdict_b = _make_verdict_b(top_class="person", top_confidence=0.70)
         classification, _, _, _ = _route_decision(verdict_a, verdict_b, thresholds)
@@ -135,7 +135,7 @@ class TestClassificationRouting:
             top_class="car", top_confidence=0.91, decision="pass_with_hint"
         )
         classifier = FakeClassifier()
-        thresholds = load_thresholds("TEST_CAM")
+        thresholds, _ = load_thresholds("TEST_CAM")
         verdict_a = classifier.classify_frame("fake_crop_a")
         verdict_b = _make_verdict_b(top_class="car", top_confidence=0.80)
         classification, class_label, _, _ = _route_decision(verdict_a, verdict_b, thresholds)
@@ -149,7 +149,7 @@ class TestClassificationRouting:
             top_class="dog", top_confidence=0.78, decision="pass_with_hint"
         )
         classifier = FakeClassifier()
-        thresholds = load_thresholds("TEST_CAM")
+        thresholds, _ = load_thresholds("TEST_CAM")
         verdict_a = classifier.classify_frame("fake_crop_a")
         verdict_b = _make_verdict_b(top_class="dog", top_confidence=0.65)
         classification, class_label, _, _ = _route_decision(verdict_a, verdict_b, thresholds)
@@ -163,7 +163,7 @@ class TestClassificationRouting:
             top_class="bench", top_confidence=0.92, decision="pass",
         )
         classifier = FakeClassifier()
-        thresholds = load_thresholds("TEST_CAM")
+        thresholds, _ = load_thresholds("TEST_CAM")
         verdict_a = classifier.classify_frame("fake_crop_a")
         verdict_b = _make_verdict_b(top_class="bench", top_confidence=0.80, decision="pass")
         classification, _class_label, _, reason = _route_decision(
@@ -176,7 +176,7 @@ class TestClassificationRouting:
     # ------------------------------------------------------------------ AC1e
     def test_ac1e_no_detection_routes_to_none(self):
         """YOLO finds nothing → classification == 'none'."""
-        thresholds = load_thresholds("TEST_CAM")
+        thresholds, _ = load_thresholds("TEST_CAM")
         # Both verdicts suppressed (no detection)
         verdict_a = QuickVerdict(
             top_class="none", top_confidence=0.0, decision="suppress",
@@ -208,7 +208,7 @@ class TestClassificationEdgeCases:
             top_class="cat", top_confidence=0.80, decision="pass_with_hint"
         )
         classifier = FakeClassifier()
-        thresholds = load_thresholds("TEST_CAM")
+        thresholds, _ = load_thresholds("TEST_CAM")
         verdict_a = classifier.classify_frame("fake_crop_a")
         # Second crop suppressed (empty/none)
         verdict_b = QuickVerdict(
@@ -224,16 +224,16 @@ class TestClassificationEdgeCases:
             top_class="teddy bear", top_confidence=0.95, decision="pass",
         )
         classifier = FakeClassifier()
-        thresholds = load_thresholds("TEST_CAM")
+        thresholds, _ = load_thresholds("TEST_CAM")
         verdict_a = classifier.classify_frame("fake_crop_a")
         verdict_b = _make_verdict_b(top_class="teddy bear", top_confidence=0.88, decision="pass")
         classification, _, _, reason = _route_decision(verdict_a, verdict_b, thresholds)
         assert classification == "none"
-        assert "teddy_bear_not_vehicle" in reason or "teddy bear" in reason
+        assert "teddy" in reason and "not_in_subjects" in reason
 
     def test_low_conf_person_suppressed_routes_to_none(self):
         """Both crops low-confidence person → 'none'."""
-        thresholds = load_thresholds("TEST_CAM")
+        thresholds, _ = load_thresholds("TEST_CAM")
         verdict_a = _make_verdict_a(top_class="person", top_confidence=0.20, decision="suppress")
         verdict_b = _make_verdict_b(top_class="person", top_confidence=0.25, decision="suppress")
         classification, _, _, _ = _route_decision(verdict_a, verdict_b, thresholds)
@@ -244,7 +244,7 @@ class TestClassificationEdgeCases:
         FakeClassifier.verdict = FakeVerdict(
             top_class="truck", top_confidence=0.90, decision="pass_with_hint"
         )
-        thresholds = load_thresholds("TEST_CAM")
+        thresholds, _ = load_thresholds("TEST_CAM")
         verdict_a = FakeClassifier().classify_frame("fake_crop_a")
         FakeClassifier.verdict = FakeVerdict(
             top_class="car", top_confidence=0.85, decision="pass_with_hint"
