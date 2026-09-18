@@ -14,23 +14,19 @@ LAYER 2: crop_b.png — gate_verdict.crop_b saved as lossless PNG (or
     None when no subject bbox was found).
 LAYER 3: composite.png — render_motion_composite(frames, bbox_a, bbox_b)
     called ONCE, result path stored.
-LAYER 4: full_frame_path — frame_paths[1] (frame 2 slot), required,
-    never None.
 
 INPUTS:
     - gate_verdict: GateVerdict (from infra.gate.run) — provides
       crop_a, crop_b (PIL.Image or None), frames (list[PIL.Image]),
       bbox_a, bbox_b.
-    - frame_paths: list[str] — 4 frame paths from frame capture.
     - output_dir: str — directory for artifact files.
 
 OUTPUTS:
-    - AlertArtifacts dataclass (crop_a_path, crop_b_path,
-      composite_path, full_frame_path).
+    - AlertArtifacts dataclass (crop_a_path, crop_b_path, composite_path).
 
 PUBLIC API:
     AlertArtifacts dataclass
-    prepare_alert_artifacts(gate_verdict, frame_paths, output_dir) -> AlertArtifacts
+    prepare_alert_artifacts(gate_verdict, output_dir) -> AlertArtifacts
 
 DOES NOT DO:
     - Does NOT classify vehicles (that's the gate's job).
@@ -80,14 +76,11 @@ class AlertArtifacts:
         crop_b_path: Path to crop_b.png (PNG lossless), or None if crop_b
             was None.
         composite_path: Path to composite.png (render_motion_composite).
-        full_frame_path: Path to frame_paths[1] (frame 2). Required,
-            never None.
     """
 
     crop_a_path: str | None
     crop_b_path: str | None
     composite_path: str | None
-    full_frame_path: str
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +109,8 @@ def _save_crop(pil_image: Image.Image | None, output_dir: str) -> str | None:
 
 
 def prepare_alert_artifacts(
-    gate_verdict, frame_paths: list[str], output_dir: str
+    gate_verdict,
+    output_dir: str,
 ) -> AlertArtifacts:
     """Produce three artifact paths from a gate verdict.
 
@@ -125,18 +119,16 @@ def prepare_alert_artifacts(
       2. Save crop_b.png from gate_verdict.crop_b (or None).
       3. Call render_motion_composite(frames, bbox_a, bbox_b, output_dir)
          exactly ONCE and store the result.
-      4. Set full_frame_path = frame_paths[1] (frame 2).
 
     Args:
         gate_verdict: GateVerdict from infra.gate.run — provides
             crop_a, crop_b (PIL.Image | None), frames (4 PIL images),
             bbox_a, bbox_b.
-        frame_paths: 4 frame paths from the frame capture stage.
         output_dir: canonical alert-scoped directory (from
             infra.paths.data_dir_for).
 
     Returns:
-        AlertArtifacts with all four paths.
+        AlertArtifacts with crop_a_path, crop_b_path, composite_path.
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -168,21 +160,16 @@ def prepare_alert_artifacts(
                 f"[{gate_verdict.reason}] composite render returned empty path"
             )
 
-    # 4. Full frame path (frame 2 slot — required, never None).
-    full_frame_path = frame_paths[1] if len(frame_paths) >= 2 else ""
-
     # Log once per webhook with structured fields.
     log.info(
         f"alert_artifacts: alert_id={gate_verdict.reason} "
         f"crop_a={'present' if crop_a_path else 'None'} "
         f"crop_b={'present' if crop_b_path else 'None'} "
-        f"composite_path={composite_path or 'None'} "
-        f"full_frame_path={full_frame_path}"
+        f"composite_path={composite_path or 'None'}"
     )
 
     return AlertArtifacts(
         crop_a_path=crop_a_path,
         crop_b_path=crop_b_path,
         composite_path=composite_path,
-        full_frame_path=full_frame_path,
     )
