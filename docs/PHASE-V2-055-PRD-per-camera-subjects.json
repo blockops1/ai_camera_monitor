@@ -1,0 +1,120 @@
+{
+  "prd_id": "PHASE-V2-055-PRD-per-camera-subjects",
+  "title": "Add per-camera `subjects` allowlist to motion_gate_thresholds.json + gate.py routing so face-level cameras (FRONT/BACK) suppress vehicles and never drop solo-person detections",
+  "author": "jill (operator-directed 2026-09-18)",
+  "status": "proposal",
+  "phase": "v2",
+  "plan_section": null,
+  "trigger": "Operator 2026-09-18 (verbatim): 'Front door outside is specifically set at face level and it's specifically supposed to get people. I don't even care if it captures a vehicle. Back door inside is the same thing. Front door outside and back door inside are specifically set up to get the best images of people. I don't want, well also in animals, but I don't want any vehicles captured from front door outside or back door inside. What's an elegant way to make that happen?' Investigation: Front Door Outside camera (192.168.1.39) sent 266 webhook POSTs in the last 24h; only 20 proceeded through the pipeline (7.5% pass rate). The last successful FRONT person alert in the entire log was 2026-09-14 11:37:01 (4 days ago). Today, 09:59:56 had a `top_class=person top_confidence=0.61 reason=high_conf_person_not_vehicle` drop -- a real person was detected and then explicitly suppressed because no vehicle was in the mix. The rule lives at infra/gate.py:752-757 (catchall Rule 5) and was locked into a v0.5.0 release to prevent 225 'bench = vehicle' false positives on perimeter cameras. The fix needs to preserve that protection for OUTSIDE_FRONT_SOLAR/OUTSIDE_BACK_SOLAR/OUTSIDE_FRONT_GARAGE/OUTSIDE_FRONT_POWER while making FRONT and BACK suppress vehicles and route solo-person to the person pipeline.",
+  "background": "Current state in /Users/jill/farm-surveillance-v2/infra/gate.py:752-757 is a hard-coded catchall: if YOLO finds any high-confidence detection but no vehicle in the bbox mix, the gate returns ('none', top_class, top_confidence, 'high_conf_<class>_not_vehicle'). The rule is correct for perimeter/driveway cameras where solo-person detection usually means a person walking past the fence line. It is wrong for entry-level cameras where solo-person IS the primary signal. The v0.5.0 release that locked this rule in was a global change; it cannot be undone without re-introducing the 225 false-positive problem on OUTSIDE_FRONT_SOLAR. The clean fix is to make subjects a per-camera config value in config/motion_gate_thresholds.json (which already carries per-camera vehicle/person thresholds and gate_enabled flags). The gate loads the camera's threshold dict at /Users/jill/farm-surveillance-v2/infra/gate.py:514 via _load_thresholds_config().get(camera_name). Adding a 'subjects' key in that dict is a natural extension -- no new file, no new env var, no global mode flag. The default when 'subjects' is missing is the current vehicle-priority behavior (backward compatible). Cameras that want different behavior add 'subjects': ['person', 'animal'] (or any subset) and the gate routes accordingly.",
+  "goal": "FRONT and BACK cameras (config keys in motion_gate_thresholds.json) get a 'subjects': ['person', 'animal'] entry. Their gate routes solo-person and solo-animal to the person/animal pipeline (not to vehicle, not to suppression). Vehicle detections on these cameras are silently dropped at the gate with reason 'top_class_vehicle_not_in_subjects'. Mixed person+vehicle detections on these cameras route to person (since vehicle is not in subjects). All other cameras keep current behavior unchanged. After the change: FRONT/BACK person alerts proceed normally; a solo-person alert at 0.61 confidence (like the 09:59:56 case) is logged as `proceeded classification=people` instead of `dropped reason=high_conf_person_not_vehicle`.",
+  "operator_guarantees": {
+    "no_residue": "After all stories land: config/motion_gate_thresholds.json has 'subjects' keys for FRONT and BACK only (4 other cameras omit it). infra/gate.py reads the per-camera subjects value at the same place it already reads per-camera thresholds (line 514-546 region). No new env var is introduced. No global MOTION_GATE_V2 toggle is flipped. The catchall at line 752-757 is REPLACED with a per-camera subjects check; the literal string 'high_conf_<class>_not_vehicle' no longer appears in the codebase.",
+    "behavior": "Per-camera routing rules after the change: (a) FRONT: solo-person@conf>=0.35 -> person pipeline; solo-animal@conf>=0.35 -> animal pipeline; any vehicle -> suppressed with reason 'top_class_vehicle_not_in_subjects'; mixed person+vehicle -> person pipeline. (b) BACK: same as FRONT. (c) OUTSIDE_FRONT_SOLAR/OUTSIDE_BACK_SOLAR/OUTSIDE_FRONT_GARAGE/OUTSIDE_FRONT_POWER: subjects default (no key) -> current behavior preserved exactly: vehicle in mix wins; no vehicle in mix + solo person/other -> current catchall suppression for non-person classes; solo person routes to person pipeline (existing US-050a behavior).",
+    "no_regression": "After the change: scripts/smoke_alert_native.py exits 0. The /alert webhook route returns HTTP 200 for all cameras. Existing US-046b NIGHT_SUPPRESS behavior (operator 2026-09-15) still gates night-time vehicle false-positives on OUTSIDE_FRONT_SOLAR. Existing US-045f animal pipeline still routes recognized animals to TG#3 with MegaDescriptor cosine. Per-class thresholds in motion_gate_thresholds.json (vehicle=0.5, person=0.35 on FRONT/BACK) remain unchanged.",
+    "auditability": "The motion_gate log line (existing format: 'motion_gate: classification=... top_class=... top_confidence=... reason=... elapsed=...ms') gains a new reason value 'top_class_<class>_not_in_subjects' for FRONT/BACK camera detections that fall outside the camera's subjects. Existing reason values ('mixed_vehicle_wins', 'high_conf_person_not_vehicle', 'no_class', 'class_below_threshold', 'class_not_in_keep', 'gate_disabled_*') remain unchanged. Operators tail-grepping daemon.log see the same log shape, with new reason strings only on FRONT/BACK.",
+    "config_drift_safe": "If a future operator adds a camera but forgets to set 'subjects', the camera falls back to the default behavior (vehicle-priority). This is documented in the JSON _comment and in infra/gate.py:load_thresholds() docstring. There is no implicit 'subjects: []' that would drop everything -- missing key = current behavior."
+  },
+  "shipping_definition": {
+    "all_stories_done": "Every story in stories[] has status='done' in this PRD JSON AND `hermes kanban --board coder-farm-surveillance list --status done` shows the corresponding t_<hex> id with title matching 'US-055<letter>'.",
+    "smoke_test": "scripts/smoke_per_camera_subjects.py exits 0. The script: (a) imports infra.gate.load_thresholds for FRONT, BACK, OUTSIDE_FRONT_SOLAR; asserts FRONT.subjects == {'person', 'animal'} and BACK == same and OUTSIDE_FRONT_SOLAR has no 'subjects' key. (b) Calls the gate function with synthetic detection tuples mimicking: solo-person on FRONT, solo-vehicle on FRONT, mixed person+vehicle on FRONT, solo-person on OUTSIDE_FRONT_SOLAR (current behavior). Asserts the routing outputs match the spec above.",
+    "no_fallback": "If the JSON file fails to parse (broken syntax) the gate raises a clean ConfigError (existing behavior). If 'subjects' is set to an empty list, the gate logs a warning ('subjects is empty -- all detections on this camera will be suppressed') and routes accordingly. There is no silent fallback to the old behavior when the operator explicitly opts out of all subjects.",
+    "branch_hygiene": "Each story lands on its own code/v2-055<letter>-<slug> branch, ff-merges into main before kanban_done. No uncommitted scratch files. Local main MUST NOT fall behind origin after the change is deployed."
+  },
+  "dispatch_order": [
+    "US-055a: Add 'subjects': ['person', 'animal'] to FRONT and BACK in config/motion_gate_thresholds.json + update _comment docstring",
+    "US-055b: Replace catchall at infra/gate.py:752-757 with per-camera subjects routing (no new env var, default = current behavior)",
+    "US-055c: tests/test_per_camera_subjects.py -- unit tests for FRONT/BACK routing + OUTSIDE_FRONT_SOLAR unchanged behavior",
+    "US-055d: scripts/smoke_per_camera_subjects.py -- end-to-end smoke test importing real gate + synthetic detections"
+  ],
+  "branch_naming": "code/v2-055a-thresholds-subjects-key, code/v2-055b-gate-subjects-routing, code/v2-055c-test-per-camera-subjects, code/v2-055d-smoke-per-camera-subjects",
+  "low_priority": false,
+  "stories": [
+    {
+      "id": "US-055a",
+      "title": "Add 'subjects': ['person', 'animal'] to FRONT and BACK in config/motion_gate_thresholds.json + update _comment docstring",
+      "story_type": "config",
+      "scope": "config/motion_gate_thresholds.json (2 keys modified + 1 docstring updated)",
+      "assignee": "coder",
+      "depends_on": [],
+      "estimated_lines": 14,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && python3 -c \"import json; d=json.load(open('config/motion_gate_thresholds.json')); assert sorted(d['FRONT']['subjects']) == ['animal','person']; assert sorted(d['BACK']['subjects']) == ['animal','person']; assert 'subjects' not in d['OUTSIDE_FRONT_SOLAR']; assert 'subjects' not in d['OUTSIDE_BACK_SOLAR']; assert 'subjects' not in d['OUTSIDE_FRONT_GARAGE']; assert 'subjects' not in d['OUTSIDE_FRONT_POWER']; print('OK')\" -> OK",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python3 -m json.tool config/motion_gate_thresholds.json > /dev/null && echo OK -> OK",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && git show main:config/motion_gate_thresholds.json | grep -nE '\"subjects\"' | wc -l -> >= 2",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && grep -nE 'subjects' config/motion_gate_thresholds.json | head -10 -- shows FRONT and BACK entries plus the updated _comment line"
+      ],
+      "files_modified": ["config/motion_gate_thresholds.json"],
+      "notes": "Edit the existing FRONT and BACK entries to add a 'subjects' key with value ['person', 'animal']. Do NOT add subjects to OUTSIDE_FRONT_SOLAR, OUTSIDE_BACK_SOLAR, OUTSIDE_FRONT_GARAGE, or OUTSIDE_FRONT_POWER -- their behavior must stay exactly as today. Update the top-level '_comment' string to mention that 'subjects' is optional and defaults to the current vehicle-priority behavior when omitted. Keep the existing keys (vehicle/person/gate_cooldown/gate_enabled/_note) untouched on FRONT and BACK. The list values are case-sensitive and must match the COCO class names exactly ('person', 'animal' is not a COCO class -- 'animal' is matched by 'cat'/'dog'/'horse'/'sheep'/'cow'/'elephant'/'bear'/'zebra'/'giraffe'; infra/gate.py:per-class classification already handles this expansion at the keep_classes level). Verify US-045a animal branch is wired before this lands.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": null,
+      "story_size_budget": 2500
+    },
+    {
+      "id": "US-055b",
+      "title": "Replace catchall at infra/gate.py:752-757 with per-camera subjects routing (no new env var, default = current behavior)",
+      "story_type": "code",
+      "scope": "infra/gate.py:lines around 740-770 (catchall block) + load_thresholds() return shape",
+      "assignee": "coder",
+      "depends_on": ["US-055a"],
+      "estimated_lines": 28,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -nE 'high_conf_.*_not_vehicle' infra/gate.py | wc -l -> 0 (literal string removed)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -nE 'top_class_.*_not_in_subjects' infra/gate.py | wc -l -> >= 2 (new reason string present + used)",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && grep -nE 'camera_subjects|subjects' infra/gate.py | wc -l -> >= 4 (load + use + default + return-shape)",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -m py_compile infra/gate.py && echo OK -> OK",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c \"from infra.gate import load_thresholds; t=load_thresholds('FRONT'); assert sorted(t['subjects'])==['animal','person'], t; t2=load_thresholds('OUTSIDE_FRONT_SOLAR'); assert 'subjects' not in t2, t2; print('OK')\" -> OK",
+        "AC6: cd /Users/jill/farm-surveillance-v2 && git show main:infra/gate.py | grep -nE 'top_class_.*_not_in_subjects' | wc -l -> >= 1 (landed on main)"
+      ],
+      "files_modified": ["infra/gate.py"],
+      "notes": "Replace the existing Rule 5 catchall (infra/gate.py:752-757, the `if vehicle_top is not None` / `return ('none', ..., 'high_conf_<class>_not_vehicle')` block) with a per-camera subjects check. The new logic: (1) resolve camera_subjects from the per-camera threshold dict via load_thresholds() (extend the return shape to include 'subjects' if present; default to None when absent). (2) If camera_subjects is None, run the OLD catchall verbatim so OUTSIDE_FRONT_SOLAR/OUTSIDE_BACK_SOLAR/etc. behavior is unchanged. (3) If camera_subjects is set and top_class is not in it, return ('none', top_class, top_confidence, f'top_class_{top_class}_not_in_subjects'). (4) If camera_subjects is set and 'vehicle' is in it AND vehicle_top is in the bbox mix, run the existing mixed_vehicle_wins rule. (5) If camera_subjects is set and 'vehicle' is NOT in it AND vehicle_top is in the mix, suppress vehicle (return 'none' with reason 'top_class_vehicle_not_in_subjects'). (6) If camera_subjects is set and no vehicle in mix, top detection wins if it's in subjects. The new 'subjects' key flows through load_thresholds() alongside vehicle/person thresholds. Do NOT introduce a new env var. Do NOT touch the V2 mode (MOTION_GATE_V2). The line numbers given are approximate; locate the actual Rule 5 block by grep.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": null,
+      "story_size_budget": 2500
+    },
+    {
+      "id": "US-055c",
+      "title": "tests/test_per_camera_subjects.py -- unit tests for FRONT/BACK routing + OUTSIDE_FRONT_SOLAR unchanged behavior",
+      "story_type": "test",
+      "scope": "tests/test_per_camera_subjects.py (new file)",
+      "assignee": "coder",
+      "depends_on": ["US-055a", "US-055b"],
+      "estimated_lines": 110,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_per_camera_subjects.py -v 2>&1 | tail -25 -> '6 passed'",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -nE '^def test_' tests/test_per_camera_subjects.py | wc -l -> >= 6",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -m py_compile tests/test_per_camera_subjects.py && echo OK -> OK",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_per_camera_subjects.py -q --no-header 2>&1 | grep -E 'passed|failed' -> '6 passed'"
+      ],
+      "files_modified": ["tests/test_per_camera_subjects.py"],
+      "notes": "Six test cases: (1) test_front_solo_person_routes_to_person -- FRONT camera, detection=(person, 0.61), no vehicle -> classification='person', reason contains 'top_subject_wins' or similar, NOT 'high_conf_person_not_vehicle'. (2) test_front_solo_vehicle_suppressed -- FRONT, detection=(truck, 0.76), no person -> classification='none', reason='top_class_truck_not_in_subjects'. (3) test_front_mixed_person_vehicle_routes_to_person -- FRONT, detections=[(person, 0.61), (car, 0.55)] -> classification='person' (vehicle is not in subjects). (4) test_outside_front_solar_unchanged -- OUTSIDE_FRONT_SOLAR, detection=(truck, 0.76), no person -> classification='vehicle' (current behavior preserved). (5) test_outside_front_solar_solo_person_suppressed_as_before -- OUTSIDE_FRONT_SOLAR, detection=(person, 0.61), no vehicle -> classification='none', reason='high_conf_person_not_vehicle' (old literal still works on cameras without 'subjects'). (6) test_back_mirror_front -- BACK camera, solo-person -> routes to person pipeline (same as FRONT). The tests use synthetic Detection/namedtuple objects matching infra/gate.py's input shape; do NOT spin up the real YOLO model. Tests must complete in <5 seconds.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": null,
+      "story_size_budget": 2500
+    },
+    {
+      "id": "US-055d",
+      "title": "scripts/smoke_per_camera_subjects.py -- end-to-end smoke test importing real gate + synthetic detections",
+      "story_type": "script",
+      "scope": "scripts/smoke_per_camera_subjects.py (new file)",
+      "assignee": "qa",
+      "depends_on": ["US-055a", "US-055b", "US-055c"],
+      "estimated_lines": 75,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python scripts/smoke_per_camera_subjects.py 2>&1 | tail -25 -> 'SMOKE OK'",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -nE 'SMOKE OK' scripts/smoke_per_camera_subjects.py | wc -l -> >= 1",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -m py_compile scripts/smoke_per_camera_subjects.py && echo OK -> OK",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && bash -c 'set -e; .venv/bin/python scripts/smoke_per_camera_subjects.py && echo PASS' -> PASS"
+      ],
+      "files_modified": ["scripts/smoke_per_camera_subjects.py"],
+      "notes": "End-to-end smoke test that imports the real infra.gate module (no mocks) and exercises every camera's subjects routing with synthetic detection tuples. The script: (a) loads motion_gate_thresholds.json, asserts FRONT.subjects==BACK.subjects==['person','animal'] and the 4 perimeter cameras lack 'subjects'. (b) calls the gate function for each of the 6 test cases from US-055c with real Detection-shaped inputs, asserts the routing matches the operator's intent. (c) prints 'SMOKE OK' and exits 0 on success, prints the failing case and exits 1 on failure. The script is safe to run repeatedly (no side effects, no log writes, no webhook calls). Add to scripts/ alongside the existing scripts/smoke_alert_native.py and scripts/smoke_log_rotation.py. Reference the existing script style; do not introduce new dependencies.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": null,
+      "story_size_budget": 2500
+    }
+  ]
+}
