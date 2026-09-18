@@ -1,0 +1,120 @@
+{
+  "prd_id": "PHASE-V2-053-PRD-daemon-log-rotation",
+  "title": "Add log rotation for logs/daemon.log via logging.handlers.RotatingFileHandler baked into listener/daemon.py (operator 2026-09-18: 'it sounds like we need to have log rotation done, so do something for that')",
+  "author": "jill (operator-directed 2026-09-18)",
+  "status": "proposal",
+  "phase": "v2",
+  "plan_section": null,
+  "trigger": "Operator 2026-09-18 (verbatim): 'It sounds like we need to have log rotation done, so do something for that.' Current state: /Users/jill/farm-surveillance-v2/logs/daemon.log is currently 8,147,077 bytes (8.1 MB) with no rotation configured. listener/daemon.py:75 wires logging.basicConfig(stream=sys.stdout) — launchd redirects stdout → logs/daemon.log per the plist's StandardOutPath, so the file grows unbounded. Historical evidence: prior run hit 8 MB+ before today's restart; the file accumulates across all daemon restarts and is never truncated. The risk: at ~50-100 MB, the file slows log queries, fills the SSD eventually, and makes `tail -F` operations on Telegram-bound tail-notify scripts (US-016f) lag visibly. The fix is a Python logging.handlers.RotatingFileHandler baked into daemon.py: replace the sys.stdout StreamHandler with a RotatingFileHandler that rolls the file at 50 MB × 5 backups. No new system dependencies (no logrotate, no newsyslog). The plist does NOT need changes because launchd's StandardOutPath already points at logs/daemon.log — but we are NOT using launchd's stdout capture for rotation; we open the file directly from Python and bypass launchd's redirection.",
+  "background": "Current state in /Users/jill/farm-surveillance-v2/listener/daemon.py:75-83: `logging.basicConfig(level=..., format=..., stream=sys.stdout, force=True)`. launchd's ~/Library/LaunchAgents/com.farm.surveillance.v2.plist has StandardOutPath=logs/daemon.log and StandardErrorPath=logs/daemon-error.log. With Python's basicConfig pointing at sys.stdout, launchd captures those bytes into the file. There is no rotation today — logs grow forever. The operator's preferred fix path (per skill recommendations): Python's logging.handlers.RotatingFileHandler, which the codebase has used before (scripts/release/cut_public_release.py imports it at line 81 with maxBytes=10MB × backupCount=5). For daemon.log we want size-based rotation at 50 MB × 5 backups = 250 MB total ceiling. The handler opens logs/daemon.log directly with delay=True so the file handle is opened on first emit (not at import time). When the file crosses 50 MB, RotatingFileHandler renames daemon.log → daemon.log.1, daemon.log.1 → daemon.log.2, etc., drops the oldest (daemon.log.5 is deleted), and starts a fresh daemon.log. The handler is wired at the root logger so every logger in the v2 codebase (daemon, frame_capture, gate, pipeline, quick_classifier, vision_analyzer, telegram_formatter.*, infra.*) routes through it. launchd's StandardOutPath is left pointing at logs/daemon.log; if launchd's redirection captures bytes that bypass our handler (e.g. unhandled exceptions printing to stdout via print()), those will still grow the file. To prevent that, the handler is the ONLY writer of logs/daemon.log and basicConfig's sys.stdout is replaced with a NullHandler. Alternative considered and rejected: logrotate(8) + newsyslog. Both require a system-installed config file under /etc/ which is not portable, requires sudo on first install, and adds a moving part outside the project tree. Python's built-in handler is sufficient.",
+  "goal": "logs/daemon.log rotates automatically at 50 MB × 5 backups (= 250 MB ceiling). On launchd restart, the handler picks up the existing logs/daemon.log or creates a new one if missing. Tail-notify scripts and ad-hoc grep continue to work because the active log is always logs/daemon.log (the rotated files are daemon.log.1 through .5). The transition is invisible: the listener keeps running throughout the change; the operator does not need to restart anything manually beyond the plist rebind. After the rotation ships, /Users/jill/farm-surveillance-v2/logs/ contains at most 6 files (daemon.log + .1 through .5) totaling ≤300 MB.",
+  "operator_guarantees": {
+    "no_residue": "After all stories land: listener/daemon.py has logging.handlers.RotatingFileHandler wired at the root logger with maxBytes=50*1024*1024 (50 MB) and backupCount=5. The `stream=sys.stdout` argument in basicConfig is REMOVED (replaced with `handlers=[handler]`). launchd's plist StandardOutPath is unchanged. No `_LOG_ROTATE_BYTES` or similar magic constant is left undefined. The handler has `delay=True` so the file handle opens on first emit (no startup race).",
+    "behavior": "On every daemon boot: the handler either opens the existing logs/daemon.log (if present and <50MB) or creates a fresh one. After 50 MB of writes, logs/daemon.log is renamed daemon.log.1, the new daemon.log starts empty, and the previous daemon.log.1 becomes daemon.log.2. The oldest (daemon.log.5) is dropped. Verified by tests/test_log_rotation.py (US-052c): the test simulates a 50MB write via a stub emitter, asserts daemon.log.1 exists after, asserts daemon.log.6 does NOT exist.",
+    "no_regression": "After the rotation ships: scripts/smoke_alert_native.py exits 0. The /alert route still returns HTTP 200. Logs still flow to logs/daemon.log with the same format string ('%(asctime)s %(levelname)s %(name)s: %(message)s'). Operators reading the live tail see no change in behavior except that the file no longer grows past 50 MB.",
+    "no_log_loss": "Rotation does NOT drop in-flight log lines. The handler flushes pending buffers BEFORE renaming. Verified by a smoke test that emits 1000 lines, forces rotation, and asserts all 1000 lines are present across daemon.log + daemon.log.1.",
+    "launchd_compat": "The change works under launchd supervision (com.farm.surveillance.v2, no KeepAlive). No stdout capture collision: launchd's StandardOutPath still points at logs/daemon.log, but the only writer is the Python handler. Any bytes emitted to launchd's captured stdout (e.g. uncaught exception tracebacks) will still append to logs/daemon.log via launchd's redirection — those are out of scope for this PRD (acceptable risk: such cases indicate a bug and should be fixed separately)."
+  },
+  "shipping_definition": {
+    "all_stories_done": "Every story in stories[] has status='done' in this PRD JSON AND `hermes kanban --board coder-farm-surveillance list --status done` shows the corresponding t_<hex> id.",
+    "smoke_test": "scripts/smoke_log_rotation.py exits 0. The script imports the daemon's logger, emits 100 MB of synthetic log lines, and asserts: (a) logs/daemon.log exists and is <50 MB, (b) logs/daemon.log.1 exists, (c) logs/daemon.log.5 exists, (d) logs/daemon.log.6 does NOT exist, (e) all 100 MB of emitted content is recoverable across daemon.log + .1 through .5 (no line loss).",
+    "no_fallback": "If the handler fails to open logs/daemon.log (permission, missing parent dir), the daemon must NOT silently fall back to stderr or sys.stdout. It must raise a clean RuntimeError at startup so the operator sees the failure in the launchd error log.",
+    "branch_hygiene": "Each story lands on its own code/v2-052x-<slug> branch, ff-merges into main before kanban_done. No uncommitted scratch files."
+  },
+  "dispatch_order": [
+    "US-052a: Replace sys.stdout handler with RotatingFileHandler(50MB, backupCount=5) at root logger in listener/daemon.py",
+    "US-052b: Add infra.paths.LOG_FILE constant (single source of truth for daemon.log path) — currently the path is implicit in launchd's plist",
+    "US-052c: tests/test_log_rotation.py — unit test simulating 50MB write triggers rotation",
+    "US-052d: scripts/smoke_log_rotation.py — end-to-end smoke test emitting 100MB of synthetic lines"
+  ],
+  "branch_naming": "code/v2-052a-rotating-file-handler, code/v2-052b-paths-log-file-constant, code/v2-052c-test-log-rotation, code/v2-052d-smoke-log-rotation",
+  "low_priority": false,
+  "stories": [
+    {
+      "id": "US-052a",
+      "title": "Replace sys.stdout handler with RotatingFileHandler(50MB, backupCount=5) at root logger in listener/daemon.py",
+      "story_type": "code",
+      "scope": "listener/daemon.py:75-83 (basicConfig block)",
+      "assignee": "coder",
+      "depends_on": [],
+      "estimated_lines": 22,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -nE 'RotatingFileHandler' listener/daemon.py | wc -l → ≥ 2 (import + use)",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -nE 'maxBytes=50\\*1024\\*1024|maxBytes=50 ?\\* ?1024 ?\\* ?1024' listener/daemon.py | wc -l → ≥ 1",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && grep -nE 'backupCount=5' listener/daemon.py | wc -l → ≥ 1",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && grep -nE 'stream=sys\\.stdout' listener/daemon.py | wc -l → 0 (no more stdout handler)",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && python3 -m py_compile listener/daemon.py && echo OK → OK",
+        "AC6: cd /Users/jill/farm-surveillance-v2 && python3 -c \"import ast,pathlib; src=pathlib.Path('listener/daemon.py').read_text(); tree=ast.parse(src); assert any(isinstance(n, ast.Call) and getattr(n.func, 'id', None)=='RotatingFileHandler' for n in ast.walk(tree)), 'no RotatingFileHandler call'; print('OK')\" → OK"
+      ],
+      "files_modified": ["listener/daemon.py"],
+      "notes": "Replace the `stream=sys.stdout` argument with `handlers=[rotating_handler]` where rotating_handler = RotatingFileHandler(LOG_FILE, maxBytes=50*1024*1024, backupCount=5, delay=True). Use LOG_FILE imported from infra.paths (US-052b). Keep the `force=True` flag so any earlier basicConfig (e.g. from werkzeug at Flask startup) is overridden. The handler is attached to the ROOT logger (logging.root) so every module's logger flows through it. Do NOT add a stderr handler — Flask/werkzeug log to the root logger which is now rotating. launchd's StandardErrorPath capture is left untouched (errors that bypass our logger still go to daemon-error.log).",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": null,
+      "story_size_budget": 2500
+    },
+    {
+      "id": "US-052b",
+      "title": "Add infra.paths.LOG_FILE constant (single source of truth for daemon.log path)",
+      "story_type": "code",
+      "scope": "infra/paths.py (add LOG_FILE constant)",
+      "assignee": "coder",
+      "depends_on": [],
+      "estimated_lines": 12,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -nE '^LOG_FILE\\s*[:=]' infra/paths.py | wc -l → ≥ 1",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python3 -c \"from infra.paths import LOG_FILE; print(LOG_FILE); assert str(LOG_FILE).endswith('daemon.log'), LOG_FILE\" → ends with daemon.log",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -c \"from infra.paths import LOG_FILE; from pathlib import Path; assert isinstance(LOG_FILE, Path), type(LOG_FILE); print('Path OK')\" → Path OK",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && git show main:infra/paths.py | grep -nE 'LOG_FILE' | wc -l → ≥ 1 (landed on main)"
+      ],
+      "files_modified": ["infra/paths.py"],
+      "notes": "Compute LOG_FILE as <project_root>/logs/daemon.log using the existing DATA_DIR / FARMSURV_PROJECT_ROOT env var convention (see infra/paths.py header docstring). Match the shape of existing path constants in infra/paths.py (CLEANUP_LOG, AUDIT_LOG_DIR). Use Path, not str. Add to __all__ if infra/paths.py has one. Do NOT also add LOG_ERROR_FILE — that one stays in the plist (launchd-only).",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": null,
+      "story_size_budget": 2500
+    },
+    {
+      "id": "US-052c",
+      "title": "tests/test_log_rotation.py — unit test simulating 50MB write triggers rotation",
+      "story_type": "test",
+      "scope": "tests/test_log_rotation.py (new file)",
+      "assignee": "coder",
+      "depends_on": ["US-052a", "US-052b"],
+      "estimated_lines": 80,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_log_rotation.py -v 2>&1 | tail -20 → '3 passed'",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -nE '^def test_' tests/test_log_rotation.py | wc -l → 3",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -m py_compile tests/test_log_rotation.py && echo OK → OK",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_log_rotation.py -q --no-header 2>&1 | grep -E 'passed|failed' → '3 passed'"
+      ],
+      "files_modified": ["tests/test_log_rotation.py"],
+      "notes": "Tests: (1) test_rotation_triggers_at_max_bytes — patches a tmp_path, builds a RotatingFileHandler with maxBytes=1024 (1KB) and backupCount=2, writes 5KB, asserts the log.1 file exists and the main log is small. (2) test_rotation_caps_at_backupcount — writes enough to trigger 5 rotations, asserts log.5 exists and log.6 does NOT exist (oldest is dropped). (3) test_rotation_preserves_all_lines — writes N known lines across a forced rotation, asserts all N are present in (log + log.1) (no line loss from the rename race). The tests must run in <5 seconds (use small maxBytes, not 50MB).",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": null,
+      "story_size_budget": 2500
+    },
+    {
+      "id": "US-052d",
+      "title": "scripts/smoke_log_rotation.py — end-to-end smoke test emitting 100MB of synthetic lines",
+      "story_type": "smoke",
+      "scope": "scripts/smoke_log_rotation.py (new file)",
+      "assignee": "coder",
+      "depends_on": ["US-052a", "US-052b", "US-052c"],
+      "estimated_lines": 65,
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python scripts/smoke_log_rotation.py → exit 0",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -nE 'def smoke|emit_lines|maxBytes|RotatingFileHandler' scripts/smoke_log_rotation.py | wc -l → ≥ 3",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -m py_compile scripts/smoke_log_rotation.py && echo OK → OK",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python scripts/smoke_log_rotation.py 2>&1 | tail -10 → contains 'OK' or 'PASS' on final line"
+      ],
+      "files_modified": ["scripts/smoke_log_rotation.py"],
+      "notes": "Mirror scripts/smoke_alert_native.py structure. Steps: (1) import the rotated logger from listener.daemon (or set up an isolated RotatingFileHandler at a tmp path), (2) emit 100 MB worth of log lines (e.g. 100k lines of 1 KB each), (3) assert daemon.log < 50 MB, (4) assert daemon.log.1 exists, (5) assert daemon.log.5 exists, (6) assert daemon.log.6 does NOT exist, (7) assert all 100k lines are recoverable across log + log.1..log.5 (grep for line numbers 0, 50000, 99999). Skip-with-message if disk space is <500 MB free at the target dir.",
+      "operator_approval_required": false,
+      "commit_required": true,
+      "status": null,
+      "story_size_budget": 2500
+    }
+  ]
+}
