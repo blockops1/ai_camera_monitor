@@ -1,0 +1,70 @@
+{
+  "$schema": "https://farm-surveillance.local/schemas/phased-prd-v2.json",
+  "id": "PHASE-V2-058",
+  "title": "Eliminate shared per-camera frame_N.png paths to stop alert-image time-skew bug",
+  "status": "draft",
+  "created": "2026-09-18T13:25:00-04:00",
+  "trigger": "Alert cb12fa36-326b-4d65-a968-a1abb1c9aee7 (OUTSIDE_BACK_SOLAR, 2026-09-18 13:11:22 EDT) fired Telegram TG#1 with composite.png from camera-timestamp 13:11:20 (correct, 2s before alert) AND full_frame frame_002.png from camera-timestamp 13:11:40 (20s AFTER the alert). Operator noticed the 20-second gap; expected <=4 seconds.",
+  "context": "PRD-V2-014 ring buffer design uses per-camera shared filenames frame_001.png .. frame_004.png. The listener writes those files at webhook arrival via infra.frame_capture.get_recent_frames, then passes the paths into the pipeline. Inside the pipeline, motion_gate takes 50-100s (vision LLM latency), then stage_prepare_artifacts writes AlertArtifacts.full_frame_path = frame_paths[1] WITHOUT COPYING the bytes. By the time TG#1 actually uploads (130s after webhook), a different alert's get_recent_frames call may have unlinked-and-rewritten frame_002.png. The path is stable, the file content is not. Camera-burned timestamps in both images prove the time skew directly.",
+  "scope": [
+    "infra/frame_capture.py: get_recent_frames now returns a per-call UUID-suffixed output_dir (or writes to a caller-specified dir)",
+    "listener/daemon.py webhook handler: alert_id first, per-alert output_dir, get_recent_frames(camera_id, n=4, output_dir=alert_dir)",
+    "infra/alert_artifacts.py AlertArtifacts: drop the full_frame_path field -- the field duplicates the composite and is the failure-mode entry point",
+    "TG#1/TG#2/TG#3 dispatchers: drop full_frame_path read; reference composite_path directly",
+    "tests/test_alert_route.py + new test_alert_frame_stability.py: prove per-alert frames are time-stable under concurrent alerts"
+  ],
+  "out_of_scope": [
+    "Renaming frame_*.png filenames in the per-camera shared buffer (they remain canonical ring fallback)",
+    "Changing gate.py motion-diff logic or vision-LLM model choices",
+    "Telegram sendMediaGroup JSON encoding (covered by US-056b)",
+    "Ring buffer sizing (covered by US-057a)"
+  ],
+  "stories": [
+    {
+      "id": "US-058a",
+      "title": "Write 4 source frames to per-alert directory at webhook arrival; remove full_frame_path",
+      "description": "Eliminate the shared per-camera frame_NNN.png file. webhook handler derives alert UUID first, calls get_recent_frames(camera_id, n=4, output_dir=alert_dir) which writes frame_001..004 directly under data/frames/<camera>/<alert_id>/frame_NNN.png. infra.alert_artifacts.AlertArtifacts drops the full_frame_path field. TG#1 formatter falls back to composite_path when no full_frame_path exists. Bytes copied once, time-stable thereafter.",
+      "in_scope": [
+        "infra/frame_capture.py get_recent_frames() overload accepting output_dir parameter; new behavior: _clean_old in caller's output_dir (not the per-camera one); 4 PNGs land in output_dir/frame_NNN.png.",
+        "listener/daemon.py webhook handler: alert_id = alert.get('id') or str(uuid.uuid4()); output_dir = data_dir_for(camera_id, alert_id); get_recent_frames(camera_id, n=4, output_dir=output_dir).",
+        "infra/alert_artifacts.py AlertArtifacts: drop full_frame_path field; drop the `frame_paths[1]` capture in prepare_alert_artifacts.",
+        "infra/alert_artifacts.py prepare_alert_artifacts: signature stays -- drop frame_paths parameter entirely; only need crop_a, crop_b, composite.",
+        "telegram_formatter/match_alert.py build_alert_message: references to artifacts.full_frame_path fall back to artifacts.composite_path.",
+        "telegram_formatter/dispatcher.py: any full_frame_path key in send_media_group payload replaced with composite_path.",
+        "tests/test_alert_route.py: drop full_frame_path assertion; if a test was expecting the shared per-camera path, update it to expect the per-alert path.",
+        "docs/V2-LOGIC-FLOW.md: update the webhook-stage flow description; replace `frame_paths[1]` references with composite-only flow."
+      ],
+      "acceptance": [
+        "AC1: get_recent_frames accepts output_dir kwarg; old behavior (write to per-camera dir) preserved ONLY when output_dir is None or omitted AND caller is unchanged.",
+        "AC2: webhook handler at listener/daemon.py writes frame_001..004 directly into data/frames/OUTSIDE_BACK_SOLAR/<alert_id>/frame_NNN.png with saved-mtime and pixel content stable across pipeline execution (verified by re-reading after motion_gate completes).",
+        "AC3: AlertArtifacts dataclass has no full_frame_path attribute (grep -rn 'full_frame_path' infra/alert_artifacts.py returns 0 lines).",
+        "AC4: .venv/bin/python3.11 -c 'from infra.alert_artifacts import AlertArtifacts; a = AlertArtifacts(crop_a_path=\"a\", crop_b_path=\"b\", composite_path=\"c\"); print(a)' does NOT raise TypeError about missing full_frame_path arg.",
+        "AC5: .venv/bin/python3.11 -m pytest tests/ -q --no-header 2>&1 | tail -3 | grep -qE 'passed' AND no test imports `full_frame_path`.",
+        "AC6: git grep -nE 'frame_paths\\[1\\]' -- ':!**/*.pyc' returns 0 matches.",
+        "AC7: git grep -nE 'full_frame_path' -- ':!**/*.pyc' returns 0 matches (or only in dispatchers where it falls back to composite_path, with a comment explaining why).",
+        "AC8: cd /Users/jill/farm-surveillance-v2 && git merge-base --is-ancestor $(git rev-parse HEAD) main && echo OK || echo MISSING."
+      ]
+    },
+    {
+      "id": "US-058b",
+      "title": "Tests: per-alert frame stability under concurrent alerts (regression test for the bug)",
+      "description": "After US-058a ships, the per-alert frames are time-stable. Add tests that prove it: enqueue two alerts on the same camera in quick succession, drive them both through the pipeline, and assert each alert's frame_NNN.png on disk matches the bytes snapshotted at webhook arrival. The test should also assert that the AlertArtifacts composite bytes match the per-alert frame_002 bytes (modulo composite-renderer overlay text). If a regression reintroduces shared filenames, the test catches it.",
+      "in_scope": [
+        "tests/test_alert_frame_stability.py (new): two concurrent alerts on the same camera; for each alert, snap frame_001..004 mtimes + sha256 at webhook; assert unchanged after motion_gate completes + alert_artifacts stage runs.",
+        "tests/test_alert_frame_stability.py: third test asserts AlertArtifacts.composite_path equals composite bytes generated from the snapshotted frames (so the operator's complaint about time-skew is provably impossible)."
+      ],
+      "acceptance": [
+        "AC1: .venv/bin/python3.11 -m pytest tests/test_alert_frame_stability.py -q --no-header 2>&1 | tail -3 | grep -qE '[0-9]+ passed' AND all passed.",
+        "AC2: The test's sha256 snapshots are taken AFTER motion_gate completes (i.e. simulates the original bug), and the alert's frame_001..004 mtimes are unchanged between webhook arrival and TG#1 dispatch.",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && git merge-base --is-ancestor $(git rev-parse HEAD) main && echo OK || echo MISSING."
+      ]
+    }
+  ],
+  "ordering": [
+    "US-058a MUST land before US-058b",
+    "US-058a MUST wait for US-056b and US-057a to complete"
+  ],
+  "estimated_loc_delta": "+45 net (US-058a: +20 in frame_capture/daemon/alert_artifacts, -8 by dropping full_frame_path, +25 in match_alert/dispatcher fallback; US-058b: +60 new tests)",
+  "estimated_stories": 2,
+  "risk": "Low. The change only affects how frame paths are written and how AlertArtifacts dataclass is constructed. Existing tests that import AlertArtifacts or assert full_frame_path need updating in US-058a itself (in_scope)."
+}
