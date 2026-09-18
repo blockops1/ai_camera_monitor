@@ -21,14 +21,14 @@
       "title": "Shrink ring buffer from 180 to 12 frames",
       "target_file": "infra/frame_capture.py",
       "branch": "code/v2-057a-ring-buffer-size-12",
-      "description": "Reduce RING_SIZE_DEFAULT constant from 180 to 12. Each PIL.Image in the deque occupies ~2.64 MB raw bytes (1280x720 RGB), so shrinking 180 -> 12 reclaims ~440 MB per camera. Across 6 cameras (BACK, FRONT, OUTSIDE_BACK_SOLAR, OUTSIDE_FRONT_GARAGE, OUTSIDE_FRONT_POWER, OUTSIDE_FRONT_SOLAR) that is ~2.5 GB total. The gate contract (4 frames minimum) stays unchanged at infra/gate.py. Justification: 2 fps decode rate * 12 frames = 6 seconds of buffer, which is 2 seconds more than the 4-frame minimum the gate requires. Verified via /debug/rtsp that all 6 cameras decode at 2.0 fps. No production code path reads deeper than 4 frames from the ring."
+      "description": "Reduce RING_SIZE_DEFAULT constant from 180 to 12. Each PIL.Image in the deque occupies ~2.64 MB raw bytes (1280x720 RGB), so shrinking 180 -> 12 reclaims ~440 MB per camera. Across 6 cameras (BACK, FRONT, OUTSIDE_BACK_SOLAR, OUTSIDE_FRONT_GARAGE, OUTSIDE_FRONT_POWER, OUTSIDE_FRONT_SOLAR) that is ~2.5 GB total. The gate contract (4 frames minimum) stays unchanged at infra/gate.py. Justification: 2 fps decode rate * 12 frames = 6 seconds of buffer, which is 2 seconds more than the 4-frame minimum the gate requires. Verified via /debug/rtsp that all 6 cameras decode at 2.0 fps. No production code path reads deeper than 4 frames from the ring.\n\nAlso update stale documentation references:\n- README.md line 18: '180-frame lossless-ish JPEG ring per camera' -> '12-frame lossless PNG ring per camera'.\n- docs/V2-LOGIC-FLOW.md line 137: '180-frame rolling buffer (deque(maxlen=180))' -> '12-frame rolling buffer (deque(maxlen=12))'."
     },
     {
       "id": "US-057b",
       "title": "Remove dead offset_seconds=6 mtime filter",
       "target_file": "infra/frame_capture.py",
       "branch": "code/v2-057b-drop-dead-offset-filter",
-      "description": "Module-level get_recent_frames() (infra/frame_capture.py:680-704) filters PNG paths by os.path.getmtime(p) >= now - 6. But mtime is set inside _save_frames when the PNG is written to disk, and all 4 paths are written in the same call within microseconds. So mtimes are effectively identical, and the cutoff check 'ages >=6s' always passes. Drop the filter and the offset_seconds parameter entirely. Update the alert handler call site at listener/daemon.py:444."
+      "description": "Module-level get_recent_frames() (infra/frame_capture.py:680-704) filters PNG paths by os.path.getmtime(p) >= now - 6. But mtime is set inside _save_frames when the PNG is written to disk, and all 4 paths are written in the same call within microseconds. So mtimes are effectively identical, and the cutoff check 'ages >=6s' always passes. Drop the filter and the offset_seconds parameter entirely. Update the alert handler call site at listener/daemon.py:444.\n\nAlso update stale documentation references:\n- docs/V2-LOGIC-FLOW.md lines 57, 119, 131: three references to offset_seconds=6 and the mtime filter must be removed/replaced. After fix, the diagram should show get_recent_frames(camera_id, n=4) without offset_seconds, and the 'filter by mtime' step disappears."
     }
   ]
 }
