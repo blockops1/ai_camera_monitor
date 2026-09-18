@@ -54,5 +54,12 @@ yolov8n_static_640.onnx
 *.weights
 yolo*.pt
 
+# CoreML scratch artifacts (created when scripts run ONNX through CoreML EP;
+# contains compiled_model.mlmodelc + dynamic_nn shape variants — large, not source)
+/[0-9]_*/        # CoreML plan-builder cache dirs left behind by /tmp scripts
+/1/
+/2/
+/3/
+
 # git worktrees (moved to ~/archive/v2-worktrees-YYYY-MM-DD when done)
 .worktrees/

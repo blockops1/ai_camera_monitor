@@ -57,6 +57,7 @@ RELATED:
 from __future__ import annotations
 
 import logging
+import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -271,15 +272,17 @@ class QuickClassifier:
             raise SystemExit(1)
 
         # Use CoreML execution provider if available (Apple Silicon GPU/ANE),
-        # fall back to CPU otherwise.
+        # fall back to CPU otherwise. With the 640x640 letterbox preprocessor
+        # in classify_frame(), CoreML compiles one plan for the canonical
+        # shape and never recompiles — no shape-related crashes.
         providers = ort.get_available_providers()
         preferred = [
             p for p in ("CoreMLExecutionProvider", "CPUExecutionProvider")
             if p in providers
-        ]
-        log.info(f"quick_classifier: loading {model_path} with providers={preferred}")
-
-        # CoreML provider has CPU+ANE+GPU sub-options; defaults are fine for us.
+        ] or ["CPUExecutionProvider"]
+        log.info(
+            f"quick_classifier: loading {model_path} with providers={preferred}"
+        )
         self.session = ort.InferenceSession(model_path, providers=preferred)
         self.input_name = self.session.get_inputs()[0].name
         self.output_name = self.session.get_outputs()[0].name
@@ -324,24 +327,47 @@ class QuickClassifier:
                     n_detections=0,
                 )
 
-        # Preprocess: pad to multiple-of-32, normalize to [0,1], NCHW float32
-        img_array = np.asarray(img, dtype=np.float32) / 255.0
-        h, w = img_array.shape[:2]
-        h_p, w_p = pad_to_multiple_of_32(h, w)
-        # Zero-pad right+bottom to reach (h_p, w_p)
-        if (h_p, w_p) != (h, w):
-            img_array = np.pad(
-                img_array,
-                ((0, h_p - h), (0, w_p - w), (0, 0)),
-                mode="constant",
-                constant_values=0,
-            )
-        img_array = img_array.transpose(2, 0, 1)[None]  # HWC -> CHW -> NCHW
+        # Preprocess: letterbox to 640x640, normalize to [0,1], NCHW float32.
+        # Letterboxing (resize + center on 640x640 black canvas) replaces the
+        # old pad-to-multiple-of-32 pipeline. Reason: CoreML's plan-builder
+        # fails on input shapes outside its safe envelope (a documented
+        # defect, microsoft/onnxruntime#20372) — wide crops (e.g. 512x1728)
+        # and tall crops (e.g. 1728x512) raise "dynamically resizing for
+        # sequence length" on every shape after the first, and the failure
+        # is sticky per session. Letterboxing guarantees a single canonical
+        # input shape (1, 3, 640, 640), which CoreML compiles one plan for
+        # and never recompiles — no crashes, no plan-builder surprises.
+        # The model is fully convolutional and was trained at 640x640, so
+        # letterboxed inputs are within its expected distribution.
+        img_array = _letterbox_640(img)
+        h = w = 640
 
         # Inference
-        raw_output = self.session.run(
-            [self.output_name], {self.input_name: img_array}
-        )[0]  # shape: (1, 84, N) — 4 bbox + 80 class scores per anchor
+        try:
+            raw_output = self.session.run(
+                [self.output_name], {self.input_name: img_array}
+            )[0]
+        except Exception as primary_err:
+            # CoreML plan-builder can fail on certain input shapes with
+            # "Failure dynamically resizing for sequence length" — a known
+            # CoreML EP defect (microsoft/onnxruntime#20372). With the
+            # 640x640 letterbox preprocessor above, this should never fire
+            # — but if it does, we log the failure to JSONL so we can see
+            # what shape reached the model. We do NOT silently fall back
+            # to CPU: that path was 5-10x slower and operator (2026-09-17)
+            # asked to lock every CPU use for review. The caller will see
+            # the exception and route accordingly.
+            err_msg = str(primary_err).split("\n")[0][:120]
+            _log_coreml_failure(
+                shape_in=getattr(img, "size", None),
+                shape_to_model=tuple(img_array.shape),
+                err=err_msg,
+            )
+            log.exception(
+                f"quick_classifier: CoreML inference failed on "
+                f"shape {tuple(img_array.shape)}: {err_msg}"
+            )
+            raise
         # Ensure 2D (84, N) for postprocess
         output_2d: np.ndarray = np.asarray(raw_output).reshape(84, -1)
 
@@ -581,6 +607,91 @@ def _nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float) -> np.ndar
 # ---------------------------------------------------------------------------
 # Image preprocessing
 # ---------------------------------------------------------------------------
+
+# CoreML's plan-builder has a documented defect (microsoft/onnxruntime#20372):
+# it fails on input shapes outside a narrow envelope (≤640 in both dims,
+# aspect ratio ≤ ~2), and once a session has been bound to a shape, subsequent
+# calls with different shapes trigger plan recompilation that fails with
+# "Failure dynamically resizing for sequence length" — a sticky per-session
+# failure. Letterboxing every crop to a fixed 640x640 is the simplest way to
+# guarantee one canonical input shape that CoreML handles reliably.
+LETTERBOX_SIZE = 640
+
+# Operator directive (2026-09-17): any path that ends up running inference on
+# CPU must be recorded for review — not silently substituted. We log to JSONL
+# so the operator can grep it later and decide what to do. Path is resolved
+# relative to the repo root (above infra/) so the logger works no matter where
+# the daemon is started from.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+COREML_FAILURE_LOG = REPO_ROOT / "logs" / "coreml_failures.jsonl"
+
+
+def _letterbox_640(img: Image.Image) -> np.ndarray:
+    """Letterbox a PIL.Image to a (1, 3, 640, 640) NCHW float32 tensor in [0,1].
+
+    The image is resized so its longer side becomes 640 (preserving aspect
+    ratio), then centered on a 640x640 black canvas. Output is the canonical
+    input shape for YOLOv8n trained at 640x640.
+
+    Returns a numpy array with shape (1, 3, 640, 640), dtype float32, range
+    [0, 1].
+    """
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    w, h = img.size
+    if (h, w) == (LETTERBOX_SIZE, LETTERBOX_SIZE):
+        arr = np.asarray(img, dtype=np.float32) / 255.0
+        return arr.transpose(2, 0, 1)[None]
+
+    # Compute scale to fit the longer side to 640, preserving aspect ratio.
+    scale = LETTERBOX_SIZE / max(h, w)
+    new_h = int(round(h * scale))
+    new_w = int(round(w * scale))
+    # Round to nearest multiple of 32 (YOLO stride) so the model gets a clean
+    # spatial shape.
+    new_h = max(32, (new_h + 16) // 32 * 32)
+    new_w = max(32, (new_w + 16) // 32 * 32)
+
+    resized = img.resize((new_w, new_h), Image.Resampling.BILINEAR)
+
+    # Center on 640x640 black canvas.
+    canvas = np.zeros((LETTERBOX_SIZE, LETTERBOX_SIZE, 3), dtype=np.uint8)
+    pad_top = (LETTERBOX_SIZE - new_h) // 2
+    pad_left = (LETTERBOX_SIZE - new_w) // 2
+    canvas[pad_top:pad_top + new_h, pad_left:pad_left + new_w] = np.array(resized)
+
+    arr = canvas.astype(np.float32) / 255.0
+    return arr.transpose(2, 0, 1)[None]  # HWC -> CHW -> NCHW
+
+
+def _log_coreml_failure(
+    shape_in: tuple[int, int] | None,
+    shape_to_model: tuple[int, int, int, int],
+    err: str,
+) -> None:
+    """Append a JSONL record describing a CoreML inference failure.
+
+    With the 640x640 letterbox preprocessor this should never fire — but if
+    it does, the operator (2026-09-17) wants the failure recorded for review
+    rather than silently swallowed. The file is appended-to, never truncated.
+    """
+    try:
+        COREML_FAILURE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with COREML_FAILURE_LOG.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "shape_in": list(shape_in) if shape_in else None,
+                        "shape_to_model": list(shape_to_model),
+                        "err": err,
+                    }
+                )
+                + "\n"
+            )
+    except Exception as log_err:  # don't let logging crash the caller
+        log.warning(f"quick_classifier: failed to write CoreML failure log: {log_err}")
+
 
 # ---------------------------------------------------------------------------
 # Output postprocessing (YOLOv8 ONNX format)
