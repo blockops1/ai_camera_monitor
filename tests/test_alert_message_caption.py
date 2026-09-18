@@ -314,7 +314,11 @@ class TestTg2CaptionAlertMetadata:
         # Basic lines still present
         assert "Camera: Back Yard" in caption
         assert "Mode: person" in caption
-        assert "Class confirmed: person" in caption
+        # TG#2 caption should NOT include "Class confirmed: person" — instead it
+        # renders the attribute that triggered classification (here: "black hoodie").
+        # Updated for v0.6.3 (2026-09-18): detail.py now echoes the confirmed
+        # attribute name when the classifier returns one, not just the class label.
+        assert "Class confirmed: black hoodie" in caption
 
 
 # ---------------------------------------------------------------------------
