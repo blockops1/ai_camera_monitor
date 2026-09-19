@@ -281,7 +281,13 @@ ALERT_RETENTION_DAYS = 7
 # first regardless of age. Bounded cleanup — without this, a camera
 # that floods (e.g. solar-camera-motion-storm) can blow past the time
 # retention and fill the disk.
-FRAME_MAX_BYTES = 10 * 1024 * 1024 * 1024  # 10 GB
+FRAME_MAX_BYTES = 20 * 1024 * 1024 * 1024  # 20 GB
+
+# Cleanup control knobs — environment variables for runtime tuning.
+# FARMSURV_CLEANUP_DISABLED=1  →  disables the cleanup daemon thread
+# FARMSURV_CLEANUP_INTERVAL_MIN=N  →  cleanup runs every N minutes (default 60)
+FARMSURV_CLEANUP_DISABLED = int(os.environ.get('FARMSURV_CLEANUP_DISABLED', '0'))
+FARMSURV_CLEANUP_INTERVAL_MIN = int(os.environ.get('FARMSURV_CLEANUP_INTERVAL_MIN', '60'))
 
 # Audit log rotation
 AUDIT_RETENTION_DAYS = 90
