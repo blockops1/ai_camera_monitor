@@ -60,14 +60,19 @@ class TestVerifyClass:
         """verify_class returns the parsed JSON dict on a 200 response."""
         mock_resp = _mock_httpx_post(
             200,
-            {"choices": [{"message": {"content": '{"class": "vehicle"}'}}]},
+            {"choices": [{"message": {"content": '{"class": "vehicle", "subclass": "sedan", "confidence": "likely", "count": 1, "face_visible": false, "notes": null}'}}]},
         )
         with (
             patch("infra.vision_analyzer._b64", _mock_b64),
             patch("infra.vision_analyzer.httpx.post", return_value=mock_resp),
         ):
             result = verify_class(sample_frames[0], sample_frames[1])
-        assert result == {"class": "vehicle"}
+        assert result["class"] == "vehicle"
+        assert result["subclass"] == "sedan"
+        assert result["confidence"] == "likely"
+        assert result["count"] == 1
+        assert result["face_visible"] is False
+        assert result["notes"] is None
 
     def test_verify_class_raises_on_non_200(self, sample_frames):
         """verify_class raises VisionAnalyzerError on non-200 status."""
@@ -137,7 +142,7 @@ class TestLlamaServerPayload:
         llama-server actually enforces."""
         mock_resp = _mock_httpx_post(
             200,
-            {"choices": [{"message": {"content": '{"class": "vehicle"}'}}]},
+            {"choices": [{"message": {"content": '{"class": "vehicle", "subclass": "sedan", "confidence": "likely", "count": 1, "face_visible": false, "notes": null}'}}]},
         )
         with (
             patch("infra.vision_analyzer._b64", _mock_b64),

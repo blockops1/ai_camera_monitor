@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from pathlib import Path
 
 import httpx
@@ -53,6 +54,8 @@ from infra.person_prompt import SCHEMA_JSON as PERSON_SCHEMA, build_person_promp
 from infra.unsure_prompt import SCHEMA_JSON as UNSURE_SCHEMA, build_unsure_prompt
 from infra.vehicle_prompt import SCHEMA_JSON as VEHICLE_SCHEMA, build_vehicle_prompt
 from infra.vm1_prompt import SCHEMA_JSON as VM1_SCHEMA, build_vm1_prompt
+
+log = logging.getLogger(__name__)
 
 _VISION_URL = "http://localhost:8080/v1/chat/completions"
 _VISION_MODEL = "qwen3-vl-8b"
@@ -127,19 +130,67 @@ def _post_vision(payload: dict, timeout: float) -> dict:
             f"llama-server returned {resp.status_code}: {resp.text[:300]}"
         )
     try:
-        raw = resp.json()["choices"][0]["message"]["content"]
+        body = resp.json()
+        choices = body.get("choices")
+        if not choices:
+            raise ValueError("empty choices in response")
+        msg = choices[0].get("message")
+        if msg is None:
+            raise ValueError("no message in choices[0]")
+        raw = msg.get("content")
+        if raw is None:
+            raise ValueError("no content in message")
         return json.loads(raw)
-    except (KeyError, json.JSONDecodeError, IndexError) as exc:
+    except (json.JSONDecodeError, ValueError) as exc:
         raise VisionAnalyzerError(
             f"failed to parse response: {exc}"
         ) from exc
 
 
+# VM1 response schema — hard-fail on any missing key.
+_VM1_REQUIRED_KEYS = frozenset({"class", "subclass", "confidence", "count", "face_visible", "notes"})
+
+
+def _validate_vm1(result: dict) -> dict:
+    """Validate that a VM1 response contains all required keys.
+
+    Raises VisionAnalyzerError if any required key is missing.
+    All keys mandatory; hard-fail when any key is absent.
+    """
+    missing = _VM1_REQUIRED_KEYS - result.keys()
+    if missing:
+        raise VisionAnalyzerError(
+            f"vm1 response missing required keys: {', '.join(sorted(missing))}"
+        )
+    return result
+
+
+def parse_vm1_response(raw: dict) -> dict:
+    """Parse and validate a raw VM1 JSON response.
+
+    Validates schema, logs telemetry, returns the dict for downstream use.
+    """
+    result = _validate_vm1(raw)
+    log.info(
+        "vm1: class=%s subclass=%s confidence=%s face_visible=%s count=%s",
+        result["class"],
+        result.get("subclass"),
+        result["confidence"],
+        result.get("face_visible"),
+        result.get("count"),
+    )
+    return result
+
+
 def verify_class(crop_a: str, crop_b: str) -> dict:
     """VM1: classify subject as vehicle/person/animal/unsure from 2 crops.
 
-    Server-side schema enforcement: model must emit exactly
-    {"class": <enum>, "confidence": <enum>}.
+    Server-side schema enforcement: model must emit
+    {"class": <enum>, "subclass": <str|null>, "confidence": <enum>,
+     "count": <int|null>, "face_visible": <bool|null>, "notes": <str|null>}.
+
+    Returns the validated VM1 result dict. Raises VisionAnalyzerError on
+    missing keys or parse failure.
     """
     payload = {
         "model": _VISION_MODEL,
@@ -153,7 +204,8 @@ def verify_class(crop_a: str, crop_b: str) -> dict:
         }],
         "response_format": _response_format(VM1_SCHEMA, "vm1"),
     }
-    return _post_vision(payload, timeout=30.0)
+    raw = _post_vision(payload, timeout=30.0)
+    return parse_vm1_response(raw)
 
 
 def detail_class(
