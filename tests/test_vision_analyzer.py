@@ -295,7 +295,7 @@ class TestSchemaContract:
         forbidden = {"threat_indicators", "threat_level", "threat_score"}
         assert not (forbidden & set(ANIMAL_SCHEMA["properties"].keys()))
 
-    def test_vm1_schema_keys_are_class_and_confidence(self):
-        """VM1 SCHEMA_JSON declares 'class' and 'confidence' (pipeline.py:150 reads 'class')."""
+    def test_vm1_schema_has_full_fields(self):
+        """VM1 SCHEMA_JSON declares all six fields: class, subclass, confidence, count, face_visible, notes."""
         keys = set(VM1_SCHEMA["properties"].keys())
-        assert keys == {"class", "confidence"}
+        assert keys == {"class", "subclass", "confidence", "count", "face_visible", "notes"}

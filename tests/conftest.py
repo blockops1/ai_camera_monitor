@@ -79,7 +79,11 @@ def mock_llama_server(monkeypatch):
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "choices": [{"message": {"content": '{"class": "vehicle"}'}}]
+        "choices": [{
+            "message": {
+                "content": '{"class": "vehicle", "subclass": "sedan", "confidence": "likely", "count": 1, "face_visible": false, "notes": null}'
+            }
+        }]
     }
     mock_client = MagicMock()
     mock_client.post.return_value = mock_response

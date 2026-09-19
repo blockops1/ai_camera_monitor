@@ -105,7 +105,7 @@ def _pipeline_result(classification="motion", camera_id="FRONT"):
             "confidence": 0.9,
             "reason": "test",
         },
-        "vm1_result": {"class": "vehicle", "confidence": "likely"},
+        "vm1_result": {"class": "vehicle", "subclass": "sedan", "confidence": "likely", "count": 1, "face_visible": False, "notes": None},
         "tg1": {"caption": "Vehicle detected", "photos": []},
         "vm2_result": {
             "class_confirmed": "vehicle",

@@ -67,18 +67,26 @@ def build_alert_message(
     composite_path = artifacts.composite_path
 
     cls = vm1_result["class"]
-    conf = vm1_result["confidence"]
+    subclass = vm1_result.get("subclass")
+    conf = vm1_result.get("confidence", "likely")
     notes = vm1_result.get("notes")
 
     # Extract alert metadata.
     alert_id = alert.get("id") if alert else None
     timestamp = alert.get("timestamp") if alert else None
 
+    # Build the Vision line. New VM1 schema: "class/subclass (confidence)"
+    # when subclass is present; otherwise "class (confidence)".
+    if subclass:
+        vision_line = f"Vision: {cls}/{subclass} ({conf})"
+    else:
+        vision_line = f"Vision: {cls} ({conf})"
+
     lines = [
         f"Camera: {camera_label}",
         f"Classification: {verdict.classification}",
         f"YOLO: {verdict.top_class} ({verdict.top_confidence:.2f})",
-        f"Vision: {cls} ({conf})",
+        vision_line,
     ]
     if alert_id:
         lines.append(f"Alert ID: {alert_id}")
