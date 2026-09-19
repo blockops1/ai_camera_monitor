@@ -39,6 +39,14 @@ strip_paths:
   - "data/vehicles/known_vehicles.json"
   # Maintainer release tooling (not for end-user installs)
   - "scripts/release/"
+  # Operator credentials (.env and creds.env files — gitignored but if tracked, strip)
+  - ".env"
+  - ".env.example"
+  - "camera-creds.env"
+  - "camera-creds.env.example"
+  - "telegram-creds.env"
+  - "telegram-creds.env.example"
+  - "llm-creds.env.example"
   # ML model weights (large binaries; users export via scripts/export_yolo_dynamic.py)
   - "models/yolov8n.onnx"
   - "models/*.onnx"
