@@ -48,6 +48,7 @@ import time
 from pathlib import Path
 
 from animal_matcher.match import match_animal
+from animal_matcher.storage import load_known
 from infra.alert_artifacts import prepare_alert_artifacts
 from infra.gate import GateVerdict
 from infra.paths import PERSON_KNOWN_FILE, VEHICLE_KNOWN_FILE, data_dir_for
@@ -251,7 +252,8 @@ def stage_perform_match(
         candidates = _load_person_candidates()
         return match_person(vm2_result, candidates)
     elif mode == "animal":
-        return match_animal(vm2_result, [])
+        animal_candidates = load_known()
+        return match_animal(vm2_result, animal_candidates)
     return {"matched": False}
 
 
