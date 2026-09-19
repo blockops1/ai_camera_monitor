@@ -69,6 +69,8 @@ def build_alert_message(
     cls = vm1_result["class"]
     subclass = vm1_result.get("subclass")
     conf = vm1_result.get("confidence", "likely")
+    face_visible = vm1_result.get("face_visible")
+    count = vm1_result.get("count")
     notes = vm1_result.get("notes")
 
     # Extract alert metadata.
@@ -77,10 +79,17 @@ def build_alert_message(
 
     # Build the Vision line. New VM1 schema: "class/subclass (confidence)"
     # when subclass is present; otherwise "class (confidence)".
+    # Append " face visible" when class=person and face_visible is True.
+    # Append " count: N" when count > 1.
     if subclass:
         vision_line = f"Vision: {cls}/{subclass} ({conf})"
     else:
         vision_line = f"Vision: {cls} ({conf})"
+
+    if face_visible and cls == "person":
+        vision_line += " face visible"
+    if count is not None and count > 1:
+        vision_line += f" count: {count}"
 
     lines = [
         f"Camera: {camera_label}",
