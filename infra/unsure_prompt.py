@@ -9,9 +9,10 @@ INPUTS:
 
 OUTPUTS:
   - SCHEMA_JSON: JSON Schema dict for the llama-server strict-mode
-    response_format. All fields nullable (no enum constraints).
+    response_format. All fields nullable; subclass uses enum constraints.
   - PROMPT_TEXT: instruction text directing the model to describe
-    what it sees without forcing a classification.
+    what it sees without forcing a classification, and to give a
+    coarse reason (subclass) for its uncertainty.
 
 PUBLIC API:
   - SCHEMA_JSON             dict
@@ -29,16 +30,17 @@ RELATED:
   - infra.vm1_prompt: VM1 classify prompt (may emit class="unsure").
 
 Design notes:
-  - Schema fields are all nullable (type: [string|null], number|null, etc.).
-  - No enum constraints -- the model is free to describe without forcing a class.
+  - Schema fields are mostly nullable (type: [string|null], number|null, etc.).
+  - subclass uses enum {blurry, partial, ambiguous, other} to capture
+    why the model is unsure (coarse-grained reason, not a classification).
   - The prompt text tells the model to give its best identification
-    without class constraints.
+    without class constraints and to explain why it is unsure.
 """
 from __future__ import annotations
 
 # ============================================================================
 # JSON Schema -- used by _response_format for server-side enforcement.
-# All fields nullable; no enum constraints.
+# All fields nullable; subclass uses enum constraints.
 # ============================================================================
 SCHEMA_JSON: dict = {
     "type": "object",
@@ -61,6 +63,11 @@ SCHEMA_JSON: dict = {
             "type": ["string", "null"],
             "description": "Natural-language description of what is moving. null if unobservable.",
         },
+        "subclass": {
+            "type": ["string", "null"],
+            "enum": ["blurry", "partial", "ambiguous", "other"],
+            "description": "Coarse reason for uncertainty. null if not applicable.",
+        },
         "notable_details": {
             "type": ["array", "null"],
             "items": {"type": "string"},
@@ -72,6 +79,7 @@ SCHEMA_JSON: dict = {
         "confidence",
         "reason",
         "description",
+        "subclass",
         "notable_details",
     ],
     "additionalProperties": False,
@@ -89,6 +97,7 @@ Respond ONLY with JSON matching this schema:
   "confidence": 0.0-1.0 (number) or null,
   "reason": string|null,
   "description": string|null,
+  "subclass": "blurry" | "partial" | "ambiguous" | "other" | null,
   "notable_details": ["detail 1", "detail 2"] or null
 }
 
@@ -97,6 +106,12 @@ Rules:
 - Use null for anything you cannot determine.
 - Give your best guess even if you are uncertain.
 - Confidence is a number between 0.0 and 1.0, or null if you cannot gauge it.
+- subclass: choose one of {blurry, partial, ambiguous, other} to explain
+  why you are unsure, or null if you can determine the class.
+  - blurry: image quality makes details indistinguishable
+  - partial: only a portion of the subject is visible
+  - ambiguous: multiple interpretations are plausible
+  - other: uncertainty for any other reason
 
 No prose, no markdown, no keys outside the list above.
 """
