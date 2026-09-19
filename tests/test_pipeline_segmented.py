@@ -37,7 +37,14 @@ _TELEGRAM_ENV = {
 }
 
 # Shared mock result for stage_verify_class_vm1.
-_VM1_RESULT = {"class": "vehicle", "confidence": "likely"}
+_VM1_RESULT = {
+    "class": "vehicle",
+    "subclass": "sedan",
+    "confidence": "likely",
+    "count": 1,
+    "face_visible": False,
+    "notes": None,
+}
 
 # Frames used by stage_load_frames and get_recent_frames.
 _TEST_FRAMES = [

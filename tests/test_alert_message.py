@@ -27,10 +27,20 @@ def _make_artifacts(
 
 def _make_vm1_result(
     cls: str = "vehicle",
-    confidence: float = 0.92,
+    subclass: str | None = "sedan",
+    confidence: str = "likely",
     notes: str | None = None,
+    count: int | None = 1,
+    face_visible: bool | None = False,
 ) -> dict:
-    return {"class": cls, "confidence": confidence, "notes": notes}
+    return {
+        "class": cls,
+        "subclass": subclass,
+        "confidence": confidence,
+        "notes": notes,
+        "count": count,
+        "face_visible": face_visible,
+    }
 
 
 def _make_verdict() -> GateVerdict:
@@ -76,12 +86,12 @@ class TestBuildAlertMessage:
         """Caption contains classification and confidence."""
         result = build_alert_message(
             verdict=_make_verdict(),
-            vm1_result=_make_vm1_result(cls="person", confidence=0.85),
+            vm1_result=_make_vm1_result(cls="person", confidence="likely"),
             artifacts=_make_artifacts(),
         )
 
         assert "person" in result["caption"]
-        assert "0.85" in result["caption"]
+        assert "likely" in result["caption"]
 
     def test_caption_includes_notes(self):
         """Caption includes notes if provided."""

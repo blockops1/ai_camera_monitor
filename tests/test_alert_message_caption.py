@@ -28,11 +28,21 @@ def _make_artifacts(
 
 def _make_vm1_result(
     cls: str = "vehicle",
-    confidence: float = 0.92,
+    subclass: str | None = "sedan",
+    confidence: str = "likely",
     notes: str | None = None,
+    count: int | None = 1,
+    face_visible: bool | None = False,
 ) -> dict:
-    """Build a VM1 result dict."""
-    return {"class": cls, "confidence": confidence, "notes": notes}
+    """Build a VM1 result dict with the new schema."""
+    return {
+        "class": cls,
+        "subclass": subclass,
+        "confidence": confidence,
+        "notes": notes,
+        "count": count,
+        "face_visible": face_visible,
+    }
 
 
 def _make_verdict_with_bbox(
