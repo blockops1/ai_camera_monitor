@@ -67,27 +67,34 @@ def _extract_ip_from_rtsp(url: str) -> str | None:
     """Extract the IP host from an RTSP URL.
 
     Handles passwords with @ (URL-encoded %40 or literal).
-    Raises if the URL is malformed.
+    Raises if the URL is empty.
+    Returns None for malformed-but-non-empty URLs (so caller can skip
+    IP auto-derive without crashing the listener).
     """
+    if not url:
+        raise IndexError("empty RTSP URL")
+    # Some env-var writers URL-encode the scheme as rtsp%3A%2F%2F.
+    # Decode once so the rest of the parser sees rtsp://...
+    from urllib.parse import unquote
+    if "%3A" in url.upper() or "%2F" in url.upper():
+        url = unquote(url)
     try:
         after_scheme = url.split("://", 1)[1]
-        auth_and_host = after_scheme.split("/", 1)[0]
-        at_idx = auth_and_host.rfind("@")
-        if at_idx < 0:
+    except IndexError:
+        # No scheme separator — give up cleanly.
+        return None
+    auth_and_host = after_scheme.split("/", 1)[0]
+    at_idx = auth_and_host.rfind("@")
+    if at_idx < 0:
+        return None
+    host_port = auth_and_host[at_idx + 1:]
+    if host_port.startswith("["):
+        close = host_port.find("]")
+        if close < 0:
             return None
-        host_port = auth_and_host[at_idx + 1:]
-        if host_port.startswith("["):
-            close = host_port.find("]")
-            if close < 0:
-                return None
-            return host_port[1:close]
-        colon = host_port.rfind(":")
-        return host_port[:colon] if colon > 0 else host_port
-    except (IndexError, ValueError):
-        logging.getLogger(__name__).exception(
-            "malformed RTSP URL — check camera-creds.env"
-        )
-        raise
+        return host_port[1:close]
+    colon = host_port.rfind(":")
+    return host_port[:colon] if colon > 0 else host_port
 
 
 def _parse_env(env_path: str) -> dict:

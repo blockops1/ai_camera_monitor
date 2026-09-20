@@ -60,6 +60,23 @@ class TestExtractIpFromRtsp:
         with pytest.raises(IndexError):
             _extract_ip_from_rtsp("")
 
+    def test_url_encoded_scheme(self):
+        """URL-encoded scheme (rtsp%3A%2F%2F) decodes and parses cleanly.
+
+        Regression: real-world Reolink webhooks sometimes submit the
+        scheme URL-encoded. The old parser IndexError'd on these and
+        crashed the listener at startup. Fixed by urllib.parse.unquote
+        at the top of the function.
+        """
+        url = "rtsp%3A%2F%2Fadmin:pass@192.0.2.1:554/h264"
+        assert _extract_ip_from_rtsp(url) == "192.0.2.1"
+
+    def test_malformed_returns_none(self):
+        """Non-empty malformed URL returns None (no listener crash)."""
+        # No scheme separator at all.
+        assert _extract_ip_from_rtsp("not-a-url") is None
+        assert _extract_ip_from_rtsp("192.0.2.1:554") is None
+
 
 # --------------------------------------------------------------------------
 # _parse_env
