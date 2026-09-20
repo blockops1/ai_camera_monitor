@@ -50,13 +50,13 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import os
-from logging.handlers import RotatingFileHandler
 import threading
 import time
 import uuid
 from collections import deque
 from collections.abc import MutableMapping
 from datetime import UTC, datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from flask import Flask, jsonify, request
@@ -66,6 +66,7 @@ from infra import (
     pipeline_cooldown as infra_pipeline_cooldown,
     tg_upload_cleanup,
 )
+from infra.quiet_hours import in_quiet_hours
 from listener.pipeline import (
     stage_build_tg1,
     stage_build_tg2,
@@ -476,21 +477,24 @@ def alert():
 
     # ---- TG#1 dispatch (after stage 10: build_tg1) ----
     try:
-        _send_tg1(result.get("tg1"), alert_id, chat_id, bot_token)
+        _send_tg1(result.get("tg1"), alert_id, chat_id, bot_token,
+                  alert_dict["camera_id"])
     except Exception:
         log.exception("TG#1 dispatch failed for alert_id=%s", alert_id)
         return jsonify(result), 200
 
     # ---- TG#2 dispatch (after stage 11: build_tg2) ----
     try:
-        _send_tg2(result.get("tg2"), alert_id, chat_id, bot_token)
+        _send_tg2(result.get("tg2"), alert_id, chat_id, bot_token,
+                  alert_dict["camera_id"])
     except Exception:
         log.exception("TG#2 dispatch failed for alert_id=%s", alert_id)
         return jsonify(result), 200
 
     # ---- TG#3 dispatch (after stage 13: build_tg3) ----
     try:
-        _send_tg3(result.get("tg3"), alert_id, chat_id, bot_token)
+        _send_tg3(result.get("tg3"), alert_id, chat_id, bot_token,
+                  alert_dict["camera_id"])
     except Exception:
         log.exception("TG#3 dispatch failed for alert_id=%s", alert_id)
         return jsonify(result), 200
@@ -523,6 +527,14 @@ def alert():
 # ---------------------------------------------------------------------------
 
 
+def _quiet_hours_suppress_log(alert_id: str, camera_id: str, tg_slot: str) -> None:
+    """Emit a single structured log line for quiet-hours suppression."""
+    log.info(
+        "quiet-hours: alert_id=%s camera=%s slot=%s suppressed",
+        alert_id, camera_id, tg_slot,
+    )
+
+
 def _convert_photos(alert_id: str, photo_paths: list[str]) -> list[str]:
     """Pre-convert source photo paths to cached JPEGs.
 
@@ -538,8 +550,13 @@ def _convert_photos(alert_id: str, photo_paths: list[str]) -> list[str]:
     return converted
 
 
-def _send_tg1(tg_msg: dict | None, alert_id: str, chat_id: str, bot_token: str) -> None:
+def _send_tg1(tg_msg: dict | None, alert_id: str, chat_id: str, bot_token: str,
+              camera_id: str = "") -> None:
     """Dispatch TG#1: alert message with photos."""
+    # Quiet-hours gate: suppress during night for scoped cameras.
+    if camera_id and in_quiet_hours(datetime.now(UTC), camera_id):
+        _quiet_hours_suppress_log(alert_id, camera_id, "TG#1")
+        return
     if not tg_msg or not bot_token:
         if tg_msg and not bot_token:
             log.warning(
@@ -584,8 +601,13 @@ def _send_tg1(tg_msg: dict | None, alert_id: str, chat_id: str, bot_token: str) 
         )
 
 
-def _send_tg2(tg_msg: dict | None, alert_id: str, chat_id: str, bot_token: str) -> None:
+def _send_tg2(tg_msg: dict | None, alert_id: str, chat_id: str, bot_token: str,
+              camera_id: str = "") -> None:
     """Dispatch TG#2: detail message with photos."""
+    # Quiet-hours gate: suppress during night for scoped cameras.
+    if camera_id and in_quiet_hours(datetime.now(UTC), camera_id):
+        _quiet_hours_suppress_log(alert_id, camera_id, "TG#2")
+        return
     if not tg_msg or not bot_token:
         if tg_msg and not bot_token:
             log.warning(
@@ -630,8 +652,13 @@ def _send_tg2(tg_msg: dict | None, alert_id: str, chat_id: str, bot_token: str) 
         )
 
 
-def _send_tg3(tg_msg: dict | None, alert_id: str, chat_id: str, bot_token: str) -> None:
+def _send_tg3(tg_msg: dict | None, alert_id: str, chat_id: str, bot_token: str,
+              camera_id: str = "") -> None:
     """Dispatch TG#3: match message (text-only)."""
+    # Quiet-hours gate: suppress during night for scoped cameras.
+    if camera_id and in_quiet_hours(datetime.now(UTC), camera_id):
+        _quiet_hours_suppress_log(alert_id, camera_id, "TG#3")
+        return
     if not tg_msg or not bot_token:
         if tg_msg and not bot_token:
             log.warning(
@@ -763,7 +790,7 @@ def _cleanup_loop(interval_min: int) -> None:
                 result["freed_bytes"],
                 result["errors"],
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("cleanup loop: run() raised")
         time.sleep(interval_s)
 
@@ -807,7 +834,6 @@ def main():
         log.warning("tg_upload_cleanup: boot sweep failed (non-fatal)")
 
     # US-061c: start the hourly cleanup thread (non-blocking, daemon=True).
-    from infra import cleanup as _infra_cleanup
     import infra.paths as _p
 
     interval_min = _p.FARMSURV_CLEANUP_INTERVAL_MIN
