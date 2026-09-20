@@ -68,6 +68,7 @@ from infra import (
 )
 from infra.quiet_hours import in_quiet_hours
 from listener.pipeline import (
+    stage_apply_baseline_override,
     stage_build_tg1,
     stage_build_tg2,
     stage_build_tg3,
@@ -311,6 +312,11 @@ def _run_pipeline(alert: dict) -> dict:
     tg3 = stage_build_tg3(
         mode, match_result, vm2_result,
         a_p, b_p, camera_label, alert,
+    )
+
+    # Stage 13b: distant-vehicle baseline override (third layer of defense).
+    alert = stage_apply_baseline_override(
+        alert, vm1_result, camera_id, datetime.now(UTC)
     )
 
     return {

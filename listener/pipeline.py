@@ -50,6 +50,7 @@ from pathlib import Path
 from animal_matcher.match import match_animal
 from animal_matcher.storage import load_known
 from infra.alert_artifacts import prepare_alert_artifacts
+from infra.alert_overrides_baseline import _apply_distant_vehicle_baseline_override
 from infra.gate import GateVerdict
 from infra.paths import PERSON_KNOWN_FILE, VEHICLE_KNOWN_FILE, data_dir_for
 from infra.pipeline_cooldown import should_suppress
@@ -279,4 +280,30 @@ def stage_build_tg3(
         vm2_result,
         camera_label=camera_label,
         alert=alert,
+    )
+
+
+def stage_apply_baseline_override(
+    alert: dict,
+    vision_result: dict,
+    camera_name: str,
+    dt,  # datetime — accepted for signature compatibility
+) -> dict:
+    """Stage 13b: apply distant-vehicle baseline override to the alert.
+
+    Demotes threat_level 1 -> 0 for distant-vehicle sightings on scoped
+    cameras during off-hours. Runs after TG#3 build but before the final
+    result dict is returned.
+
+    Args:
+        alert: Mutable alert dict with 'threat_level' key.
+        vision_result: Dict with 'top_class' and 'scene_description'.
+        camera_name: Camera identifier to check against the env list.
+        dt: UTC datetime (unused — signature compatibility).
+
+    Returns:
+        The alert dict (possibly modified with threat_level demoted).
+    """
+    return _apply_distant_vehicle_baseline_override(
+        alert, vision_result, camera_name, dt
     )
