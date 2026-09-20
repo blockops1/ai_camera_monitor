@@ -41,7 +41,7 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
-from infra import paths
+from infra import paths, telegram_alerts
 
 log = logging.getLogger(__name__)
 if not log.handlers:
@@ -88,6 +88,13 @@ def run() -> dict:
         dict with keys ``deleted_dirs`` (int), ``freed_bytes`` (int),
         ``errors`` (int).
     """
+    # ------------------------------------------------------------------
+    # Kill switch — FARMSURV_CLEANUP_DISABLED
+    # ------------------------------------------------------------------
+    if paths.FARMSURV_CLEANUP_DISABLED:
+        log.info("cleanup: disabled by FARMSURV_CLEANUP_DISABLED, skipping")
+        return {"deleted_dirs": 0, "freed_bytes": 0, "errors": 0}
+
     frames_dir = Path(paths.FRAMES_DIR)
     retention_seconds = paths.FRAME_RETENTION_HOURS * 3600
     now = _now_epoch()
@@ -152,6 +159,16 @@ def run() -> dict:
             evict_budget = total_bytes - paths.FRAME_MAX_BYTES
             evicted = _evict_by_oldest(frames_dir, evict_budget)
             stats["freed_bytes"] += evicted
+
+    # ------------------------------------------------------------------
+    # Post-cleanup: if still over cap, alert Telegram
+    # ------------------------------------------------------------------
+    total_bytes = _total_bytes(frames_dir)
+    if total_bytes > paths.FRAME_MAX_BYTES:
+        alert_msg = (
+            f"cleanup exceeded 20 GB cap: {total_bytes / 1e9:.2f} GB"
+        )
+        telegram_alerts.send(alert_msg)
 
     log.info(
         "cleanup: %d dirs, %d bytes freed, %d errors",

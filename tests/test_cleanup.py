@@ -177,3 +177,79 @@ class TestCleanupRun:
 
         assert result["deleted_dirs"] == 0
         assert hidden_dir.exists()
+
+    def test_cleanup_disabled_returns_empty(self, tmp_path):
+        """When FARMSURV_CLEANUP_DISABLED=1, run returns zeroed stats."""
+        import infra.paths as _paths
+
+        old_val = _paths.FARMSURV_CLEANUP_DISABLED
+        _paths.FARMSURV_CLEANUP_DISABLED = 1
+        try:
+            # Create some alert dirs that would normally be cleaned up
+            frames_dir = Path(_paths.FRAMES_DIR)
+            frames_dir.mkdir(parents=True, exist_ok=True)
+            alert_dir = frames_dir / "CAM1" / "alert-old"
+            alert_dir.mkdir(parents=True, exist_ok=True)
+            _write_file(alert_dir / "crop_a.png", 100)
+
+            result = run()
+
+            assert result == {
+                "deleted_dirs": 0,
+                "freed_bytes": 0,
+                "errors": 0,
+            }
+            # Directory should still exist (not deleted)
+            assert alert_dir.exists()
+        finally:
+            _paths.FARMSURV_CLEANUP_DISABLED = old_val
+
+    def test_cleanup_emits_alert_when_over_cap(self, tmp_path):
+        """When post-cleanup bytes exceed cap, Telegram alert is sent."""
+        from unittest.mock import patch
+
+        # We need total_bytes > FRAME_MAX_BYTES AFTER eviction.
+        # To achieve this, make _evict_by_oldest fail (return 0 bytes freed)
+        # so bytes are NOT freed — the alert fires because cleanup couldn't
+        # get under cap.
+        from infra import paths
+
+        old_max_bytes = paths.FRAME_MAX_BYTES
+        paths.FRAME_MAX_BYTES = 50
+
+        try:
+            _make_alert_dir("CAM1", "alert-big", tmp_path, age_hours=1)
+
+            with patch(
+                "infra.cleanup._evict_by_oldest", return_value=0
+            ), patch("infra.telegram_alerts.send") as mock_send:
+                run()
+
+                # _evict_by_oldest was stubbed to return 0, so 400 bytes remain
+                # 400 > 50, so the alert path fires
+                mock_send.assert_called_once()
+                assert "cleanup exceeded 20 GB cap" in mock_send.call_args[0][0]
+        finally:
+            paths.FRAME_MAX_BYTES = old_max_bytes
+
+    def test_cleanup_no_alert_when_under_cap(self, tmp_path):
+        """When post-cleanup bytes are under cap, no alert is sent."""
+        from unittest.mock import patch
+
+        from infra import paths
+
+        # Set a large budget so we are definitely under cap
+        old_max_bytes = paths.FRAME_MAX_BYTES
+        paths.FRAME_MAX_BYTES = 1024 * 1024 * 1024  # 1 GB — way more than test data
+
+        try:
+            # Create a small alert dir
+            _make_alert_dir("CAM1", "alert-small", tmp_path, age_hours=1)
+
+            with patch("infra.telegram_alerts.send") as mock_send:
+                run()
+
+                # send() should NOT have been called
+                mock_send.assert_not_called()
+        finally:
+            paths.FRAME_MAX_BYTES = old_max_bytes
