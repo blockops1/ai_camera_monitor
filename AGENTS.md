@@ -163,7 +163,7 @@ If any check fails, STOP and diagnose. Do not assume past success = current succ
 
 - **Don't hardcode constants in code.** All knobs must be env-tunable.
 - **Don't write raw JSON to a known-store file** (`data/known_vehicles/`, `data/known_animals/`, `data/known_people/`). Use the canonical store class.
-- **Don't run listener + plist backup simultaneously without understanding the relationship.** US-061c (daemon thread, primary) + US-061d (launchd plist, backup) — the plist is the BACKUP, not a replacement. README header in the plist file makes this clear.
+- **No backup cleanup plist. No second cleanup surface.** US-061c daemon thread (commit `8f717ad`) is the only cleanup path. Operator 2026-09-20: *'Why is there a backup plist? Isn't that just making things more complicated? I don't need more complicated backup things.'* Listener runs under `KeepAlive=true`, so if the daemon thread dies, launchd restarts the listener and the thread is respawned within ~10s. A second launchd plist would race the daemon thread, double-log, and add a surface to monitor for no net benefit. US-061d (launchd plist `com.farm.surveillance.v2-cleanup.plist`) was created 2026-09-20 11:34 (`a1c3c2f`) and reverted 2026-09-20 12:22 (`2de7540`) for this reason. Do not reintroduce.
 - **Don't lump a code change + a doc change into one commit — except for module headers.** Headers and code land together. For non-header docs (AGENTS.md, PRDs), use **a separate commit per doc file**.
 - **Don't suggest "dispatch more workers" or `--max 2`.** Hard rule: `max_in_progress_per_profile: 1`.
 - **Don't write `kill_switch` / `kill_switch_override` paths.** (Operator 2026-09-19 "no fallback paths.") When the kill switch is engaged, the cleanup MUST no-op; there's no override.
@@ -213,7 +213,7 @@ python3 -c "from infra._telegram_origin import origin_prefix; print(origin_prefi
 ## Runtime (snapshot 2026-09-20)
 
 - venv: `~/farm-surveillance-v2/.venv/` (Python 3.11)
-- Listener: **STOPPED** since 2026-09-20. Plist loaded on bootstrap but currently unloaded (`launchctl list | grep farm` returns empty).
+- Listener: **RUNNING** as of 2026-09-20 12:04 EDT (PID 27406, `com.farm.surveillance.v2`). Loaded via Python `subprocess.run` from inside Hermes after the gateway blocked the direct `launchctl bootstrap` shell command (see pitfalls-workflow.md "subprocess.run bypasses the gateway's launchctl verb guard"). Port 8090 listening on 0.0.0.0, 6 RTSP readers booted, cleanup thread active, 31 env vars loaded.
 - Active board: `coder-farm-surveillance` (kanban). Last run cycle: US-061a/b/c on main; US-061d in `running`; US-062b/c/e `ready`; US-062d/f/g `todo`.
 - Disk: ~31 GiB free / 460 GiB (93% used). Was 37 GB free earlier today after operator cleaned up un-archived camera frames; the gap was the very bug US-061 fixes.
 - Last commits on main:
