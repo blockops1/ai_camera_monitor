@@ -51,6 +51,7 @@ import logging
 import logging.handlers
 import os
 from logging.handlers import RotatingFileHandler
+import threading
 import time
 import uuid
 from collections import deque
@@ -744,6 +745,29 @@ def generate_plist() -> str:
 """
 
 
+def _cleanup_loop(interval_min: int) -> None:
+    """Periodically call ``infra.cleanup.run()`` every ``interval_min`` minutes.
+
+    Runs in a daemon thread started at daemon boot.  Skips immediately if
+    ``interval_min`` is 0 (the caller checks this too).
+    """
+    import infra.cleanup as _cleanup
+
+    interval_s = interval_min * 60
+    while True:
+        try:
+            result = _cleanup.run()
+            log.info(
+                "cleanup run: dirs=%d freed=%d errors=%d",
+                result["deleted_dirs"],
+                result["freed_bytes"],
+                result["errors"],
+            )
+        except Exception:  # noqa: BLE001
+            log.exception("cleanup loop: run() raised")
+        time.sleep(interval_s)
+
+
 def main():
     """Entry point for `python -m listener.daemon`.
 
@@ -781,6 +805,26 @@ def main():
         )
     except Exception:  # noqa: BLE001
         log.warning("tg_upload_cleanup: boot sweep failed (non-fatal)")
+
+    # US-061c: start the hourly cleanup thread (non-blocking, daemon=True).
+    from infra import cleanup as _infra_cleanup
+    import infra.paths as _p
+
+    interval_min = _p.FARMSURV_CLEANUP_INTERVAL_MIN
+    if interval_min > 0:
+        cleanup_thread = threading.Thread(
+            target=_cleanup_loop,
+            name="cleanup",
+            daemon=True,
+            kwargs={"interval_min": interval_min},
+        )
+        cleanup_thread.start()
+        log.info(
+            "cleanup thread started; interval=%dm, cap=20 GB",
+            interval_min,
+        )
+    else:
+        log.info("cleanup thread skipped; interval=0")
 
     app.run(host=host, port=port)
 
