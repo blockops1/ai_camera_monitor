@@ -1,0 +1,265 @@
+{
+  "prd_id": "PHASE-V2-062-PRD-night-time-headlight-suppression",
+  "title": "Night-time headlight false-positive suppression: suntime-driven quiet hours + dispatcher gate + per-camera baseline overrides",
+  "author": "jill-agent",
+  "status": "draft",
+  "phase": "V2-062",
+  "plan_section": "V2-062 supersedes V2-046 (yolo-night-false-alarm-suppression, 2026-09-15, status=active but never dispatched). V2-046 only covered NIGHT_SUPPRESS env-flag enable + OUTSIDE_FRONT_SOLAR threshold bump; that proved insufficient because (1) the 0.40 confidence floor misses the 0.5-0.69 band that vision still emits for headlights-as-cars, (2) there is no dispatcher-level quiet-hours gate so vision noise still reaches Telegram during night hours, (3) the 4 affected exterior cameras are not all addressed. V2-062 adds three layers: suntime-driven quiet hours with 30-min twilight buffer (per operator 2026-09-20 directive), a dispatcher-level Telegram gate that suppresses quiet-hours alerts, and per-camera baseline-override config for distance/ambiguity keywords. All knobs are env-tunable per operator 2026-09-20 directive. Worker preflight enforces v2-vs-refactor directory separation per operator 2026-09-20 directive.",
+  "trigger": "Operator 2026-09-20 (verbatim, telegram msg): 'Step 1-3, not 4. Make sure these applications use options that can be set in the environmental file. Make sure the worker does not get confused on what directory version is being worked on. Add something that doesn't just hardcode the time of day to implement it that actually figures out when sunrise and sunset is it 30 minutes after sunset in 30 minutes before sunrise.' Operator 2026-09-20 also stated (verbatim): 'No deletions'. Operator 2026-09-19 (verbatim): 'I had a bunch of false alarms last night that made it all the way through the way we had addressed that on the version one refactor was to do a tuning to Yolo or do some kind of sensible thing to Yolo, I forget what it was'. Confirmed headlight FPs on 2026-09-19/20 overnight window: (a) eda3b858 01:20 AM OUTSIDE_FRONT_SOLAR car 0.58 -- vision LLM saw headlight glow + flare, called it 'car'; (b) 163e10ea 22:23 OUTSIDE_BACK_SOLAR cat 0.72 with 62% frame-area motion bbox -- frames deleted, highly suspected headlight illumination.",
+  "background": "Root cause is multi-layer. (1) infra/gate.py default THRESHOLDS_BY_CLASS['cat']=0.60 plus default confidence thresholds lets a 0.5-0.69 false-positive band slip through on the 4 exterior cameras (CAM3=CAMC4=CAMC5=CAMC6 = OUTSIDE_FRONT_GARAGE, OUTSIDE_FRONT_POWER, OUTSIDE_FRONT_SOLAR, OUTSIDE_BACK_SOLAR). v2's infra/quick_classifier.py has the v1 NIGHT_SUPPRESS primitive (inherited dormant, MOTION_GATE_NIGHT_SUPPRESS_ENABLED=0 default) which uses suntime + brightness_ratio + confidence floor, but confidence floor 0.40 misses the 0.5-0.69 'car'/'cat' band that Qwen3-VL confidently emits on headlight glow. (2) v2 has NO dispatcher-level quiet-hours gate. Even when motion-gate suppresses the motion event, the listener still emits Telegram alerts when Qwen classifies a glowing blob as 'car' or 'cat' with conf > 0.40. (3) v2 has NO infra/time_of_day.py (refactor has it but the file is not ported). The hardcoded EDT hour assumption from any naive quiet-hours implementation would fail across seasons at farm coordinates 34.5782N, -84.9438W (Resaca, GA): civil twilight ranges from 5:48 AM (winter) to 6:38 AM (summer), sunset ranges 6:45 PM (winter) to 8:55 PM (summer). (4) v2 has NO infra/alert_overrides_baseline.py for per-camera distance-keyword demotion. The refactor proved that 'distant vehicle with light source' scene_description keywords correlate strongly with headlight FPs and are demotable via baseline override. v2's listener/daemon.py tg-send call sites (_send_tg1/_send_tg2/_send_tg3, lines ~540/586/630) have no quiet-hours check between alert generation and dispatcher.dispatch().",
+  "operator_guarantees": {
+    "env_var_every_knob": "Every night/quiet-hours/threshold/camera-list tunable is exposed via environment variable. NO hardcoded hour-of-day constants, NO hardcoded brightness ratios, NO hardcoded confidence floors in shipped code. Worker MUST NOT edit the .env file directly; it MUST only edit .env.example with placeholder defaults. The real .env is gitignored per US-017b.",
+    "suntime_not_hardcoded": "Sunrise/sunset calculation uses python suntime library against farm latitude/longitude (configurable via FARMSURV_FARM_LAT / FARMSURV_FARM_LON env vars, default 34.5782N / -84.9438W for Resaca, GA). Twilight buffer is 30 minutes AFTER sunset and 30 minutes BEFORE sunrise per operator 2026-09-20 directive. NO 'night starts at 8pm' literal in code.",
+    "directory_guard": "Worker MUST verify before each commit that its working directory is /Users/jill/farm-surveillance-v2/ and NOT /Users/jill/farm-surveillance-refactor/ or /Users/jill/farm-surveillance/ (v1). Preflight script bin/preflight_v2_only.sh asserts cwd is v2 root; gates the first commit. NO edits to refactor/v1 directories in any US-062x story.",
+    "no_deletions": "Per operator 2026-09-20 directive 'No deletions'. /Users/jill/farm-surveillance-refactor/ is preserved untouched. /Users/jill/farm-surveillance/ (v1) is preserved untouched. v2's existing infra/quick_classifier.py NIGHT_SUPPRESS code path is preserved (only the wrapper config that flips the env flag from 0 to 1 changes).",
+    "git_maintained": "Every story lands as a real commit on main BEFORE claiming done. Reviewer verifies via git log main --grep <story_id>.",
+    "code_actually_written": "Every AC is a re-runnable shell command with explicit expected output. Reviewer round-2 lens: checkout work, run AC verbatim, compare actual vs expected.",
+    "no_residue": "After each story lands, the file MUST contain the new code AND no commented-out old code. No 'if False:' branches keeping the old template. No backward-compat shims.",
+    "no_phantom_done": "No story claims done without code-grep on local main. Branch tip is not enough. Reviewer verifies via git show main:<file>.",
+    "no_camera_changes": "No Reolink camera web-UI changes. v2-side fixes only. Per V2-046 scope exclusion carried forward.",
+    "no_push": "Per V2-046 scope exclusion carried forward. Operator reviews and pushes.",
+    "no_new_skills": "Per V2-046 scope exclusion carried forward. Use existing skill set.",
+    "no_daemon_restart": "Operator restarts the daemon manually post-merge to pick up the new .env values. Per V2-046 carry forward."
+  },
+  "shipping_definition": "(a) infra/time_of_day.py exports is_night_at_edt(timestamp) and get_night_window() using suntime against FARMSURV_FARM_LAT / FARMSURV_FARM_LON with FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN=30 default. (b) infra/quiet_hours.py exports in_quiet_hours(timestamp, camera_name) that returns True only when is_night_at_edt(timestamp) is True AND camera_name is in FARMSURV_QUIET_HOURS_CAMERAS env. (c) listener/daemon.py calls in_quiet_hours() before each tg-send call site (_send_tg1/_send_tg2/_send_tg3) and short-circuits with a structured log line. (d) infra/alert_overrides_baseline.py exports _apply_distant_vehicle_baseline_override(alert, vision_result, camera_name, timestamp) that demotes L1 to L0 when off-hours + camera in baseline override config + vision sees vehicle + scene_description has distance/ambiguity keyword + no person present. (e) config/alert_overrides.json carries the baseline override config with FARMSURV_BASELINE_OVERRIDE_CAMERAS env-var-driven camera list. (f) .env.example documents every new env var with placeholder + comment. (g) bin/preflight_v2_only.sh asserts cwd is v2 root. (h) Working tree clean. (i) No camera-side changes. (j) No deletions to refactor or v1.",
+  "scope_exclusions": [
+    "Do NOT touch /Users/jill/farm-surveillance-refactor/. Frozen archive per operator 2026-09-20 'No deletions' directive.",
+    "Do NOT touch /Users/jill/farm-surveillance-internal/. Frozen archive.",
+    "Do NOT touch /Users/jill/farm-surveillance/ (v1). OFF and stays OFF.",
+    "Do NOT git push to forgejo or GitHub. Operator reviews and pushes.",
+    "Do NOT install new skills. Use existing skill set.",
+    "Do NOT touch any Reolink camera web-UI. Cameras OFF-LIMITS.",
+    "Do NOT edit .env (real values). Operator manages .env manually. Worker edits .env.example only.",
+    "Do NOT add night/quiet-hours keys to the plist. Belongs in .env per US-017b.",
+    "Do NOT modify infra/quick_classifier.py NIGHT_SUPPRESS code path body. It is already correct (inherited from v1). Only the env-flag default / config wrapper changes.",
+    "Do NOT modify infra/gate.py THRESHOLDS_BY_CLASS defaults. Per-camera overrides in JSON handle the surgical fix.",
+    "Do NOT touch the daemon plist or restart the daemon. Operator restarts manually after merge.",
+    "Do NOT modify any existing test files that don't need changes. If a test breaks because it expected hardcoded hours, delete the assertion per V2-046 'DELETE old tests not skip them' precedent, do not skip."
+  ],
+  "design_principles": [
+    "All three layers of defense: (1) motion-gate NIGHT_SUPPRESS already in quick_classifier.py (just enable via env), (2) dispatcher quiet-hours gate (NEW in v2.062), (3) baseline override for distance-keyword demotion (NEW in v2.062). Each layer independently suppresses the FP. Belt + suspenders + safety pin.",
+    "Sunrise/sunset calculation MUST use python suntime. NO hardcoded hours like '8 PM to 6 AM'. The farm is in EDT (UTC-4) with no DST auto-switch inside suntime (operator uses fixed UTC-4). Twilight window = sunset + 30 min ... sunrise - 30 min per operator directive.",
+    "Worker preflight: bin/preflight_v2_only.sh asserts cwd basename is 'farm-surveillance-v2' (NOT 'farm-surveillance-refactor' or 'farm-surveillance'). Fails the pre-commit hook if cwd is wrong. The script is committed to main once (US-062a).",
+    "Env-tunable knobs (with defaults): FARMSURV_FARM_LAT=34.5782, FARMSURV_FARM_LON=-84.9438, FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN=30, FARMSURV_QUIET_HOURS_ENABLED=1 (kill switch), FARMSURV_QUIET_HOURS_CAMERAS='OUTSIDE_FRONT_SOLAR,OUTSIDE_BACK_SOLAR,OUTSIDE_FRONT_POWER,OUTSIDE_FRONT_GARAGE', FARMSURV_BASELINE_OVERRIDE_ENABLED=1, FARMSURV_BASELINE_OVERRIDE_CAMERAS='OUTSIDE_FRONT_SOLAR,OUTSIDE_BACK_SOLAR', FARMSURV_DISTANT_KEYWORDS='faint,indistinct,distant,reflection,light source,moving lights,far away,barely visible,glare,headlight', MOTION_GATE_NIGHT_SUPPRESS_ENABLED=1 (already-existing env var, just flip from 0 to 1 default).",
+    "No backward-compat. The new quiet-hours gate is a hard short-circuit on Telegram send -- if the operator wants to disable it, they set FARMSURV_QUIET_HOURS_ENABLED=0. No 'if old behavior expected' branches.",
+    "Telegram-side logging: every quiet-hours suppress emits a log line of the form 'quiet-hours: alert_id=<uuid> camera=<name> suppressed=<TG#1|TG#2|TG#3> reason=is_night_at_edt_<true|false>_camera_in_set' so the operator can audit what got suppressed.",
+    "Tests for the OLD hardcoded-hour behavior are deleted, not skipped. If a test was asserting 'night starts at 8 PM', delete that assertion (it encoded the bug we are fixing).",
+    "Single commit per story on main with US-062x in the message. Squash-merge via forgejo per V2-046/V2-060 precedent."
+  ],
+  "operator_directives": {
+    "2026-09-20-step-1-3-not-4": "Operator 2026-09-20 (verbatim, telegram msg): 'Step 1-3, not 4. Make sure these applications use options that can be set in the environmental file. Make sure the worker does not get confused on what directory version is being worked on. Add something that doesn't just hardcode the time of day to implement it that actually figures out when sunrise and sunset is it 30 minutes after sunset in 30 minutes before sunrise.' Translation: (a) implement Steps 1-3 of the headlight-FP remediation, skip Step 4 (the refactor-deletion step); (b) all knobs must be env-tunable; (c) worker must have a directory-version guard so it doesn't apply v1/refactor code to v2; (d) time-of-day MUST be derived from real sunrise/sunset (suntime) at farm coordinates with 30-min twilight buffer either side.",
+    "2026-09-20-no-deletions": "Operator 2026-09-20 (verbatim, telegram msg): 'No deletions'. Translation: /Users/jill/farm-surveillance-refactor/, /Users/jill/farm-surveillance-internal/, /Users/jill/farm-surveillance/ (v1) are preserved untouched. No git history rewriting. No branch deletion. No orphan cleanup. v2 only adds files; it doesn't delete existing files outside its own scope.",
+    "2026-09-19-yolo-night-fp": "Operator 2026-09-19 (verbatim, telegram msg): 'I had a bunch of false alarms last night that made it all the way through the way we had addressed that on the version one refactor was to do a tuning to Yolo or do some kind of sensible thing to Yolo, I forget what it was / The cameras haven't been changed, don't mess with those / There was some kind of factor that we had added to Yolo version one that rejected a bunch of stuff.' Translation: adopt v1's proven night-suppress primitive (already in v2's quick_classifier.py, just disabled). No camera-side changes.",
+    "2026-09-15-v2-046-superseded": "V2-046 (yolo-night-false-alarm-suppression, 2026-09-15, status=active but never dispatched with 0 completed ACs) is superseded by V2-062. V2-046 covered only the env-flag enable + OUTSIDE_FRONT_SOLAR threshold bump; V2-062 expands to all 3 layers + all 4 exterior cameras + dispatcher gate. Mark V2-046 status='superseded' in the same commit that lands US-062a.",
+    "2026-09-20-no-fallback-paths": "Carry forward V2-060 no-fallback directive. No try/except wrappers that mask schema mismatches. No 'if subclass is None' branches that silently use old defaults. No 'if old behavior expected' branches in the quiet-hours gate."
+  },
+  "stories": [
+    {
+      "id": "US-062a",
+      "title": "Preflight v2-only directory guard + V2-046 supersession marker",
+      "story_type": "config",
+      "scope": "bin/preflight_v2_only.sh (NEW, ~25 lines bash) + bin/README.md (NEW, ~30 lines) + docs/PHASE-V2-046-PRD-yolo-night-false-alarm-suppression.json status field flip from 'active' to 'superseded' (single-line edit)",
+      "assignee": "coder",
+      "depends_on": [],
+      "rationale": "Operator 2026-09-20 directive requires a worker directory guard so future US-062x stories don't accidentally apply v1/refactor code to v2. This story establishes the guard as a reusable script and supersedes V2-046 in the same atomic commit so the supersession is auditable.",
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && test -x bin/preflight_v2_only.sh && echo OK -> exit 0 (script exists and is executable).",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && bash bin/preflight_v2_only.sh && echo OK -> exit 0 (script passes when cwd is v2 root).",
+        "AC3: cd /Users/jill/farm-surveillance-refactor && bash /Users/jill/farm-surveillance-v2/bin/preflight_v2_only.sh 2>&1 | tail -1 -> 'ERROR: cwd is /Users/jill/farm-surveillance-refactor, expected /Users/jill/farm-surveillance-v2' (script fails loudly when cwd is wrong, with exact path output).",
+        "AC4: cd /Users/jill/farm-surveillance && bash /Users/jill/farm-surveillance-v2/bin/preflight_v2_only.sh 2>&1 | tail -1 -> 'ERROR: cwd is /Users/jill/farm-surveillance, expected /Users/jill/farm-surveillance-v2' (script also rejects v1).",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && grep -E '^# V2-046 superseded by V2-062' bin/preflight_v2_only.sh | wc -l -> 1 (script has a comment line referencing the supersession).",
+        "AC6: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import json; d=json.load(open(\"docs/PHASE-V2-046-PRD-yolo-night-false-alarm-suppression.json\")); assert d[\"status\"]==\"superseded\", \"V2-046 status not flipped\"' -> exit 0 (V2-046 marked superseded).",
+        "AC7: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import json; d=json.load(open(\"docs/PHASE-V2-046-PRD-yolo-night-false-alarm-suppression.json\")); assert \"superseded by V2-062\" in d[\"plan_section\"], \"plan_section missing supersession note\"' -> exit 0 (V2-046 plan_section references V2-062).",
+        "AC8: cd /Users/jill/farm-surveillance-v2 && git diff main..HEAD --stat | tail -1 -> '<N> files changed, <N> insertions(+), <N> deletions(-)' with insertions == deletions + 1 (single commit, atomic, no scope creep).",
+        "AC9: cd /Users/jill/farm-surveillance-v2 && git log --oneline -1 main -> contains 'US-062a' substring (commit message includes story id)."
+      ],
+      "files_touched": [
+        "bin/preflight_v2_only.sh",
+        "bin/README.md",
+        "docs/PHASE-V2-046-PRD-yolo-night-false-alarm-suppression.json"
+      ],
+      "lines_added_estimate": 60,
+      "lines_deleted_estimate": 1
+    },
+    {
+      "id": "US-062b",
+      "title": "infra/time_of_day.py: suntime-driven sunrise/sunset with env-tunable lat/lon and 30-min twilight buffer",
+      "story_type": "infra",
+      "scope": "infra/time_of_day.py (NEW, ~120 lines) + infra/__init__.py re-export + tests/test_time_of_day.py (NEW, ~100 lines, no llama-server dependency, mocks suntime)",
+      "assignee": "coder",
+      "depends_on": [],
+      "rationale": "Operator 2026-09-20 directive: 'doesn't just hardcode the time of day ... actually figures out when sunrise and sunset is it 30 minutes after sunset in 30 minutes before sunrise'. v2 has no time_of_day module -- the refactor has one but we don't port it (operator said 'No deletions' and the refactor is frozen; we add a NEW file in v2 that does the same job with operator-specified env-var knobs). All knobs are env-tunable: FARMSURV_FARM_LAT, FARMSURV_FARM_LON, FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN, FARMSURV_TIMEZONE_OFFSET_HOURS.",
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && test -f infra/time_of_day.py && wc -l infra/time_of_day.py -> ~120 lines (file exists with expected size).",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from infra.time_of_day import is_night_at_edt, get_night_window; print(is_night_at_edt, get_night_window)' -> exits 0 and prints both callables (module exports the two public functions).",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && FARMSURV_FARM_LAT=34.5782 FARMSURV_FARM_LON=-84.9438 FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN=30 TZ=UTC python3 -c 'from infra.time_of_day import get_night_window; from datetime import timedelta; w = get_night_window(); assert w.sunset + timedelta(minutes=30) <= w.night_start <= w.sunset + timedelta(minutes=35), f\"night_start not 30 min after sunset: sunset={w.sunset} night_start={w.night_start}\"' -> exit 0 (30-min twilight buffer is exactly 30 minutes after sunset).",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && FARMSURV_FARM_LAT=34.5782 FARMSURV_FARM_LON=-84.9438 FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN=30 TZ=UTC python3 -c 'from infra.time_of_day import get_night_window; from datetime import timedelta; w = get_night_window(); assert w.night_end + timedelta(minutes=30) >= w.sunrise >= w.night_end, f\"sunrise not exactly 30 min before night_end: night_end={w.night_end} sunrise={w.sunrise}\"' -> exit 0 (sunrise is exactly 30 min before night_end = night ends 30 min before sunrise).",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && FARMSURV_FARM_LAT=34.5782 FARMSURV_FARM_LON=-84.9438 FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN=30 TZ=UTC python3 -c 'from infra.time_of_day import is_night_at_edt; from datetime import datetime; assert is_night_at_edt(datetime(2026, 9, 19, 1, 20)) is True, \"01:20 AM should be night\"' -> exit 0 (eda3b858 01:20 timestamp correctly classifies as night).",
+        "AC6: cd /Users/jill/farm-surveillance-v2 && FARMSURV_FARM_LAT=34.5782 FARMSURV_FARM_LON=-84.9438 FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN=30 TZ=UTC python3 -c 'from infra.time_of_day import is_night_at_edt; from datetime import datetime; assert is_night_at_edt(datetime(2026, 9, 19, 12, 0)) is False, \"noon should be day\"' -> exit 0 (noon correctly classifies as day).",
+        "AC7: cd /Users/jill/farm-surveillance-v2 && FARMSURV_FARM_LAT=34.5782 FARMSURV_FARM_LON=-84.9438 FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN=30 TZ=UTC python3 -c 'from infra.time_of_day import is_night_at_edt; from datetime import datetime; assert is_night_at_edt(datetime(2026, 12, 21, 17, 30)) is False, \"winter 5:30 PM should still be day (sunset ~5:38 PM EST + buffer)\"' -> exit 0 (winter 5:30 PM not yet night, demonstrating suntime works across seasons, not hardcoded).",
+        "AC8: cd /Users/jill/farm-surveillance-v2 && FARMSURV_FARM_LAT=34.5782 FARMSURV_FARM_LON=-84.9438 FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN=30 TZ=UTC python3 -c 'from infra.time_of_day import is_night_at_edt; from datetime import datetime; assert is_night_at_edt(datetime(2026, 6, 21, 21, 30)) is True, \"summer 9:30 PM should be night\"' -> exit 0 (summer 9:30 PM is night, demonstrating suntime works across seasons).",
+        "AC9: cd /Users/jill/farm-surveillance-v2 && FARMSURV_FARM_LAT=40.7128 FARMSURV_FARM_LON=-74.0060 FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN=30 TZ=UTC python3 -c 'from infra.time_of_day import get_night_window; w = get_night_window(); print(w.sunset); assert w.sunset.hour > 18, f\"NYC sunset hour too early: {w.sunset.hour}\"' -> exit 0 (lat/lon override works, NYC is north so sunset is later than GA).",
+        "AC10: cd /Users/jill/farm-surveillance-v2 && grep -cE '^\\s*(NIGHT_START_HOUR|NIGHT_END_HOUR|QUIET_HOUR) ?=' infra/time_of_day.py -> 0 (NO hardcoded hour constants in source -- proves env-driven).",
+        "AC11: cd /Users/jill/farm-surveillance-v2 && grep -cE 'os\\.environ\\.get' infra/time_of_day.py -> 4+ (all four env vars read).",
+        "AC12: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python3 -m pytest tests/test_time_of_day.py -v --tb=short 2>&1 | tail -20 -> all 8+ tests pass (test file exists with mocks for suntime, no llama-server dependency).",
+        "AC13: cd /Users/jill/farm-surveillance-v2 && bash bin/preflight_v2_only.sh && git add infra/time_of_day.py tests/test_time_of_day.py && git diff --cached --name-only | grep -E 'farm-surveillance-refactor|farm-surveillance/' | wc -l -> 0 (no files from refactor or v1 accidentally staged)."
+      ],
+      "files_touched": [
+        "infra/time_of_day.py",
+        "infra/__init__.py",
+        "tests/test_time_of_day.py"
+      ],
+      "lines_added_estimate": 220,
+      "lines_deleted_estimate": 0
+    },
+    {
+      "id": "US-062c",
+      "title": "infra/quiet_hours.py: camera-scoped night quiet-hours gate with env-tunable camera list + kill switch",
+      "story_type": "infra",
+      "scope": "infra/quiet_hours.py (NEW, ~80 lines) + tests/test_quiet_hours.py (NEW, ~120 lines) + infra/__init__.py re-export",
+      "assignee": "coder",
+      "depends_on": [
+        "US-062b"
+      ],
+      "rationale": "The dispatcher-level safety net. Even when motion-gate suppresses and vision prompt confuses a headlight for a car, the quiet-hours gate in quiet_hours.py short-circuits the Telegram send BEFORE dispatcher.dispatch() is called. All knobs are env-tunable: FARMSURV_QUIET_HOURS_ENABLED (kill switch), FARMSURV_QUIET_HOURS_CAMERAS (camera list, default the 4 exterior cameras).",
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && test -f infra/quiet_hours.py && wc -l infra/quiet_hours.py -> ~80 lines (file exists).",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from infra.quiet_hours import in_quiet_hours; print(in_quiet_hours)' -> exit 0 and prints the callable (public function exported).",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && FARMSURV_QUIET_HOURS_ENABLED=0 FARMSURV_FARM_LAT=34.5782 FARMSURV_FARM_LON=-84.9438 python3 -c 'from infra.quiet_hours import in_quiet_hours; from datetime import datetime; assert in_quiet_hours(datetime(2026,9,19,1,20), \"OUTSIDE_FRONT_SOLAR\") is False, \"kill switch must disable\"' -> exit 0 (FARMSURV_QUIET_HOURS_ENABLED=0 disables the gate entirely).",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && FARMSURV_QUIET_HOURS_ENABLED=1 FARMSURV_QUIET_HOURS_CAMERAS='OUTSIDE_FRONT_SOLAR' FARMSURV_FARM_LAT=34.5782 FARMSURV_FARM_LON=-84.9438 python3 -c 'from infra.quiet_hours import in_quiet_hours; from datetime import datetime; assert in_quiet_hours(datetime(2026,9,19,1,20), \"OUTSIDE_FRONT_SOLAR\") is True, \"01:20 AM should be quiet for OUTSIDE_FRONT_SOLAR\"' -> exit 0 (eda3b858's specific case caught by the gate).",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && FARMSURV_QUIET_HOURS_ENABLED=1 FARMSURV_QUIET_HOURS_CAMERAS='OUTSIDE_FRONT_SOLAR' FARMSURV_FARM_LAT=34.5782 FARMSURV_FARM_LON=-84.9438 python3 -c 'from infra.quiet_hours import in_quiet_hours; from datetime import datetime; assert in_quiet_hours(datetime(2026,9,19,12,0), \"OUTSIDE_FRONT_SOLAR\") is False, \"noon must NOT be quiet\"' -> exit 0 (noon bypasses the gate).",
+        "AC6: cd /Users/jill/farm-surveillance-v2 && FARMSURV_QUIET_HOURS_ENABLED=1 FARMSURV_QUIET_HOURS_CAMERAS='OUTSIDE_FRONT_SOLAR' FARMSURV_FARM_LAT=34.5782 FARMSURV_FARM_LON=-84.9438 python3 -c 'from infra.quiet_hours import in_quiet_hours; from datetime import datetime; assert in_quiet_hours(datetime(2026,9,19,1,20), \"INSIDE_GARAGE\") is False, \"camera NOT in env list must bypass the gate\"' -> exit 0 (camera scoping works -- INSIDE_GARAGE not affected).",
+        "AC7: cd /Users/jill/farm-surveillance-v2 && grep -cE 'os\\.environ\\.get' infra/quiet_hours.py -> 3+ (all three env vars read).",
+        "AC8: cd /Users/jill/farm-surveillance-v2 && grep -cE '^\\s*(QUIET_HOURS_DEFAULT_CAMERAS|QUIET_HOUR_START) ?=' infra/quiet_hours.py -> 0 (NO hardcoded camera list or hour constant in source -- env-driven).",
+        "AC9: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python3 -m pytest tests/test_quiet_hours.py -v --tb=short 2>&1 | tail -20 -> all 10+ tests pass (test file exists, no llama-server dependency, mocks time_of_day.is_night_at_edt).",
+        "AC10: cd /Users/jill/farm-surveillance-v2 && bash bin/preflight_v2_only.sh && git status --short | wc -l -> 0 after commit (clean working tree, single story committed)."
+      ],
+      "files_touched": [
+        "infra/quiet_hours.py",
+        "infra/__init__.py",
+        "tests/test_quiet_hours.py"
+      ],
+      "lines_added_estimate": 200,
+      "lines_deleted_estimate": 0
+    },
+    {
+      "id": "US-062d",
+      "title": "Wire quiet-hours gate into listener/daemon.py TG#1/TG#2/TG#3 call sites + add structured suppress log line",
+      "story_type": "wired",
+      "scope": "listener/daemon.py (EDIT, add in_quiet_hours() call before each dispatcher.dispatch() in _send_tg1/_send_tg2/_send_tg3, ~30 lines added) + tests/test_daemon_quiet_hours.py (NEW, ~80 lines)",
+      "assignee": "coder",
+      "depends_on": [
+        "US-062b",
+        "US-062c"
+      ],
+      "rationale": "This is the wire-up. The gate from US-062c must be called BEFORE every Telegram send so a quiet-hours alert never reaches dispatcher.dispatch(). Three call sites to wire: _send_tg1 (line ~553), _send_tg2 (line ~599), _send_tg3 (line ~643). Suppression emits a structured log line so the operator can audit what got suppressed.",
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -nE 'in_quiet_hours\\(' listener/daemon.py | wc -l -> 3 (one in_quiet_hours() call before each TG#1/TG#2/TG#3 send).",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -nE 'def _send_tg1|def _send_tg2|def _send_tg3' listener/daemon.py | wc -l -> 3 (all three send helpers exist).",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && grep -nE 'quiet-hours: alert_id=' listener/daemon.py | wc -l -> 1 (single shared log-line formatter, not three duplicates).",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import ast; ast.parse(open(\"listener/daemon.py\").read()); print(\"parse OK\")' -> exit 0 (no syntax errors introduced).",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && FARMSURV_QUIET_HOURS_ENABLED=1 FARMSURV_QUIET_HOURS_CAMERAS='OUTSIDE_FRONT_SOLAR' .venv/bin/python3 -m pytest tests/test_daemon_quiet_hours.py -v --tb=short 2>&1 | tail -25 -> all 4 tests pass (TG#1/TG#2/TG#3 suppressed when in quiet hours; all 3 NOT suppressed when not in quiet hours).",
+        "AC6: cd /Users/jill/farm-surveillance-v2 && grep -cE 'from infra\\.quiet_hours' listener/daemon.py -> 1 (clean import at top of file, not duplicated inline).",
+        "AC7: cd /Users/jill/farm-surveillance-v2 && bash bin/preflight_v2_only.sh && git status --short | wc -l -> 0 after commit (clean working tree).",
+        "AC8: cd /Users/jill/farm-surveillance-v2 && git log --oneline -1 main -> contains 'US-062d' substring (commit message includes story id)."
+      ],
+      "files_touched": [
+        "listener/daemon.py",
+        "tests/test_daemon_quiet_hours.py"
+      ],
+      "lines_added_estimate": 110,
+      "lines_deleted_estimate": 0
+    },
+    {
+      "id": "US-062e",
+      "title": "infra/alert_overrides_baseline.py: per-camera distant-vehicle baseline override with env-tunable keyword list",
+      "story_type": "infra",
+      "scope": "infra/alert_overrides_baseline.py (NEW, ~150 lines) + infra/__init__.py re-export + config/alert_overrides.json (NEW, ~30 lines, default config) + tests/test_alert_overrides_baseline.py (NEW, ~120 lines)",
+      "assignee": "coder",
+      "depends_on": [
+        "US-062b"
+      ],
+      "rationale": "Third layer of defense: vision LLM (Qwen3-VL-8B) sometimes writes 'faint', 'distant', 'light source', 'moving lights', 'reflection', 'glare', 'headlight' in its scene_description for what is actually a car driving at night with its headlights blooming. When this happens off-hours + camera in baseline set + L1 threat + vision sees vehicle + scene_description has distance keyword + no person present, demote L1 to L0 (no Telegram send). All knobs env-tunable: FARMSURV_BASELINE_OVERRIDE_ENABLED, FARMSURV_BASELINE_OVERRIDE_CAMERAS, FARMSURV_DISTANT_KEYWORDS.",
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && test -f infra/alert_overrides_baseline.py && wc -l infra/alert_overrides_baseline.py -> ~150 lines.",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from infra.alert_overrides_baseline import _apply_distant_vehicle_baseline_override; print(_apply_distant_vehicle_baseline_override)' -> exit 0 and prints the callable.",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && FARMSURV_BASELINE_OVERRIDE_ENABLED=1 FARMSURV_BASELINE_OVERRIDE_CAMERAS='OUTSIDE_FRONT_SOLAR' FARMSURV_DISTANT_KEYWORDS='faint,distant,headlight' python3 -c 'from infra.alert_overrides_baseline import _apply_distant_vehicle_baseline_override; alert={\"threat_level\":1}; vr={\"top_class\":\"car\",\"scene_description\":\"faint car with distant headlight\"}; result=_apply_distant_vehicle_baseline_override(alert, vr, \"OUTSIDE_FRONT_SOLAR\", None); assert result[\"threat_level\"]==0, f\"should demote: {result}\"' -> exit 0 (L1 demoted to L0 when scene_description has distant/headlight keyword + camera in set + vehicle class).",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && FARMSURV_BASELINE_OVERRIDE_ENABLED=1 FARMSURV_BASELINE_OVERRIDE_CAMERAS='OUTSIDE_FRONT_SOLAR' FARMSURV_DISTANT_KEYWORDS='faint,distant,headlight' python3 -c 'from infra.alert_overrides_baseline import _apply_distant_vehicle_baseline_override; alert={\"threat_level\":1}; vr={\"top_class\":\"person\",\"scene_description\":\"faint person with distant headlight\"}; result=_apply_distant_vehicle_baseline_override(alert, vr, \"OUTSIDE_FRONT_SOLAR\", None); assert result[\"threat_level\"]==1, f\"person must NOT be demoted: {result}\"' -> exit 0 (vision seeing a person preserves L1 -- person safety wins over baseline override).",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && FARMSURV_BASELINE_OVERRIDE_ENABLED=1 FARMSURV_BASELINE_OVERRIDE_CAMERAS='OUTSIDE_FRONT_SOLAR' FARMSURV_DISTANT_KEYWORDS='faint,distant,headlight' python3 -c 'from infra.alert_overrides_baseline import _apply_distant_vehicle_baseline_override; alert={\"threat_level\":2}; vr={\"top_class\":\"car\",\"scene_description\":\"faint car\"}; result=_apply_distant_vehicle_baseline_override(alert, vr, \"OUTSIDE_FRONT_SOLAR\", None); assert result[\"threat_level\"]==2, f\"L2 must NOT be demoted: {result}\"' -> exit 0 (L2 alert preserved regardless of distance keyword).",
+        "AC6: cd /Users/jill/farm-surveillance-v2 && FARMSURV_BASELINE_OVERRIDE_ENABLED=1 FARMSURV_BASELINE_OVERRIDE_CAMERAS='OUTSIDE_FRONT_SOLAR' FARMSURV_DISTANT_KEYWORDS='faint,distant,headlight' python3 -c 'from infra.alert_overrides_baseline import _apply_distant_vehicle_baseline_override; alert={\"threat_level\":1}; vr={\"top_class\":\"car\",\"scene_description\":\"clear bright car right next to camera\"}; result=_apply_distant_vehicle_baseline_override(alert, vr, \"OUTSIDE_FRONT_SOLAR\", None); assert result[\"threat_level\"]==1, f\"no distance keyword must NOT demote: {result}\"' -> exit 0 (a clear close car is NOT demoted).",
+        "AC7: cd /Users/jill/farm-surveillance-v2 && FARMSURV_BASELINE_OVERRIDE_ENABLED=0 FARMSURV_BASELINE_OVERRIDE_CAMERAS='OUTSIDE_FRONT_SOLAR' python3 -c 'from infra.alert_overrides_baseline import _apply_distant_vehicle_baseline_override; alert={\"threat_level\":1}; vr={\"top_class\":\"car\",\"scene_description\":\"faint car\"}; result=_apply_distant_vehicle_baseline_override(alert, vr, \"OUTSIDE_FRONT_SOLAR\", None); assert result[\"threat_level\"]==1, f\"kill switch must disable: {result}\"' -> exit 0 (FARMSURV_BASELINE_OVERRIDE_ENABLED=0 disables the override).",
+        "AC8: cd /Users/jill/farm-surveillance-v2 && grep -cE 'os\\.environ\\.get' infra/alert_overrides_baseline.py -> 3+ (all three env vars read).",
+        "AC9: cd /Users/jill/farm-surveillance-v2 && grep -cE '^\\s*(DISTANT_KEYWORDS_DEFAULT|OFFHOURS_START|OFFHOURS_END) ?=' infra/alert_overrides_baseline.py -> 0 (NO hardcoded keyword list or hour constant in source).",
+        "AC10: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python3 -m pytest tests/test_alert_overrides_baseline.py -v --tb=short 2>&1 | tail -25 -> all 8+ tests pass.",
+        "AC11: cd /Users/jill/farm-surveillance-v2 && bash bin/preflight_v2_only.sh && git status --short | wc -l -> 0 after commit."
+      ],
+      "files_touched": [
+        "infra/alert_overrides_baseline.py",
+        "infra/__init__.py",
+        "config/alert_overrides.json",
+        "tests/test_alert_overrides_baseline.py"
+      ],
+      "lines_added_estimate": 300,
+      "lines_deleted_estimate": 0
+    },
+    {
+      "id": "US-062f",
+      "title": "Wire baseline override into alert_generator pipeline + flip MOTION_GATE_NIGHT_SUPPRESS_ENABLED default to 1",
+      "story_type": "wired",
+      "scope": "listener/pipeline.py (EDIT, ~20 lines added, call _apply_distant_vehicle_baseline_override in the alert-finalization stage) + listener/daemon.py (small import addition if pipeline.py doesn't already wire it) + .env.example (EDIT, flip MOTION_GATE_NIGHT_SUPPRESS_ENABLED comment to enable by default) + tests/test_pipeline_baseline_override.py (NEW, ~80 lines)",
+      "assignee": "coder",
+      "depends_on": [
+        "US-062e"
+      ],
+      "rationale": "Wire the third-layer baseline override into the actual pipeline so alerts with distance-keyword scene_description on baseline-set cameras during off-hours get demoted before Telegram send. Also flips the dormant v1-inherited NIGHT_SUPPRESS feature flag from 0 to 1 in .env.example (template; operator manages real .env). All three layers active together for belt+suspenders+safety-pin coverage.",
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -nE '_apply_distant_vehicle_baseline_override\\(' listener/pipeline.py | wc -l -> 1 (one call site, in the alert-finalization stage).",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && python3 -c 'import ast; ast.parse(open(\"listener/pipeline.py\").read())' -> exit 0 (no syntax errors).",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && grep -cE 'MOTION_GATE_NIGHT_SUPPRESS_ENABLED=1' .env.example -> 1 (env example documents the enabled default).",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && grep -cE 'FARMSURV_(FARM_LAT|FARM_LON|NIGHT_TWILIGHT_BUFFER_MIN|QUIET_HOURS_ENABLED|QUIET_HOURS_CAMERAS|BASELINE_OVERRIDE_ENABLED|BASELINE_OVERRIDE_CAMERAS|DISTANT_KEYWORDS)=' .env.example -> 8+ (all 8 new env vars documented in .env.example).",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && git status --short | grep -E '^.M\\s+\\.env$' | wc -l -> 0 (.env remains untouched -- operator manages real values).",
+        "AC6: cd /Users/jill/farm-surveillance-v2 && FARMSURV_QUIET_HOURS_ENABLED=1 FARMSURV_BASELINE_OVERRIDE_ENABLED=1 MOTION_GATE_NIGHT_SUPPRESS_ENABLED=1 .venv/bin/python3 -m pytest tests/test_pipeline_baseline_override.py -v --tb=short 2>&1 | tail -20 -> all 4 tests pass (integration test of all three layers together with mocked vision_result).",
+        "AC7: cd /Users/jill/farm-surveillance-v2 && bash bin/preflight_v2_only.sh && git status --short | wc -l -> 0 after commit."
+      ],
+      "files_touched": [
+        "listener/pipeline.py",
+        "listener/daemon.py",
+        ".env.example",
+        "tests/test_pipeline_baseline_override.py"
+      ],
+      "lines_added_estimate": 110,
+      "lines_deleted_estimate": 0
+    },
+    {
+      "id": "US-062g",
+      "title": "End-to-end regression test: feed 2026-09-19/20 confirmed FPs through pipeline, assert zero Telegram emissions",
+      "story_type": "verification",
+      "scope": "tests/test_regression_headlight_fp.py (NEW, ~200 lines) + docs/PHASE-V2-062-verification-report.md (NEW, ~80 lines, summarizes what was tested and how)",
+      "assignee": "qa",
+      "depends_on": [
+        "US-062a",
+        "US-062b",
+        "US-062c",
+        "US-062d",
+        "US-062e",
+        "US-062f"
+      ],
+      "rationale": "Operator's shipping definition requires that the headlight FPs from 2026-09-19/20 (eda3b858 01:20 OUTSIDE_FRONT_SOLAR car 0.58, 163e10ea 22:23 OUTSIDE_BACK_SOLAR cat 0.72) would NOT have generated Telegram emissions if V2-062 had been live. This story replays those exact events through a mocked pipeline and asserts the suppression log path.",
+      "acceptance": [
+        "AC1: cd /Users/jill/farm-surveillance-v2 && test -f tests/test_regression_headlight_fp.py && wc -l tests/test_regression_headlight_fp.py -> ~200 lines.",
+        "AC2: cd /Users/jill/farm-surveillance-v2 && FARMSURV_QUIET_HOURS_ENABLED=1 FARMSURV_QUIET_HOURS_CAMERAS='OUTSIDE_FRONT_SOLAR,OUTSIDE_BACK_SOLAR' FARMSURV_FARM_LAT=34.5782 FARMSURV_FARM_LON=-84.9438 .venv/bin/python3 -m pytest tests/test_regression_headlight_fp.py::test_eda3b858_0120am_quiet_hours_suppresses -v --tb=short 2>&1 | tail -10 -> PASSED (replays eda3b858's exact timestamp+camera through dispatcher.dispatch() mock, asserts zero tg-send calls).",
+        "AC3: cd /Users/jill/farm-surveillance-v2 && FARMSURV_QUIET_HOURS_ENABLED=1 FARMSURV_QUIET_HOURS_CAMERAS='OUTSIDE_FRONT_SOLAR,OUTSIDE_BACK_SOLAR' FARMSURV_FARM_LAT=34.5782 FARMSURV_FARM_LON=-84.9438 .venv/bin/python3 -m pytest tests/test_regression_headlight_fp.py::test_163e10ea_2223pm_quiet_hours_suppresses -v --tb=short 2>&1 | tail -10 -> PASSED (replays 163e10ea's exact timestamp+camera, asserts zero tg-send).",
+        "AC4: cd /Users/jill/farm-surveillance-v2 && FARMSURV_QUIET_HOURS_ENABLED=0 .venv/bin/python3 -m pytest tests/test_regression_headlight_fp.py::test_kill_switch_re_enables_tg -v --tb=short 2>&1 | tail -10 -> PASSED (with kill switch off, same input DOES emit Telegram -- proves the gate is the only thing suppressing, not a regression).",
+        "AC5: cd /Users/jill/farm-surveillance-v2 && grep -cE '^## ' docs/PHASE-V2-062-verification-report.md -> 4+ (report has Summary / What was tested / Layer-by-layer results / Sign-off sections).",
+        "AC6: cd /Users/jill/farm-surveillance-v2 && bash bin/preflight_v2_only.sh && git status --short | wc -l -> 0 after commit.",
+        "AC7: cd /Users/jill/farm-surveillance-v2 && git log --oneline main --grep='US-062' | wc -l -> 7 (all 6 PRD stories landed + 1 QA verification story, each with US-062x in commit message)."
+      ],
+      "files_touched": [
+        "tests/test_regression_headlight_fp.py",
+        "docs/PHASE-V2-062-verification-report.md"
+      ],
+      "lines_added_estimate": 280,
+      "lines_deleted_estimate": 0
+    }
+  ]
+}
