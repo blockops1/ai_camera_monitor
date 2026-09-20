@@ -1,0 +1,9 @@
+{
+  "description": "Alert baseline override configuration.",
+  "notes": "All knobs are env-tunable; this file is a reference for the expected structure. Production config lives in environment variables (FARMSURV_BASELINE_OVERRIDE_ENABLED, FARMSURV_BASELINE_OVERRIDE_CAMERAS, FARMSURV_DISTANT_KEYWORDS).",
+  "distant_vehicle": {
+    "enabled_default": true,
+    "cameras_default": "",
+    "keywords_default": "faint,distant,light source,moving lights,reflection,glare,headlight"
+  }
+}
