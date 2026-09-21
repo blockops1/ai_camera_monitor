@@ -357,6 +357,54 @@ def is_v2_enabled() -> bool:
     return os.environ.get("MOTION_GATE_V2", "").strip().lower() in ("1", "true", "yes")
 
 
+def _read_global_change_max_pct() -> float:
+    """FARMSURV_GLOBAL_CHANGE_MAX_PCT — operator-tunable (default 60).
+
+    When EITHER per-frame diff bbox covers more than this % of the frame
+    area, treat the diff as global-change (IR exposure rebalance, grass
+    swaying in wind, lightning flash, raindrops on lens, moth on dome)
+    rather than a localized subject moving. Suppress the alert at the
+    motion-gate layer — YOLO inside such a large region will pick up
+    whatever is in the frame (often a stationary background vehicle)
+    and produce a high-confidence misclassification that the user does
+    not want.
+
+    Operator decision 2026-09-20 21:35 EDT, precedent alert
+    d54d3b29-6db7-4c2d-a66b-bfe104600480 (OUTSIDE_BACK_SOLAR, bbox
+    67% / 86% of frame, YOLO cleared "car 0.59" on the parked truck
+    that's been there for months — operator verbatim "when the crap
+    is the entire freaking frame, it shouldn't be alerting on
+    anything").
+
+    Calibration on 2026-09-20 traffic (24h):
+      0-20% bbox area:   6 proceeded / 1104 dropped
+      20-40%:            0 / 249
+      40-60%:            0 / 54
+      60-80%:            3 / 41   ← these 3 are the false positives we drop
+      80-100%:           2 / 15   ← these 2 are the false positives we drop
+      100%+:             1 / 29    ← this 1 is the false positive we drop
+
+    A threshold of 60% catches all 6 known false positives while
+    losing zero legitimate alerts.
+
+    Set to 0 or negative to disable (every alert proceeds regardless of
+    diff bbox coverage). Default 60.
+    """
+    raw = os.environ.get("FARMSURV_GLOBAL_CHANGE_MAX_PCT", "60").strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return 60.0
+
+
+def _bbox_area_pct(bbox, frame_w: int, frame_h: int) -> float:
+    """Return bbox area as percent of frame area; 0.0 if bbox is None."""
+    if bbox is None or frame_w <= 0 or frame_h <= 0:
+        return 0.0
+    _x, _y, w, h = bbox
+    return 100.0 * (w * h) / (frame_w * frame_h)
+
+
 # V2 routing thresholds (used in rule 5 only)
 V2_VEHICLE_OVERRIDE_MIN_CONF: float = (
     0.6  # vehicle must be at or above to override person
@@ -1013,6 +1061,51 @@ def run(
             crop_bbox_b=None,
             reason="no_server_motion",
         )
+
+    # ---- edge case: diff bbox covers most of the frame (global change) ----
+    # Operator directive 2026-09-20 21:35 EDT (precedent alert
+    # d54d3b29-6db7-4c2d-a66b-bfe104600480 on OUTSIDE_BACK_SOLAR): when
+    # the diff bbox covers most of the frame, treat it as global-change
+    # (IR exposure rebalance, grass in wind, lightning flash, raindrops
+    # on lens, moth on dome) — NOT a localized subject moving. YOLO
+    # inside such a large region clears whatever is in the frame (often
+    # a stationary background vehicle) and produces a high-confidence
+    # misclassification that the user does not want.
+    #
+    # Calibration on 2026-09-20 traffic (24h): 6 proceeded alerts all
+    # had bbox > 60% of frame area, 0 proceeded alerts had 30-60%.
+    # Threshold at 60% catches all 6 known false positives while losing
+    # zero legitimate alerts.
+    #
+    # See _read_global_change_max_pct() for the env var knob
+    # (FARMSURV_GLOBAL_CHANGE_MAX_PCT, default 60).
+    global_change_max_pct = _read_global_change_max_pct()
+    if global_change_max_pct > 0:
+        frame_w, frame_h = frame_2_pil.size
+        pct_a = _bbox_area_pct(crop_bbox_a, frame_w, frame_h)
+        pct_b = _bbox_area_pct(crop_bbox_b, frame_w, frame_h)
+        max_pct = max(pct_a, pct_b)
+        if max_pct > global_change_max_pct:
+            log.info(
+                f"[{alert_id}] motion_gate: global_change — suppress since diff bbox "
+                f"covers {max_pct:.1f}% of frame area (thresh={global_change_max_pct:.1f}%); "
+                f"crop_bbox_a={crop_bbox_a} ({pct_a:.1f}%), "
+                f"crop_bbox_b={crop_bbox_b} ({pct_b:.1f}%); "
+                f"likely IR exposure rebalance / grass in wind / lightning / lens artifact."
+            )
+            return GateVerdict(
+                classification="none",
+                class_label=None,
+                confidence=0.0,
+                top_class="",
+                top_confidence=0.0,
+                frames=pil_frames,
+                bbox_a=bbox_a,
+                bbox_b=bbox_b,
+                crop_bbox_a=crop_bbox_a,
+                crop_bbox_b=crop_bbox_b,
+                reason="global_change",
+            )
 
     # ---- crop frames (in-memory + optional disk write) ----
     # In-memory PIL crops: always built (verdict.crop_a/b are the

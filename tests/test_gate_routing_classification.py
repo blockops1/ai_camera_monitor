@@ -350,17 +350,24 @@ def _make_tiny_jpeg(path, size=(64, 64), color=(100, 100, 100)):
 def _make_fake_frames(tmp_path, offset=0, base_color=(0, 0, 0)):
     """Create 4 fake JPEG frames on disk. Each frame differs enough for diff to detect motion.
 
-    Uses a 640x480 size so cv2 diff works reliably. Frame 0 is all-black;
-    frames 1-3 shift the entire image to bright colors so pairwise diff
-    finds motion bboxes for the AND-subject logic.
+    Uses a 640x480 size so cv2 diff works reliably. Frame 0 is black;
+    frames 1-3 paint a small 80x80 patch in the center with a progressive
+    color shift so pairwise diff finds a compact motion bbox (~3% of frame
+    area, well below the global_change 60% threshold).
     """
     frame_paths = []
     for i in range(4):
         fp = tmp_path / f"frame_{i + offset:04d}.jpg"
-        # Frame 0 = black; frames 1-3 = progressively brighter
-        # to guarantee diff detects motion (threshold=25).
-        color = (i * 60, i * 60, i * 60)
-        _make_tiny_jpeg(fp, size=(640, 480), color=color)
+        # Frame 0 = black; frames 1-3 = black with a small colored patch
+        # in the center. Patch is 80x80 on a 640x480 frame = ~3% area.
+        img = Image.new("RGB", (640, 480), (0, 0, 0))
+        if i > 0:
+            color = (i * 80, i * 80, i * 80)
+            img.crop((0, 0, 0, 0))  # no-op to keep structure
+            from PIL import ImageDraw
+            draw = ImageDraw.Draw(img)
+            draw.rectangle((280, 200, 360, 280), fill=color)
+        img.save(fp, format="JPEG")
         frame_paths.append(str(fp))
     return frame_paths
 
