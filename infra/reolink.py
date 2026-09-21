@@ -1434,3 +1434,238 @@ class ReolinkClient:
             enabled=bool(d.get("enabled")),
             preset_index=int(d.get("preset_index", d.get("preset", 0))),
         )
+
+
+# ---------------------------------------------------------------------------
+# Recipe helpers
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RecipeResult:
+    """Per-camera result from apply_recipe or verify_recipe."""
+    camera: str
+    ok: bool = False  # apply: did apply succeed; verify: match=True
+    match: bool = False  # verify-only: all fields match
+    diffs: list[str] = field(default_factory=list)
+
+
+def _parse_recipe_toml(recipe_path: str) -> dict[str, dict[str, dict[str, Any]]]:
+    """Parse camera_recipes.toml -> {camera: {subcommand: {key: value}}}.
+
+    TOML dotted-section headers produce nested dicts. This function
+    flattens them to the expected shape.
+
+    Example TOML:
+        [detect_ai.person.front]
+        stay_time = 2
+        sensitivity = 50
+
+    tomllib parses as:
+        {"detect_ai": {"person": {"front": {"stay_time": 2, ...}}}}
+
+    Returns:
+        {"front": {"detect_ai.person": {"stay_time": 2, "sensitivity": 50}}, ...}
+    """
+    try:
+        import tomllib  # Python 3.11+
+    except ImportError:
+        import tomli as tomllib  # type: ignore[no-redef]
+
+    with open(recipe_path, "rb") as f:
+        data = tomllib.load(f)
+
+    # Collect leaves: (list_of_keys_to_field, field_name, value)
+    leaves: list[tuple[list[str], str, Any]] = []
+
+    def _collect(d: dict[str, Any], path: list[str]) -> None:
+        for k, v in d.items():
+            if isinstance(v, dict):
+                _collect(v, path + [k])
+            else:
+                leaves.append((path + [k], k, v))
+
+    _collect(data, [])
+
+    # Group by (camera, subcommand):
+    #   TOML section [detect_ai.person.front] → path:
+    #     ["detect_ai", "person", "front", "stay_time"]   (4 parts)
+    #   -> subcommand = "detect_ai.person"   (parts[0] + "." + parts[1])
+    #   -> camera = "front"                   (parts[2])
+    #   -> field = "stay_time"                (parts[3])
+    result: dict[str, dict[str, dict[str, Any]]] = {}
+    for full_path, field_name, field_value in leaves:
+        # Expect exactly 4 parts: detect_ai.<type>.<camera>.<field>
+        if len(full_path) != 4:
+            continue
+        subcommand = f"{full_path[0]}.{full_path[1]}"  # "detect_ai.person"
+        camera = full_path[2]  # "front"
+        if camera not in result:
+            result[camera] = {}
+        if subcommand not in result[camera]:
+            result[camera][subcommand] = {}
+        result[camera][subcommand][field_name] = field_value
+
+    return result
+
+
+def apply_recipe(
+    recipe_path: str,
+    camera: str | None = None,
+    gateway_addr: str | None = None,
+) -> list[RecipeResult]:
+    """Apply camera_recipes.toml settings via reolink-cli.
+
+    Loops over cameras in the recipe. For each (camera, subcommand, params),
+    calls detect ai apply with corresponding args.
+
+    Args:
+        recipe_path: Path to camera_recipes.toml.
+        camera: If set, apply only this camera's settings. None = all.
+        gateway_addr: Override FARM_REOLINK_GATEWAY_ADDR.
+
+    Returns:
+        Per-camera (camera, ok, diffs) list.
+    """
+    recipe = _parse_recipe_toml(recipe_path)
+    client = ReolinkClient(gateway_addr=gateway_addr)
+    results: list[RecipeResult] = []
+
+    for cam_alias, subcommands in recipe.items():
+        if camera is not None and cam_alias != camera:
+            continue
+
+        camera_ok = True
+        for subcmd, fields in subcommands.items():
+            # subcmd: "detect_ai.person", "detect_ai.vehicle", "detect_motion"
+            # Split on first dot: detect_ai.person → ("detect_ai", "person")
+            dot_idx = subcmd.find(".")
+            if dot_idx == -1:
+                continue
+            prefix = subcmd[:dot_idx]   # "detect_ai" or "detect_motion"
+            # Extract the category+subcategory: detect_ai.person → ("detect_ai", "person")
+            parts = subcmd.split(".")
+            if len(parts) < 2:
+                continue
+
+            # For detect_ai: pass atype, stay_time, sensitivity
+            if prefix == "detect_ai":
+                atype = parts[1] if len(parts) > 1 else "person"
+                apply_kw: dict[str, Any] = {}
+                if "stay_time" in fields:
+                    apply_kw["stay_time"] = fields["stay_time"]
+                if "sensitivity" in fields:
+                    apply_kw["sensitivity"] = fields["sensitivity"]
+                try:
+                    client.detect_ai_apply(
+                        atype=atype,
+                        camera=cam_alias,
+                        **apply_kw,
+                    )
+                except (ReolinkCommandError, ReolinkAuthError):
+                    camera_ok = False
+            elif prefix == "detect_motion":
+                # detect_motion_apply
+                apply_kw: dict[str, Any] = {}
+                if "sensitivity" in fields:
+                    apply_kw["sensitivity"] = fields["sensitivity"]
+                if "enabled" in fields:
+                    apply_kw["enabled"] = fields["enabled"]
+                try:
+                    client.detect_motion_apply(
+                        camera=cam_alias,
+                        **apply_kw,
+                    )
+                except (ReolinkCommandError, ReolinkAuthError):
+                    camera_ok = False
+            # Add more subcommand handling as needed
+
+        results.append(RecipeResult(
+            camera=cam_alias,
+            ok=camera_ok,
+            diffs=[] if camera_ok else ["apply failed for one or more subcommands"],
+        ))
+
+    return results
+
+
+def verify_recipe(
+    recipe_path: str,
+    camera: str | None = None,
+    gateway_addr: str | None = None,
+) -> list[RecipeResult]:
+    """Verify camera_recipes.toml settings against live device state.
+
+    Reads each camera's live state and diffs against recipe.
+
+    Args:
+        recipe_path: Path to camera_recipes.toml.
+        camera: If set, verify only this camera. None = all.
+        gateway_addr: Override FARM_REOLINK_GATEWAY_ADDR.
+
+    Returns:
+        Per-camera (camera, match, diffs) list. match=True when all fields equal.
+    """
+    recipe = _parse_recipe_toml(recipe_path)
+    client = ReolinkClient(gateway_addr=gateway_addr)
+    results: list[RecipeResult] = []
+
+    for cam_alias, subcommands in recipe.items():
+        if camera is not None and cam_alias != camera:
+            continue
+
+        diffs: list[str] = []
+        for subcmd, fields in subcommands.items():
+            # subcmd: "detect_ai.person", "detect_ai.vehicle", "detect_motion"
+            dot_idx = subcmd.find(".")
+            if dot_idx == -1:
+                continue
+            prefix = subcmd[:dot_idx]
+            parts = subcmd.split(".")
+            if len(parts) < 2:
+                continue
+
+            if prefix == "detect_ai":
+                atype = parts[1] if len(parts) > 1 else "person"
+                try:
+                    config = client.detect_ai_get(atype=atype, camera=cam_alias)
+                    for key, expected in fields.items():
+                        if key == "stay_time":
+                            actual = config.person_stay_time if atype == "person" else (
+                                config.vehicle_stay_time if atype == "vehicle" else config.dog_cat_stay_time
+                            )
+                        elif key == "sensitivity":
+                            actual = config.sensitivity
+                        else:
+                            continue
+                        if actual != expected:
+                            diffs.append(
+                                f"{cam_alias}.{subcmd}.{key}: recipe={expected}, live={actual}"
+                            )
+                except (ReolinkCommandError, ReolinkAuthError) as exc:
+                    diffs.append(f"{cam_alias}.{subcmd}: read error: {exc}")
+
+            elif prefix == "detect_motion":
+                try:
+                    config = client.detect_motion_get(camera=cam_alias)
+                    for key, expected in fields.items():
+                        if key == "sensitivity":
+                            actual = config.sensitivity
+                        elif key == "enabled":
+                            actual = config.enabled
+                        else:
+                            continue
+                        if actual != expected:
+                            diffs.append(
+                                f"{cam_alias}.{subcmd}.{key}: recipe={expected}, live={actual}"
+                            )
+                except (ReolinkCommandError, ReolinkAuthError) as exc:
+                    diffs.append(f"{cam_alias}.{subcmd}: read error: {exc}")
+
+        results.append(RecipeResult(
+            camera=cam_alias,
+            ok=len(diffs) == 0,
+            match=len(diffs) == 0,
+            diffs=diffs,
+        ))
+
+    return results

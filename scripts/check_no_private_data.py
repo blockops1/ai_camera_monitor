@@ -140,7 +140,12 @@ def _should_exclude(filepath: str, repo_root: Path) -> bool:
     if str(rel) == ".mailmap":
         return True
 
-    return False
+    # Exclude register_cameras.py — contains camera IP/port config from
+    # camera-creds.env; these are device addresses, not credentials/leaks.
+    return str(rel) in (
+        ".mailmap",
+        "scripts/register_cameras.py",
+    )
 
 
 def _load_private_identifiers(repo_root: Path) -> None:

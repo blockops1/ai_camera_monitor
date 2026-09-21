@@ -25,6 +25,7 @@ from infra.reolink import (
     PTZGuard,
     PTZPatrol,
     PTZPreset,
+    RecipeResult,
     RecordSchedule,
     ReolinkAuthError,
     ReolinkClient,
@@ -32,6 +33,8 @@ from infra.reolink import (
     ReolinkTimeoutError,
     UserEntry,
     VodEntry,
+    apply_recipe,
+    verify_recipe,
 )
 from infra.time_of_day import get_night_window, is_night_at_edt
 
@@ -51,6 +54,7 @@ __all__ = [
     "PTZPreset",
     "PingResult",
     "PrivacyMask",
+    "RecipeResult",
     "RecordSchedule",
     "ReolinkAuthError",
     "ReolinkClient",
@@ -59,7 +63,9 @@ __all__ = [
     "UserEntry",
     "VodEntry",
     "_apply_distant_vehicle_baseline_override",
+    "apply_recipe",
     "get_night_window",
     "in_quiet_hours",
     "is_night_at_edt",
+    "verify_recipe",
 ]
