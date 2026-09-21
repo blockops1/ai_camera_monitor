@@ -291,6 +291,31 @@ def _run_pipeline(alert: dict) -> dict:
     # Stage 9: verify_class VM1.
     vm1_result = stage_verify_class_vm1(a_p, b_p)
 
+    # Stage 9b: VM1 unsure short-circuit (operator 2026-09-20 ~20:30 EDT).
+    # Precedent: alert b1d400da-df87-4102-8d04-bdd7a9c16a1d. YOLO said
+    # "cat 0.79" on grass-blade motion (motion-gate cleared it because
+    # 0.79 > NIGHT_CONF_FLOOR=0.40 and cat isn't on the implausible-class
+    # list). VM1 then returned {"class": "unsure", "subclass": "ambiguous"}
+    # because there's no actual animal in the frame. The old pipeline still
+    # built TG#1+TG#2+TG#3 with that unsure answer, sending a useless
+    # notification. Now: if VM1 can't identify the class, drop the alert.
+    if vm1_result.get("class") == "unsure":
+        log.info(
+            "pipeline: dropped alert_id=%s camera=%s reason=vm1_unsure "
+            "vm1_class=unsure vm1_subclass=%r vm1_confidence=%r",
+            alert_id, camera_id,
+            vm1_result.get("subclass"),
+            vm1_result.get("confidence"),
+        )
+        return {
+            "id": alert_id,
+            "status": "dropped",
+            "reason": "vm1_unsure",
+            "classification": classification,
+            "gate": gate_result["gsum"],
+            "vm1_result": vm1_result,
+        }
+
     # Stage 10: build TG#1.
     tg1 = stage_build_tg1(
         gate_result["gate_verdict"], vm1_result, a_p, b_p,
