@@ -48,7 +48,6 @@ import time
 from pathlib import Path
 
 from animal_matcher.match import match_animal
-from animal_matcher.storage import load_known
 from infra.alert_artifacts import prepare_alert_artifacts
 from infra.alert_overrides_baseline import _apply_distant_vehicle_baseline_override
 from infra.gate import GateVerdict
@@ -253,8 +252,8 @@ def stage_perform_match(
         candidates = _load_person_candidates()
         return match_person(vm2_result, candidates)
     elif mode == "animal":
-        animal_candidates = load_known()
-        return match_animal(vm2_result, animal_candidates)
+        crop_a_path = vm2_result.get("crop_a_path", "")
+        return match_animal(crop_a_path)
     return {"matched": False}
 
 

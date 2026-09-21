@@ -1,4 +1,4 @@
-"""Tests for animal_matcher/match.py — Tier-2 cosine + Tier-1 ranking matcher.
+"""Tests for animal_matcher/match.py — Tier-2 cosine + Tier-1 Jaccard matcher.
 
 AC3: match_animal("") returns {matched: False} when no enrolled animals.
 AC4: Full test suite passes (unit tests only; live integration is opt-in).
@@ -45,23 +45,26 @@ class TestNoEnrolled:
     """AC3: match_animal returns {matched: False} when no enrolled animals."""
 
     def test_empty_registry(self, tmp_path: Path) -> None:
-        """No known animals → {matched: False, top_candidates: [], threshold: 0.5}."""
+        """No known animals -> {matched: False, top_candidates: [], threshold: 0.85}."""
         animals_dir = tmp_path / "data" / "known" / "animals"
         animals_dir.mkdir(parents=True)
         (animals_dir / "known_animals.json").write_text("[]")
         _patch_animals_dir(animals_dir)
 
-        vm2_result = {"crop_a_path": "/tmp/fake_crop.png", "class": "cow"}
-        result = match_animal(vm2_result, [])
+        crop_path = str(animals_dir / "fake.png")
+        Image.new("RGB", (64, 64), color=(128, 64, 32)).save(crop_path)
+
+        result = match_animal(crop_path)
 
         _restore_animals_dir()
 
         assert result["matched"] is False
         assert result["top_candidates"] == []
         assert isinstance(result["threshold"], float)
+        assert "skipped" in result  # embedder_off path
 
     def test_crop_file_missing(self, tmp_path: Path) -> None:
-        """Crop file not found → {matched: False}."""
+        """Crop file not found -> {matched: False}."""
         animals_dir = tmp_path / "data" / "known" / "animals"
         animals_dir.mkdir(parents=True)
         (animals_dir / "known_animals.json").write_text(
@@ -69,12 +72,38 @@ class TestNoEnrolled:
         )
         _patch_animals_dir(animals_dir)
 
-        vm2_result = {"crop_a_path": "/tmp/nonexistent_crop.png", "class": "cow"}
-        result = match_animal(vm2_result, [])
+        result = match_animal("/tmp/nonexistent_crop.png")
 
         _restore_animals_dir()
 
         assert result["matched"] is False
+
+
+# ---------------------------------------------------------------------------
+# ANIMAL_EMBEDDER_LIVE check.
+# ---------------------------------------------------------------------------
+
+class TestEmbedderOff:
+    """When ANIMAL_EMBEDDER_LIVE != 1, return skipped marker."""
+
+    def test_embedder_off_returns_skipped(self, tmp_path: Path) -> None:
+        """ANIMAL_EMBEDDER_LIVE=0 -> {matched: False, skipped: embedder_off}."""
+        animals_dir = tmp_path / "data" / "known" / "animals"
+        animals_dir.mkdir(parents=True)
+        (animals_dir / "known_animals.json").write_text("[]")
+        _patch_animals_dir(animals_dir)
+
+        crop_path = str(animals_dir / "fake.png")
+        Image.new("RGB", (64, 64), color=(128, 64, 32)).save(crop_path)
+
+        with patch.dict("os.environ", {"ANIMAL_EMBEDDER_LIVE": "0"}):
+            result = match_animal(crop_path)
+
+        _restore_animals_dir()
+
+        assert result["matched"] is False
+        assert result["skipped"] == "embedder_off"
+        assert result["threshold"] == 0.85
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +114,7 @@ class TestCosineBelowThreshold:
     """Tier-2: candidates exist but cosine is below threshold."""
 
     def test_below_threshold_no_match(self, tmp_path: Path) -> None:
-        """Cosine below threshold → {matched: False, top_candidates: []}."""
+        """Cosine below threshold -> {matched: False, top_candidates: []}."""
         animals_dir = tmp_path / "data" / "known" / "animals"
         animals_dir.mkdir(parents=True)
         (animals_dir / "known_animals.json").write_text(
@@ -105,19 +134,19 @@ class TestCosineBelowThreshold:
         crop_path = str(animals_dir / "fake_crop.png")
         Image.new("RGB", (64, 64), color=(128, 64, 32)).save(crop_path)
 
-        vm2_result = {"crop_a_path": crop_path, "class": "cow"}
-
         # Mock _embed_crop to return a vector orthogonal to enrolled vec,
-        # ensuring cosine is well below the 0.5 threshold.
+        # ensuring cosine is well below the 0.85 threshold.
         vec_crop = np.array([0.9, 0.9, 0.9], dtype=np.float32)
-        with patch("animal_matcher.match._embed_crop", return_value=vec_crop):
-            result = match_animal(vm2_result, [])
+        with patch.dict("os.environ", {"ANIMAL_EMBEDDER_LIVE": "1"}), \
+             patch("animal_matcher.match._embed_crop", return_value=vec_crop):
+            result = match_animal(crop_path)
 
         _restore_animals_dir()
 
         assert result["matched"] is False
         assert "top_candidates" in result
         assert "threshold" in result
+        assert result["threshold"] == 0.85
 
 
 # ---------------------------------------------------------------------------
@@ -125,10 +154,10 @@ class TestCosineBelowThreshold:
 # ---------------------------------------------------------------------------
 
 class TestCosineAboveThreshold:
-    """Tier-2: candidate above threshold → match."""
+    """Tier-2: candidate above threshold -> match."""
 
     def test_match_found(self, tmp_path: Path) -> None:
-        """Cosine above threshold → {matched: True, candidate, cosine_score, tier1_score}."""
+        """Cosine above threshold -> {matched: True, candidate, cosine_score, tier1_score}."""
         animals_dir = tmp_path / "data" / "known" / "animals"
         animals_dir.mkdir(parents=True)
         (animals_dir / "known_animals.json").write_text(
@@ -138,7 +167,7 @@ class TestCosineAboveThreshold:
                  "distinctive_features": ["horned"]},
             ])
         )
-        # Identical vector → cosine = 1.0 (above any threshold).
+        # Identical vector -> cosine = 1.0 (above any threshold).
         vec = np.array([0.1, 0.2, 0.3], dtype=np.float32)
         embeddings = {"cow-001__avg": vec}
         np.savez(str(animals_dir / "embeddings.npz"), **embeddings)  # type: ignore[arg-type]
@@ -148,13 +177,11 @@ class TestCosineAboveThreshold:
         crop_path = str(animals_dir / "fake_crop.png")
         Image.new("RGB", (64, 64), color=(128, 64, 32)).save(crop_path)
 
-        vm2_result = {"crop_a_path": crop_path, "class": "cow",
-                       "colors": ["brown"], "distinctive_features": ["horned"]}
-
         # Mock _embed_crop to return the same vector as the enrollment,
         # so cosine similarity = 1.0 (guaranteed match).
-        with patch("animal_matcher.match._embed_crop", return_value=vec):
-            result = match_animal(vm2_result, [])
+        with patch.dict("os.environ", {"ANIMAL_EMBEDDER_LIVE": "1"}), \
+             patch("animal_matcher.match._embed_crop", return_value=vec):
+            result = match_animal(crop_path)
 
         _restore_animals_dir()
 
@@ -164,9 +191,10 @@ class TestCosineAboveThreshold:
         assert "cosine_score" in result
         assert "tier1_score" in result
         assert "threshold" in result
+        assert result["threshold"] == 0.85
 
     def test_match_with_runner_ups(self, tmp_path: Path) -> None:
-        """Multiple candidates above threshold → runner_ups populated."""
+        """Multiple candidates above threshold -> runner_ups populated."""
         animals_dir = tmp_path / "data" / "known" / "animals"
         animals_dir.mkdir(parents=True)
         (animals_dir / "known_animals.json").write_text(
@@ -187,11 +215,10 @@ class TestCosineAboveThreshold:
         crop_path = str(animals_dir / "fake_crop.png")
         Image.new("RGB", (64, 64), color=(128, 64, 32)).save(crop_path)
 
-        vm2_result = {"crop_a_path": crop_path, "class": "cow"}
-
         # Mock _embed_crop to return Bessie's exact vector (cosine=1.0).
-        with patch("animal_matcher.match._embed_crop", return_value=vec_bessie):
-            result = match_animal(vm2_result, [])
+        with patch.dict("os.environ", {"ANIMAL_EMBEDDER_LIVE": "1"}), \
+             patch("animal_matcher.match._embed_crop", return_value=vec_bessie):
+            result = match_animal(crop_path)
 
         _restore_animals_dir()
 
@@ -202,25 +229,54 @@ class TestCosineAboveThreshold:
 
 
 # ---------------------------------------------------------------------------
-# Tier-1: feature scoring.
+# Tier-1: Jaccard over identity_markers.
 # ---------------------------------------------------------------------------
 
 class TestTier1Scoring:
-    """Tier-1: species, color, distinctive features scoring."""
+    """Tier-1: Jaccard over identity_markers field."""
 
-    def test_species_match_boosts_score(self, tmp_path: Path) -> None:
-        """VM2 class='cow' + candidate species='cow' → species score added."""
-        from animal_matcher.match import _tier1_score
+    def test_jaccard_over_identity_markers(self, tmp_path: Path) -> None:
+        """identity_markers with overlap -> higher Jaccard score."""
+        from animal_matcher.match import _jaccard_score
 
-        candidate = {"id": "cow-001", "label": "Bessie", "species": "cow"}
-        vm2_with_class = {"class": "cow", "crop_a_path": "/tmp/x.png"}
-        vm2_no_class = {"crop_a_path": "/tmp/x.png"}
+        markers_a = ["spot", "horned", "large"]
+        markers_b = ["spot", "horned", "small"]
+        markers_c = ["blue", "tiny"]
 
-        score_with = _tier1_score(candidate, vm2_with_class)
-        score_without = _tier1_score(candidate, vm2_no_class)
+        j_same = _jaccard_score(markers_a, markers_a)
+        j_partial = _jaccard_score(markers_a, markers_b)
+        j_none = _jaccard_score(markers_a, markers_c)
 
-        # Species match should add weight (1.0).
-        assert score_with > score_without, "Species match should boost score"
+        assert j_same == 1.0, "Same markers should give Jaccard=1.0"
+        assert j_partial > j_none, "Partial overlap > no overlap"
+        assert j_none < j_partial, "No overlap < partial overlap"
+
+    def test_empty_identity_markers(self, tmp_path: Path) -> None:
+        """Empty identity_markers in candidate -> candidate skipped (no Tier-1)."""
+        animals_dir = tmp_path / "data" / "known" / "animals"
+        animals_dir.mkdir(parents=True)
+        (animals_dir / "known_animals.json").write_text(
+            json.dumps([
+                {"id": "cow-001", "label": "Bessie", "species": "cow",
+                 "identity_markers": []},
+            ])
+        )
+        vec = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+        embeddings = {"cow-001__avg": vec}
+        np.savez(str(animals_dir / "embeddings.npz"), **embeddings)  # type: ignore[arg-type]
+        _patch_animals_dir(animals_dir)
+
+        crop_path = str(animals_dir / "fake_crop.png")
+        Image.new("RGB", (64, 64), color=(128, 64, 32)).save(crop_path)
+
+        # Empty identity_markers -> _jaccard_score([], []) returns 1.0.
+        with patch.dict("os.environ", {"ANIMAL_EMBEDDER_LIVE": "1"}), \
+             patch("animal_matcher.match._embed_crop", return_value=vec):
+            result = match_animal(crop_path)
+
+        _restore_animals_dir()
+
+        assert result["matched"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -231,13 +287,16 @@ class TestReturnShape:
     """Verify the return shape matches the PRD spec."""
 
     def test_no_match_shape(self, tmp_path: Path) -> None:
-        """No match → {matched, top_candidates, threshold}."""
+        """No match -> {matched, top_candidates, threshold}."""
         animals_dir = tmp_path / "data" / "known" / "animals"
         animals_dir.mkdir(parents=True)
         (animals_dir / "known_animals.json").write_text("[]")
         _patch_animals_dir(animals_dir)
 
-        result = match_animal({"crop_a_path": "/tmp/x.png", "class": "cow"}, [])
+        crop_path = str(animals_dir / "fake.png")
+        Image.new("RGB", (64, 64), color=(128, 64, 32)).save(crop_path)
+
+        result = match_animal(crop_path)
 
         _restore_animals_dir()
 
@@ -247,7 +306,7 @@ class TestReturnShape:
         assert result["matched"] is False
 
     def test_match_shape(self, tmp_path: Path) -> None:
-        """Match → {matched, candidate, cosine_score, tier1_score, top_candidates, threshold}."""
+        """Match -> {matched, candidate, cosine_score, tier1_score, top_candidates, threshold}."""
         animals_dir = tmp_path / "data" / "known" / "animals"
         animals_dir.mkdir(parents=True)
         (animals_dir / "known_animals.json").write_text(
@@ -260,12 +319,9 @@ class TestReturnShape:
         crop_path = str(animals_dir / "fake_crop.png")
         Image.new("RGB", (64, 64), color=(128, 64, 32)).save(crop_path)
 
-        vm2_result = {"crop_a_path": crop_path, "class": "cow",
-                       "colors": ["brown"], "distinctive_features": ["horned"]}
-
-        # Mock _embed_crop to return the same vector as the enrollment.
-        with patch("animal_matcher.match._embed_crop", return_value=vec):
-            result = match_animal(vm2_result, [])
+        with patch.dict("os.environ", {"ANIMAL_EMBEDDER_LIVE": "1"}), \
+             patch("animal_matcher.match._embed_crop", return_value=vec):
+            result = match_animal(crop_path)
 
         _restore_animals_dir()
 
@@ -275,3 +331,40 @@ class TestReturnShape:
         assert "tier1_score" in result
         assert "top_candidates" in result
         assert "threshold" in result
+        assert result["threshold"] == 0.85
+
+    def test_no_match_below_threshold_shape(self, tmp_path: Path) -> None:
+        """All cosine below threshold -> {matched: False, top_candidates populated}.
+        
+        This is step 7 of the task body: all-cosine-below-threshold case should
+        return matched=False with top_candidates populated.
+        """
+        animals_dir = tmp_path / "data" / "known" / "animals"
+        animals_dir.mkdir(parents=True)
+        (animals_dir / "known_animals.json").write_text(
+            json.dumps([
+                {"id": "cow-001", "label": "Bessie", "species": "cow",
+                 "identity_markers": ["spotted"]},
+            ])
+        )
+        # Vector designed to give cosine < 0.85.
+        vec_enrolled = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        embeddings = {"cow-001__avg": vec_enrolled}
+        np.savez(str(animals_dir / "embeddings.npz"), **embeddings)  # type: ignore[arg-type]
+        _patch_animals_dir(animals_dir)
+
+        crop_path = str(animals_dir / "fake_crop.png")
+        Image.new("RGB", (64, 64), color=(128, 64, 32)).save(crop_path)
+
+        # Orthogonal vector -> cosine ~0.0.
+        vec_crop = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+        with patch.dict("os.environ", {"ANIMAL_EMBEDDER_LIVE": "1"}), \
+             patch("animal_matcher.match._embed_crop", return_value=vec_crop):
+            result = match_animal(crop_path)
+
+        _restore_animals_dir()
+
+        assert result["matched"] is False
+        assert "top_candidates" in result
+        # top_candidates should be empty (no candidates passed threshold).
+        assert result["top_candidates"] == []
