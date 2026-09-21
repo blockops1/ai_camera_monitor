@@ -49,3 +49,4 @@ include = ["infra*", "listener*", "telegram_formatter*", "vehicle_matcher*"]
 include = ["infra", "listener", "telegram_formatter", "vehicle_matcher", "tests"]
 exclude = ["**/__pycache__", ".venv", ".desloppify", ".qa", "data"]
 reportMissingImports = "warning"
+pythonVersion = "3.11"
