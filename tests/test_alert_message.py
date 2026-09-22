@@ -18,7 +18,6 @@ from infra.alert_artifacts import AlertArtifacts
 from infra.gate import GateVerdict
 from telegram_formatter.alert import (
     _emoji_for_class,
-    _escape_markdown_v2,
     build_alert_message,
 )
 
@@ -242,49 +241,6 @@ class TestEmojiMapping:
         assert _emoji_for_class("unknown") == "\U0001f4e6"  # box
 
 
-class TestMarkdownVEscaping:
-    """AC: MarkdownV2 special chars are escaped."""
-
-    def test_asterisks_escaped(self):
-        """Asterisks in user data should be escaped."""
-        escaped = _escape_markdown_v2("hello*world")
-        assert "\\*hello\\*world" == escaped or "\\*world" in escaped
-
-    def test_underscore_escaped(self):
-        escaped = _escape_markdown_v2("hello_world")
-        assert "\\_" in escaped
-
-    def test_brackets_escaped(self):
-        escaped = _escape_markdown_v2("hello[world]")
-        assert "\\[" in escaped and "\\]" in escaped
-
-    def test_backtick_escaped(self):
-        escaped = _escape_markdown_v2("hello`world`")
-        assert "\\`" in escaped
-
-    def test_backslash_escaped(self):
-        escaped = _escape_markdown_v2("hello\\world")
-        assert escaped == "hello\\\\world"
-
-    def test_safe_chars_preserved(self):
-        """Safe characters should pass through unchanged."""
-        safe = "abc123"
-        assert _escape_markdown_v2(safe) == safe
-
-    def test_caption_uses_escaped_values(self):
-        """Camera label with special chars should be escaped in caption."""
-        result = build_alert_message(
-            verdict=_make_verdict(),
-            vm1_result=_make_vm1_result(cls="person"),
-            artifacts=_make_artifacts(),
-            camera_label="Front [Door]",
-            position=1,
-            alert=_make_alert(alert_id="test_id1"),
-        )
-        assert "[Front" not in result["caption"]  # brackets escaped
-        assert "\\[" in result["caption"]
-
-
 class TestCaptionTruncation:
     """AC: caption is truncated to 1024 chars."""
 
@@ -299,4 +255,42 @@ class TestCaptionTruncation:
             alert=_make_alert(),
         )
         assert len(result["caption"]) <= 1024
-        assert "..." in result["caption"]
+
+
+class TestNoDoubleEscape:
+    """AC: alert.py MUST NOT pre-escape. Dispatcher is the single escape site.
+
+    Pre-escaping here caused operator-visible artifacts in TG#1: timestamp
+    dashes like 2026-09-22 became "2026\\-09\\-22" after alert.py, then
+    dispatcher.escape_markdown_v2() turned the backslashes into
+    "2026\\\\-09\\\\-22" — which Telegram rendered as visible "\\-" glyphs
+    (the operator saw them as pipes in the rendered message).
+    """
+
+    def test_caption_contains_raw_dashes(self):
+        """Timestamp dashes must remain raw in the caption (NOT pre-escaped)."""
+        result = build_alert_message(
+            verdict=_make_verdict(),
+            vm1_result=_make_vm1_result(cls="person"),
+            artifacts=_make_artifacts(),
+            camera_label="Front Door",
+            position=1,
+            alert=_make_alert(alert_id="test_id1"),
+        )
+        # 2026-09-22 09:55:40 EDT — dashes must be literal, NOT escaped.
+        assert "2026-09-22" in result["caption"]
+        assert "\\-09\\-22" not in result["caption"]  # NO double-escape
+
+    def test_caption_contains_raw_camera_label(self):
+        """Camera label with reserved chars must be passed through raw."""
+        result = build_alert_message(
+            verdict=_make_verdict(),
+            vm1_result=_make_vm1_result(cls="person"),
+            artifacts=_make_artifacts(),
+            camera_label="Front [Door]",
+            position=1,
+            alert=_make_alert(alert_id="test_id1"),
+        )
+        # Brackets raw, NOT pre-escaped. Dispatcher will escape them once.
+        assert "Front [Door]" in result["caption"]
+        assert "Front \\[Door\\]" not in result["caption"]
