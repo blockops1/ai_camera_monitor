@@ -142,9 +142,14 @@ def _should_exclude(filepath: str, repo_root: Path) -> bool:
 
     # Exclude register_cameras.py — contains camera IP/port config from
     # camera-creds.env; these are device addresses, not credentials/leaks.
+    # Exclude verify_recipe_live.py — same reason: camera IP/model metadata.
+    # Exclude PHASE-V2-065-verification.json — live evidence contains
+    # camera IPs from the farm network (device addresses, not secrets).
     return str(rel) in (
         ".mailmap",
         "scripts/register_cameras.py",
+        "scripts/verify_recipe_live.py",
+        "docs/PHASE-V2-065-verification.json",
     )
 
 
