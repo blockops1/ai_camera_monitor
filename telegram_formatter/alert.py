@@ -110,16 +110,20 @@ def build_alert_message(
         time_str = format_local_timestamp(timestamp)
     else:
         time_str = ""
+    # NOTE: bold markers (*...*) intentionally absent — the dispatcher escapes
+    # every reserved char including '*', so '*{camera_label}*' would render as
+    # literal '*camera_label*' (no bold, just visible asterisks). Plain text
+    # is cleaner and matches how detail.py / match_alert.py render.
     if time_str:
-        header = f"{_CAMERA_EMOJI} *{camera_label}* -- {time_str}"
+        header = f"{_CAMERA_EMOJI} {camera_label} -- {time_str}"
     else:
-        header = f"{_CAMERA_EMOJI} *{camera_label}*"
+        header = f"{_CAMERA_EMOJI} {camera_label}"
     lines.append(header)
 
     # Line 2: class with emoji and confidence.
     emoji = _emoji_for_class(cls)
     conf_str = str(conf)
-    class_line = f"{emoji} *{cls}* \u2022 confidence {conf_str}%"
+    class_line = f"{emoji} {cls} \u2022 confidence {conf_str}%"
     lines.append(class_line)
 
     # Line 3: TG position marker.
