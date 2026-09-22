@@ -29,37 +29,37 @@ from dotenv import dotenv_values
 CAMERAS: list[tuple[str, str, str, str]] = [
     (
         "front",
-        "192.168.1.39:9000",
+        "[REDACTED-LAN-IP]:9000",
         "FRONT_HTTP_PASS",
         "Front entrance",
     ),
     (
         "back",
-        "192.168.1.85:9000",
+        "[REDACTED-LAN-IP]:9000",
         "BACK_HTTP_PASS",
         "Back door",
     ),
     (
         "outside_front_garage",
-        "192.168.1.73:9000",
+        "[REDACTED-LAN-IP]:9000",
         "OUTSIDE_FRONT_GARAGE_HTTP_PASS",
         "Outside front garage",
     ),
     (
         "outside_front_solar",
-        "192.168.1.103:9000",
+        "[REDACTED-LAN-IP]:9000",
         "OUTSIDE_FRONT_SOLAR_HTTP_PASS",
         "Outside front solar (gatekeeper)",
     ),
     (
         "outside_front_power",
-        "192.168.1.108:9000",
+        "[REDACTED-LAN-IP]:9000",
         "OUTSIDE_FRONT_POWER_HTTP_PASS",
         "Outside front power",
     ),
     (
         "outside_back_solar",
-        "192.168.1.113:9000",
+        "[REDACTED-LAN-IP]:9000",
         "OUTSIDE_BACK_SOLAR_HTTP_PASS",
         "Outside back solar",
     ),
