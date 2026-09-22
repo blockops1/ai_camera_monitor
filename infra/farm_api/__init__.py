@@ -21,4 +21,7 @@ All functions are pure or read from well-known filesystem paths.
 No transport awareness — the MCP server is the only consumer today.
 """
 
-from infra.farm_api import cameras  # noqa: F401 — exposes camera resources
+from infra.farm_api import (
+    cameras,  # noqa: F401 — exposes camera resources
+    gate,  # noqa: F401 — exposes gate resources
+)
