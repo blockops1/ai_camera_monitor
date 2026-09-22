@@ -517,3 +517,54 @@ def crop_frame_to_bbox(frame_path: str, bbox: tuple[int, int, int, int]) -> str 
     except OSError:
         return None
     return str(out_path)
+
+
+def compute_cross_diff_bboxes(
+    frame_1_path: str,
+    frame_2_path: str,
+    frame_3_path: str,
+    frame_4_path: str,
+    threshold: int = DEFAULT_DIFF_THRESHOLD,
+    min_area_px: int = DEFAULT_MIN_AREA_PX,
+    pad_pct: float = DEFAULT_BBOX_PAD_PCT,
+    iou_threshold: float = 0.50,
+) -> tuple[tuple[int, int, int, int] | None, tuple[int, int, int, int] | None]:
+    """Compute cross-diff bboxes for the motion gate pipeline.
+
+    Loads 4 frames, computes diff(1,2), diff(2,3), diff(3,4) masks, then:
+      - bbox_a = bbox_from_mask_with_intersection(mask_12, mask_23, ...)
+        (anchored to frame_2 — the subject WAS here)
+      - bbox_b = bbox_from_mask_with_intersection(mask_23, mask_34, ...)
+        (anchored to frame_3 — the subject IS here)
+
+    Either may be None if no IoU match is found above threshold.
+
+    Returns (bbox_a, bbox_b).
+    """
+    f1 = load_frame(frame_1_path)
+    f2 = load_frame(frame_2_path)
+    f3 = load_frame(frame_3_path)
+    f4 = load_frame(frame_4_path)
+
+    # If any frame fails to load, return (None, None).
+    if f1 is None or f2 is None or f3 is None or f4 is None:
+        return None, None
+
+    mask_12 = pairwise_diff(f1, f2, threshold=threshold)
+    mask_23 = pairwise_diff(f2, f3, threshold=threshold)
+    mask_34 = pairwise_diff(f3, f4, threshold=threshold)
+
+    bbox_a = bbox_from_mask_with_intersection(
+        mask_12, mask_23,
+        min_area_px=min_area_px,
+        pad_pct=pad_pct,
+        iou_threshold=iou_threshold,
+    )
+    bbox_b = bbox_from_mask_with_intersection(
+        mask_23, mask_34,
+        min_area_px=min_area_px,
+        pad_pct=pad_pct,
+        iou_threshold=iou_threshold,
+    )
+
+    return bbox_a, bbox_b

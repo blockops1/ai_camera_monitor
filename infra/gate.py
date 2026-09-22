@@ -135,9 +135,10 @@ from typing import Literal, Protocol
 from PIL import Image
 
 from infra.frame_diff import (
+    DEFAULT_BBOX_PAD_PCT,
     DEFAULT_DIFF_THRESHOLD,
     DEFAULT_MIN_AREA_PX,
-    diff_pair_with_bbox,
+    compute_cross_diff_bboxes,
 )
 from infra.quick_classifier import KEEP_CLASSES_DEFAULT, QuickClassifier, QuickVerdict
 
@@ -395,6 +396,31 @@ def _read_global_change_max_pct() -> float:
         return float(raw)
     except ValueError:
         return 60.0
+
+
+# ---------------------------------------------------------------------------
+# Env var: FARMSURV_DIFF_IOU_THRESHOLD
+# ---------------------------------------------------------------------------
+#
+# IoU threshold for cross-diff bbox matching (bbox_from_mask_with_intersection).
+# Default 0.50 — components in adjacent diffs must overlap by at least 50%
+# to count as the same object.
+_DEFAULT_DIFF_IOU_THRESHOLD = 0.50
+
+
+def _read_iou_threshold() -> float:
+    """FARMSURV_DIFF_IOU_THRESHOLD — operator-tunable (default 0.50).
+
+    Components in consecutive diff masks (e.g. diff(1,2) and diff(2,3))
+    must have IoU >= this value to be considered the same object.
+    Set to 0 to disable cross-diff intersection (returns None always).
+    Set very high (e.g. 1.0) to require near-perfect overlap.
+    """
+    raw = os.environ.get("FARMSURV_DIFF_IOU_THRESHOLD", str(_DEFAULT_DIFF_IOU_THRESHOLD)).strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return _DEFAULT_DIFF_IOU_THRESHOLD
 
 
 def _bbox_area_pct(bbox, frame_w: int, frame_h: int) -> float:
@@ -1012,20 +1038,18 @@ def run(
 
     thresholds, subjects = load_thresholds(camera_name)
 
-    # ---- diff(2,3) → bbox_a → crop_a ----
-    bbox_a, count_a, _mask_a = diff_pair_with_bbox(
-        frame_2_path, frame_3_path, threshold=diff_threshold, min_area_px=min_area_px
+    # ---- unified cross-diff: compute both bboxes in one pass ----
+    iou_threshold = _read_iou_threshold()
+    bbox_a, bbox_b = compute_cross_diff_bboxes(
+        frame_1_path, frame_2_path, frame_3_path, frame_4_path,
+        threshold=diff_threshold,
+        min_area_px=min_area_px,
+        pad_pct=DEFAULT_BBOX_PAD_PCT,
+        iou_threshold=iou_threshold,
     )
     log.debug(
-        f"[{alert_id}] motion_gate: diff(2,3) changed_pixels={count_a} bbox_a={bbox_a}"
-    )
-
-    # ---- diff(3,4) → bbox_b → crop_b ----
-    bbox_b, count_b, _mask_b = diff_pair_with_bbox(
-        frame_3_path, frame_4_path, threshold=diff_threshold, min_area_px=min_area_px
-    )
-    log.debug(
-        f"[{alert_id}] motion_gate: diff(3,4) changed_pixels={count_b} bbox_b={bbox_b}"
+        f"[{alert_id}] motion_gate: compute_cross_diff_bboxes — "
+        f"bbox_a={bbox_a} bbox_b={bbox_b} iou_threshold={iou_threshold:.2f}"
     )
 
     # Phase 6B.175 (reverted 2026-09-13): crop uses the SAME bbox that's
