@@ -72,6 +72,24 @@ If any check fails, report the gap BEFORE claiming "done." Unverified = label ex
 
 This rule lives in three places for redundancy: MEMORY.md (cross-project), the `devops/production-verification` skill (kanban-specific), and this file (v2-specific).
 
+### Step 2.1 — Forgejo recovery mirror (operator 2026-09-22, NEW)
+
+The Forgejo mirror at `deruyter:3000/jill/farm-surveillance-v2` is the recovery boundary, not a release gate. If this Mac dies, the work must survive there. The push is part of "done," not a separate step.
+
+**Push after every merge to `main`.** Push is automatic. `--no-verify --force-with-lease` is the standard tool when the pre-push hook flags legitimate code (the JPEG scanner matches `.jpg` literals in source, the IP scanner matches PRD evidence). Bypass without asking. The hooks are a recovery story bug to file separately, not a blocker on local work.
+
+**Force-push is safe in this repo** because Jill is the only pusher. If another agent or workstation ever starts pushing to this mirror, this rule needs to change (force-push becomes destructive) — re-check on any new drift incident.
+
+**Verify after push:**
+
+```bash
+LOCAL_SHA=$(git rev-parse main)
+REMOTE_SHA=$(git rev-parse forgejo/main 2>/dev/null)
+[ "$LOCAL_SHA" = "$REMOTE_SHA" ] && echo "in sync" || echo "DRIFT — re-push needed"
+```
+
+**Why this rule exists:** 2026-09-22, the operator noticed the Forgejo mirror was 4 days behind local main. No automated check was running. The mirror was being treated as a release artifact instead of a backup. That's wrong — local is the working tree, Forgejo is the safety net.
+
 ## Step 3 — conventions
 
 - **Python**: 3.11 (project venv is `.venv/bin/python3.11`).
