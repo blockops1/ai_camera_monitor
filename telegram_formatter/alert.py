@@ -82,7 +82,9 @@ def _emoji_for_class(cls: str) -> str:
     return _CLASS_EMOJI.get(cls, _DEFAULT_EMOJI)
 
 
-def build_alert_message(verdict, vm1_result, artifacts, camera_label="Camera", position=1, alert=None):
+def build_alert_message(
+    verdict, vm1_result, artifacts, camera_label="Camera", position=1, alert=None
+):
     """Build a TG#1 Telegram message dict (MarkdownV2).
 
     Returns a 4-6 line Markdown body:

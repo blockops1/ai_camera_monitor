@@ -207,13 +207,13 @@ class TestMatchMessageAnimalUnmatched:
     """build_match_message animal + unmatched path."""
 
     def test_animal_unrecognized_shows_status(self) -> None:
-        """Unmatched animal alert shows 'unrecognized animal'."""
+        """Unmatched animal alert shows no-match emoji header."""
         match_result = {"matched": False}
         vm2_result = {"class": "animal"}
         result = build_match_message(match_result, vm2_result, camera_label="Gate")
         caption = result["caption"]
-        assert "unrecognized animal" in caption
-        assert "Status: unrecognized animal" in caption
+        # US-067c: no 'Status:' line, just the no-match header
+        assert "⚠️ No match" in caption
 
     def test_animal_unmatched_no_vehicle_string(self) -> None:
         """Unmatched animal must not contain 'vehicle' or 'Recognized:'. """
@@ -228,7 +228,7 @@ class TestMatchMessageAnimalUnmatched:
         assert "vehicle" not in caption
 
     def test_animal_unrecognized_with_top_candidates(self) -> None:
-        """Unmatched animal with top_candidates shows full no-match body."""
+        """Unmatched animal with top_candidates shows slimmed no-match body."""
         match_result = {"matched": False}
         vm2_result = {"class": "animal"}
         result = build_match_message(
@@ -242,8 +242,11 @@ class TestMatchMessageAnimalUnmatched:
             gap_threshold=0.1,
         )
         caption = result["caption"]
-        assert "unrecognized animal" in caption
-        assert "below confidence threshold" in caption
+        # US-067c: slimmed body, no Status:/Reason:/Thresholds:
+        assert "⚠️ No match" in caption
+        assert "Runner-up: *a_001* (0.72)" in caption
+        assert "unrecognized" not in caption
+        assert "Reason:" not in caption
 
     def test_animal_unmatched_default_class_fallback(self) -> None:
         """When vm2_result has no 'class' key, classification defaults to 'vehicle'.
@@ -252,9 +255,9 @@ class TestMatchMessageAnimalUnmatched:
         vm2_result = {}  # no class key
         result = build_match_message(match_result, vm2_result, camera_label="Gate")
         caption = result["caption"]
-        # Should fall back to vehicle, NOT animal
-        assert "unrecognized vehicle" in caption
-        assert "unrecognized animal" not in caption
+        # US-067c: no-match uses emoji header regardless of class
+        assert "⚠️ No match" in caption
+        assert "vehicle" not in caption
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +269,7 @@ class TestVehicleVsAnimalDivergence:
     """Verify vehicle and animal paths diverge correctly."""
 
     def test_vehicle_match_unchanged(self) -> None:
-        """Vehicle matched alert still uses build_match_alert_body (label, confidence, gap)."""
+        """Vehicle matched alert still uses build_match_alert_body (label, gap)."""
         match_result = {
             "matched": True,
             "known_vehicle": {
@@ -284,8 +287,9 @@ class TestVehicleVsAnimalDivergence:
         caption = result["caption"]
         assert "Match" in caption
         assert "Red Ford F150" in caption
-        assert "Confidence: 8.5" in caption
-        assert "gap: 3.00" in caption
+        # US-067c: Confidence line removed, Gap kept
+        assert "Confidence:" not in caption
+        assert "Gap: 3.0" in caption
         assert "Recognized:" not in caption
 
     def test_animal_match_uses_recognized_not_match(self) -> None:
