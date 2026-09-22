@@ -47,12 +47,12 @@ RECIPE_PATH = str(_PROJECT_ROOT / "config" / "camera_recipes.toml")
 EVIDENCE_PATH = str(_PROJECT_ROOT / "docs" / "PHASE-V2-065-verification.json")
 
 CAMERA_META: dict[str, dict[str, str]] = {
-    "front": {"ip": "192.168.1.39", "model": "RLC-833A"},
-    "back": {"ip": "192.168.1.85", "model": "RLC-833A"},
-    "outside_front_garage": {"ip": "192.168.1.73", "model": "RLC-510A"},
-    "outside_front_solar": {"ip": "192.168.1.103", "model": "RLC-510A"},
-    "outside_front_power": {"ip": "192.168.1.108", "model": "RLC-510A"},
-    "outside_back_solar": {"ip": "192.168.1.113", "model": "RLC-510A"},
+    "front": {"ip": "[REDACTED-LAN-IP]", "model": "RLC-833A"},
+    "back": {"ip": "[REDACTED-LAN-IP]", "model": "RLC-833A"},
+    "outside_front_garage": {"ip": "[REDACTED-LAN-IP]", "model": "RLC-510A"},
+    "outside_front_solar": {"ip": "[REDACTED-LAN-IP]", "model": "RLC-510A"},
+    "outside_front_power": {"ip": "[REDACTED-LAN-IP]", "model": "RLC-510A"},
+    "outside_back_solar": {"ip": "[REDACTED-LAN-IP]", "model": "RLC-510A"},
 }
 
 

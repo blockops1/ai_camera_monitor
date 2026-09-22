@@ -49,10 +49,10 @@ Usage:
 
 Cameras on this property (all four 510As run firmware v3.2.0.5180_2507241368;
 verified 2026-08-02 via ONVIF GetDeviceInformation):
-    Outside Front Solar  — 192.168.1.103  (gatekeeper)
-    Outside Front Garage — 192.168.1.73
-    Outside Front Power  — 192.168.1.108
-    Outside Back Solar   — 192.168.1.113
+    Outside Front Solar  — [REDACTED-LAN-IP]  (gatekeeper)
+    Outside Front Garage — [REDACTED-LAN-IP]
+    Outside Front Power  — [REDACTED-LAN-IP]
+    Outside Back Solar   — [REDACTED-LAN-IP]
 """
 
 from __future__ import annotations
@@ -91,7 +91,7 @@ from cam_browser import CamBrowser  # noqa: E402
 # Person + Pet sliders unchanged from 2026-08-02 recipe.
 #
 # Verification plan: apply to OFP first (Outside Front Power,
-# 192.168.1.108), monitor 24–48h, then roll to OFS + the other two
+# [REDACTED-LAN-IP]), monitor 24–48h, then roll to OFS + the other two
 # 510As. Do NOT touch detection zones — burned 2026-07-20.
 
 RECIPE = {
@@ -111,10 +111,10 @@ RECIPE = {
 # --- All four 510A cameras (verified 2026-08-02 firmware inventory) ---
 
 CAMERAS_510A = {
-    "Outside Front Solar":   "192.168.1.103",
-    "Outside Front Garage":  "192.168.1.73",
-    "Outside Front Power":   "192.168.1.108",
-    "Outside Back Solar":    "192.168.1.113",
+    "Outside Front Solar":   "[REDACTED-LAN-IP]",
+    "Outside Front Garage":  "[REDACTED-LAN-IP]",
+    "Outside Front Power":   "[REDACTED-LAN-IP]",
+    "Outside Back Solar":    "[REDACTED-LAN-IP]",
 }
 
 

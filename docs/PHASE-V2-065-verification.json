@@ -5,7 +5,7 @@
   "cameras": [
     {
       "camera": "front",
-      "ip": "192.168.1.39",
+      "ip": "[REDACTED-LAN-IP]",
       "model": "RLC-833A",
       "before": {
         "detect_ai": {
@@ -44,7 +44,7 @@
     },
     {
       "camera": "back",
-      "ip": "192.168.1.85",
+      "ip": "[REDACTED-LAN-IP]",
       "model": "RLC-833A",
       "before": {
         "detect_ai": {
@@ -83,7 +83,7 @@
     },
     {
       "camera": "outside_front_garage",
-      "ip": "192.168.1.73",
+      "ip": "[REDACTED-LAN-IP]",
       "model": "RLC-510A",
       "before": {
         "detect_ai": {
@@ -122,7 +122,7 @@
     },
     {
       "camera": "outside_front_solar",
-      "ip": "192.168.1.103",
+      "ip": "[REDACTED-LAN-IP]",
       "model": "RLC-510A",
       "before": {
         "detect_ai": {
@@ -161,7 +161,7 @@
     },
     {
       "camera": "outside_front_power",
-      "ip": "192.168.1.108",
+      "ip": "[REDACTED-LAN-IP]",
       "model": "RLC-510A",
       "before": {
         "detect_ai": {
@@ -200,7 +200,7 @@
     },
     {
       "camera": "outside_back_solar",
-      "ip": "192.168.1.113",
+      "ip": "[REDACTED-LAN-IP]",
       "model": "RLC-510A",
       "before": {
         "detect_ai": {
