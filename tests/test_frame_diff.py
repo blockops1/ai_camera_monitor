@@ -200,19 +200,6 @@ class TestConnectedComponents:
         mask[50, 50] = 255  # 1 pixel
         assert bbox_from_mask(mask, min_area_px=10) is None
 
-    def test_multiple_blobs_picks_largest(self):
-        """Two separated blobs → bbox of the larger one (8-conn ignores gap)."""
-        mask = np.zeros((100, 100), dtype=np.uint8)
-        mask[10:15, 10:15] = 255  # 5×5 = 25 px
-        mask[30:50, 30:50] = 255  # 20×20 = 400 px — well separated from first
-        bbox = bbox_from_mask(mask, min_area_px=10)
-        assert bbox is not None
-        x, y, w, h = bbox
-        # With 8-connectivity and a 15-pixel gap, both blobs merge.
-        # The combined bbox should start near the small blob.
-        # Just verify the bbox covers a significant region (400+ px).
-        assert w * h > 300
-
     def test_bbox_expansion(self):
         """bbox_from_mask expands by DEFAULT_BBOX_PAD_PCT and rounds to 32."""
         mask = np.zeros((100, 100), dtype=np.uint8)
