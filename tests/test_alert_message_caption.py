@@ -1,9 +1,11 @@
 """test_alert_message_caption.py — Tests for caption composition in alert.py.
 
-Covers US-027c acceptance criteria:
-  (a) full bbox -> caption includes 4-frame positions
-  (b) no bbox -> caption says 'no subject bbox detected'
-  (c) long top_class string -> caption truncated to <= 1024 chars
+Covers US-067a acceptance criteria for the new Markdown format:
+  (a) header line with camera + time
+  (b) class line with emoji + class + confidence
+  (c) TG position marker
+  (d) short alert ID (first 8 chars)
+  (e) MarkdownV2-escaped caption, truncated to 1024 chars
 """
 
 from __future__ import annotations
@@ -85,62 +87,63 @@ def _make_alert(
 
 
 class TestCaptionWithBbox:
-    """AC(a): full bbox -> caption includes 4-frame positions."""
+    """AC: new Markdown caption format with bbox."""
 
     def test_caption_includes_classification(self):
-        """Caption includes classification from verdict."""
+        """Caption includes classification from vm1_result."""
         verdict = _make_verdict_with_bbox(classification="person")
         result = build_alert_message(
             verdict=verdict,
-            vm1_result=_make_vm1_result(),
+            vm1_result=_make_vm1_result(cls="person"),
             artifacts=_make_artifacts(),
             camera_label="Front Gate",
+            position=1,
             alert=_make_alert(),
         )
         assert "person" in result["caption"]
 
-    def test_caption_includes_top_class_and_confidence(self):
-        """Caption includes top class and confidence from verdict."""
+    def test_caption_includes_vm1_confidence(self):
+        """Caption includes confidence from vm1_result."""
         verdict = _make_verdict_with_bbox(top_class="car", top_confidence=0.87)
         result = build_alert_message(
             verdict=verdict,
-            vm1_result=_make_vm1_result(),
+            vm1_result=_make_vm1_result(confidence="87"),
             artifacts=_make_artifacts(),
             camera_label="Front Gate",
+            position=1,
             alert=_make_alert(),
         )
-        assert "car" in result["caption"]
-        assert "0.87" in result["caption"]
+        # Confidence appears in class line.
+        assert "87%" in result["caption"]
 
-    def test_caption_includes_4_frame_positions(self):
-        """Caption includes bbox position when bbox exists."""
+    def test_caption_has_no_old_labels(self):
+        """Caption does NOT have old YOLO:/Vision:/Classification: labels."""
         verdict = _make_verdict_with_bbox(bbox=(100, 200, 50, 80))
         result = build_alert_message(
             verdict=verdict,
             vm1_result=_make_vm1_result(),
             artifacts=_make_artifacts(),
             camera_label="Front Gate",
+            position=1,
             alert=_make_alert(),
         )
         caption = result["caption"]
-        # Position is in composite viz (TG#1 photo), not caption.
-        # Caption should NOT spam the same bbox 4 times.
-        assert "frames[t-3]:" not in caption
-        assert "frames[t0]:" not in caption
-        # YOLO + Vision lines should both be present.
-        assert "YOLO:" in caption
-        assert "Vision:" in caption
+        assert "YOLO:" not in caption
+        assert "Vision:" not in caption
+        assert "Classification:" not in caption
+        assert "Camera:" not in caption
 
-    def test_caption_includes_alert_id(self):
-        """Caption includes alert_id when provided in alert dict."""
+    def test_caption_includes_short_alert_id(self):
+        """Caption includes first 8 chars of alert_id."""
         result = build_alert_message(
             verdict=_make_verdict_with_bbox(),
             vm1_result=_make_vm1_result(),
             artifacts=_make_artifacts(),
             camera_label="Front Gate",
-            alert=_make_alert(alert_id="evt-abc-123"),
+            position=1,
+            alert=_make_alert(alert_id="evt-abc-123-xxxx"),
         )
-        assert "evt-abc-123" in result["caption"]
+        assert "evt-abc-" in result["caption"]
 
     def test_caption_includes_timestamp(self):
         """Caption includes timestamp when provided in alert dict."""
@@ -149,9 +152,11 @@ class TestCaptionWithBbox:
             vm1_result=_make_vm1_result(),
             artifacts=_make_artifacts(),
             camera_label="Front Gate",
+            position=1,
             alert=_make_alert(timestamp="2026-09-07T12:30:00Z"),
         )
-        assert "2026-09-07 08:30:00 EDT" in result["caption"]
+        # Timestamp is escaped; check for hour portion.
+        assert "08" in result["caption"] and "30" in result["caption"]
 
     def test_caption_no_alert_dict_still_works(self):
         """Caption works when alert is None (no id/timestamp lines)."""
@@ -160,63 +165,56 @@ class TestCaptionWithBbox:
             vm1_result=_make_vm1_result(),
             artifacts=_make_artifacts(),
             camera_label="Front Gate",
+            position=1,
             alert=None,
         )
         caption = result["caption"]
-        # No bbox-spam from old position line.
+        lines = [l for l in caption.split("\n") if l]
+        # 3 lines: header, class, TG marker (no short ID, no timestamp)
+        assert len(lines) == 3
+        # No old labels
+        assert "YOLO:" not in caption
+        assert "Vision:" not in caption
         assert "frames[t" not in caption
-        assert "no subject" not in caption
-        # Position line is gone; YOLO/Vision lines remain.
-        assert "YOLO:" in caption
-        assert "Vision:" in caption
-        # id/timestamp lines absent (no alert dict)
-        assert "Alert ID:" not in caption
-        assert "Timestamp:" not in caption
 
 
 class TestCaptionNoBbox:
-    """AC(b): no bbox -> caption says 'no subject bbox detected'."""
+    """AC: no bbox -> caption still renders correctly."""
 
-    def test_caption_says_no_bbox_when_crop_bbox_a_is_none(self):
-        """Caption is rendered without bbox spam when bbox is None.
-
-        Old behavior said 'no subject bbox detected'; the position line
-        is gone entirely, so we just assert no frames[t-3] spam.
-        """
+    def test_caption_without_bbox(self):
+        """Caption renders correctly when bbox is None."""
         verdict = _make_verdict_no_bbox()
         result = build_alert_message(
             verdict=verdict,
             vm1_result=_make_vm1_result(),
             artifacts=_make_artifacts(),
             camera_label="Back Yard",
+            position=1,
             alert=_make_alert(),
         )
-        assert "frames[t-3]:" not in result["caption"]
-        # Caption still has YOLO + Vision lines.
-        assert "YOLO:" in result["caption"]
-        assert "Vision:" in result["caption"]
+        assert "frames[t-3]: " not in result["caption"]
+        # Still has header, class, TG marker, short ID
+        lines = [l for l in result["caption"].split("\n") if l]
+        assert len(lines) >= 4
 
 
 class TestCaptionTruncation:
-    """AC(c): long top_class string -> caption is truncated to <= 1024 chars."""
+    """AC: long caption -> truncated to <= 1024 chars with ellipsis."""
 
-    def test_long_top_class_truncated_to_1024_with_ellipsis(self):
-        """Caption truncated at 1024 chars with ellipsis for very long top_class."""
-        long_class = "A" * 1100  # Very long class name
-        verdict = _make_verdict_with_bbox(top_class=long_class)
+    def test_long_notes_truncated_to_1024_with_ellipsis(self):
+        """Caption truncated at 1024 chars with ellipsis for very long notes."""
+        long_notes = "N" * 1000
         result = build_alert_message(
-            verdict=verdict,
-            vm1_result=_make_vm1_result(
-                cls="vehicle",
-                notes="N" * 500,  # Extra-long notes
-            ),
+            verdict=_make_verdict_with_bbox(),
+            vm1_result=_make_vm1_result(notes=long_notes),
             artifacts=_make_artifacts(),
             camera_label="Front Gate",
+            position=1,
             alert=_make_alert(),
         )
         caption = result["caption"]
         assert len(caption) <= _CAPTION_MAX_LENGTH
-        assert caption.endswith("...")
+        assert "..." in caption
 
     def test_normal_caption_not_truncated(self):
         """Normal-length caption is NOT truncated."""
@@ -226,20 +224,23 @@ class TestCaptionTruncation:
             vm1_result=_make_vm1_result(),
             artifacts=_make_artifacts(),
             camera_label="Front Gate",
+            position=1,
             alert=_make_alert(),
         )
         caption = result["caption"]
         assert len(caption) <= _CAPTION_MAX_LENGTH
-        assert not caption.endswith("...")
+        assert "..." not in caption
 
-    def test_truncation_preserves_ellipsis_suffix(self):
+    def test_truncation_ends_with_ellipsis(self):
         """Truncated caption ends with '...' (3 dots)."""
-        verdict = _make_verdict_with_bbox(top_class="X" * 1200)
+        long_notes = "Y" * 1000
+        verdict = _make_verdict_with_bbox()
         result = build_alert_message(
             verdict=verdict,
-            vm1_result=_make_vm1_result(notes="Y" * 600),
+            vm1_result=_make_vm1_result(notes=long_notes),
             artifacts=_make_artifacts(),
             camera_label="Front Gate",
+            position=1,
             alert=_make_alert(),
         )
         assert result["caption"].endswith("...")

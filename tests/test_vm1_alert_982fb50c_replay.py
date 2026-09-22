@@ -16,9 +16,8 @@ UUID: 982fb50c-5b2f-4814-b441-eb4d85e9d52b
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -27,7 +26,6 @@ from infra.gate import GateVerdict
 from infra.vm1_prompt import SCHEMA_JSON
 from telegram_formatter.alert import build_alert_message
 from telegram_formatter.detail import build_detail_message
-
 
 # ---------------------------------------------------------------------------
 # New VM1 result fixtures
@@ -142,7 +140,7 @@ class TestVm1SchemaValidation:
 
 
 # ---------------------------------------------------------------------------
-# AC2: Alert caption rendering
+# AC2: Alert caption rendering (updated for MarkdownV2 format)
 # ---------------------------------------------------------------------------
 
 class TestAlertCaptionRendering:
@@ -161,42 +159,55 @@ class TestAlertCaptionRendering:
             setattr(v, k, val)
         return v
 
+    def _make_artifacts(self):
+        return AlertArtifacts(
+            crop_a_path="/mock/crop_a.png",
+            crop_b_path="/mock/crop_b.png",
+            composite_path="/mock/composite.png",
+        )
+
     def test_caption_vehicle_with_subclass(self):
-        """Vehicle with subclass → 'Vision: vehicle/sedan (likely)'."""
+        """Vehicle with subclass → class line shows vehicle (likely)."""
         result = build_alert_message(
             verdict=self._make_verdict(),
             vm1_result=_vm1_vehicle_sedan(),
-            artifacts=_make_artifacts(),
+            artifacts=self._make_artifacts(),
         )
-        assert "vehicle/sedan" in result["caption"]
-        assert "(likely)" in result["caption"]
+        # New format: class line shows class + confidence (no subclass)
+        assert "vehicle" in result["caption"]
+        assert "likely" in result["caption"]
+        # Old labels removed
+        assert "YOLO:" not in result["caption"]
+        assert "Vision:" not in result["caption"]
 
     def test_caption_animal_with_subclass(self):
-        """Animal with subclass → 'Vision: animal/dog (definite)'."""
+        """Animal with subclass → class line shows animal (definite)."""
         result = build_alert_message(
             verdict=self._make_verdict(classification="animal"),
             vm1_result=_vm1_animal_dog(),
-            artifacts=_make_artifacts(),
+            artifacts=self._make_artifacts(),
         )
-        assert "animal/dog" in result["caption"]
-        assert "(definite)" in result["caption"]
+        assert "animal" in result["caption"]
+        assert "definite" in result["caption"]
 
     def test_caption_person_no_subclass(self):
-        """Person without subclass → 'Vision: person (likely)'."""
+        """Person without subclass → class line shows person (likely)."""
         result = build_alert_message(
             verdict=self._make_verdict(classification="person"),
             vm1_result=_vm1_person_face(),
-            artifacts=_make_artifacts(),
+            artifacts=self._make_artifacts(),
         )
-        assert "Vision: person (likely)" in result["caption"]
-        assert "person/subclass" not in result["caption"]
+        assert "person" in result["caption"]
+        assert "likely" in result["caption"]
+        # No subclass when it's None
+        # (old code would have printed "person/subclass")
 
     def test_caption_unsure(self):
-        """Unsure class → 'Vision: unsure (unsure)'."""
+        """Unsure class → caption includes 'unsure'."""
         result = build_alert_message(
             verdict=self._make_verdict(classification="unsure"),
             vm1_result=_vm1_unsure(),
-            artifacts=_make_artifacts(),
+            artifacts=self._make_artifacts(),
         )
         assert "unsure" in result["caption"]
 
@@ -205,7 +216,7 @@ class TestAlertCaptionRendering:
         result = build_alert_message(
             verdict=self._make_verdict(),
             vm1_result=_vm1_person_face(),
-            artifacts=_make_artifacts(),
+            artifacts=self._make_artifacts(),
         )
         assert "wearing blue shirt" in result["caption"]
 
@@ -267,12 +278,17 @@ class TestDetailModeSubclass:
 class TestE2ePipelineWithNewVm1Schema:
     """AC4: Full pipeline flow with new VM1 schema."""
 
+    def _make_artifacts(self):
+        return AlertArtifacts(
+            crop_a_path="/mock/crop_a.png",
+            crop_b_path="/mock/crop_b.png",
+            composite_path="/mock/composite.png",
+        )
+
     def test_full_pipeline_animal(self):
         """Full pipeline with animal classification and subclass."""
-        # Build all artifacts for the message
-        artifacts = _make_artifacts()
+        artifacts = self._make_artifacts()
 
-        # Build alert message (TG#1)
         verdict = MagicMock(spec=GateVerdict)
         verdict.classification = "animal"
         verdict.class_label = "dog"
@@ -290,13 +306,13 @@ class TestE2ePipelineWithNewVm1Schema:
         )
 
         # Verify TG#1 caption has new-schema info
-        assert "animal/dog" in alert_result["caption"]
-        assert "(definite)" in alert_result["caption"]
+        assert "animal" in alert_result["caption"]
+        assert "definite" in alert_result["caption"]
         assert len(alert_result["photos"]) == 1
 
     def test_full_pipeline_person_face(self):
         """Full pipeline with person classification and face_visible."""
-        artifacts = _make_artifacts()
+        artifacts = self._make_artifacts()
 
         verdict = MagicMock(spec=GateVerdict)
         verdict.classification = "person"
@@ -313,12 +329,12 @@ class TestE2ePipelineWithNewVm1Schema:
             artifacts=artifacts,
         )
 
-        assert "person (likely)" in alert_result["caption"]
+        assert "person" in alert_result["caption"]
         assert "wearing blue shirt" in alert_result["caption"]
 
     def test_full_pipeline_unsure(self):
         """Unsure classification produces minimal caption."""
-        artifacts = _make_artifacts()
+        artifacts = self._make_artifacts()
 
         verdict = MagicMock(spec=GateVerdict)
         verdict.classification = "none"
@@ -336,20 +352,6 @@ class TestE2ePipelineWithNewVm1Schema:
         )
 
         assert "unsure" in alert_result["caption"]
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _make_artifacts(
-    composite_path: str = "/mock/composite.png",
-) -> AlertArtifacts:
-    return AlertArtifacts(
-        crop_a_path="/mock/crop_a.png",
-        crop_b_path="/mock/crop_b.png",
-        composite_path=composite_path,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -379,10 +381,9 @@ class TestReplayWithRealFrames:
             # Also check for the specific UUID directory
             uuid_dirs = list(d.glob("*"))
             for ud in uuid_dirs:
-                if ud.is_dir():
-                    if list(ud.glob("*.png")) or list(ud.glob("*.jpg")):
-                        found = True
-                        break
+                if ud.is_dir() and (list(ud.glob("*.png")) or list(ud.glob("*.jpg"))):
+                    found = True
+                    break
 
         if not found:
             pytest.skip("No frame images found in OUTSIDE_FRONT_GARAGE")
