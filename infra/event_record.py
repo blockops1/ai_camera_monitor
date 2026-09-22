@@ -49,12 +49,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from infra.paths import PROJECT_ROOT
+from infra.paths import DATA_DIR
 
 log = logging.getLogger(__name__)
 
 # Output directory for event.json files per alert.
-EVENTS_DIR = str(Path(PROJECT_ROOT) / "data" / "events")
+EVENTS_DIR = str(Path(DATA_DIR) / "events")
 
 
 @dataclass
