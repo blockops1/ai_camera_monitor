@@ -1170,12 +1170,17 @@ class ReolinkClient:
         d = _to_dict(raw)
         if not d:
             return DetectionConfig()
+        # The Reolink API returns "stayTime" (camelCase) as a top-level
+        # field — it is shared across person / vehicle / dog_cat.  Fall
+        # back to snake_case keys when present (some older API paths).
+        stay = int(d.get("stayTime") or d.get("person_stay_time") or
+                   d.get("vehicle_stay_time") or d.get("dog_cat_stay_time") or 0)
         return DetectionConfig(
             enabled=bool(d.get("enable") or d.get("enabled")),
             sensitivity=int(d.get("sensitivity", 50)),
-            person_stay_time=int(d.get("person_stay_time", 0)),
-            vehicle_stay_time=int(d.get("vehicle_stay_time", 0)),
-            dog_cat_stay_time=int(d.get("dog_cat_stay_time", 0)),
+            person_stay_time=stay,
+            vehicle_stay_time=stay,
+            dog_cat_stay_time=stay,
             motion_area=d.get("motion_area", ""),
             alarm_type=d.get("alarm_type", ""),
             delay_time=int(d.get("delay_time", 0)),

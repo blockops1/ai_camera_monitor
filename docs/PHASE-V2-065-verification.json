@@ -1,7 +1,7 @@
 {
   "prd": "PHASE-V2-065",
-  "ran_at": "2026-09-22T00:09:53.890657+00:00",
-  "recipe_path": "/Users/jill/farm-surveillance-v2/.worktrees/t_4ecafd5e/config/camera_recipes.toml",
+  "ran_at": "2026-09-22T01:10:09.033479+00:00",
+  "recipe_path": "/Users/jill/farm-surveillance-v2/config/camera_recipes.toml",
   "cameras": [
     {
       "camera": "front",
@@ -10,35 +10,37 @@
       "before": {
         "detect_ai": {
           "person": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "vehicle": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "dog_cat": {
-            "error": "read failed"
+            "sensitivity": 30,
+            "stay_time": 2
           }
         }
       },
       "after": {
         "detect_ai": {
           "person": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "vehicle": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "dog_cat": {
-            "error": "read failed"
+            "sensitivity": 30,
+            "stay_time": 2
           }
         }
       },
-      "match": false,
-      "diffs": [
-        "front.detect_ai.person: read error: reolink-cli exited 1: reolink-cli --output json --camera front detect ai get --type person\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: front\",\"retryable\":false}}\n",
-        "front.detect_ai.vehicle: read error: reolink-cli exited 1: reolink-cli --output json --camera front detect ai get --type vehicle\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: front\",\"retryable\":false}}\n",
-        "front.detect_ai.dog_cat: read error: reolink-cli exited 1: reolink-cli --output json --camera front detect ai get --type dog_cat\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: front\",\"retryable\":false}}\n"
-      ]
+      "match": true,
+      "diffs": []
     },
     {
       "camera": "back",
@@ -47,35 +49,37 @@
       "before": {
         "detect_ai": {
           "person": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "vehicle": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "dog_cat": {
-            "error": "read failed"
+            "sensitivity": 30,
+            "stay_time": 2
           }
         }
       },
       "after": {
         "detect_ai": {
           "person": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "vehicle": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "dog_cat": {
-            "error": "read failed"
+            "sensitivity": 30,
+            "stay_time": 2
           }
         }
       },
-      "match": false,
-      "diffs": [
-        "back.detect_ai.person: read error: reolink-cli exited 1: reolink-cli --output json --camera back detect ai get --type person\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: back\",\"retryable\":false}}\n",
-        "back.detect_ai.vehicle: read error: reolink-cli exited 1: reolink-cli --output json --camera back detect ai get --type vehicle\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: back\",\"retryable\":false}}\n",
-        "back.detect_ai.dog_cat: read error: reolink-cli exited 1: reolink-cli --output json --camera back detect ai get --type dog_cat\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: back\",\"retryable\":false}}\n"
-      ]
+      "match": true,
+      "diffs": []
     },
     {
       "camera": "outside_front_garage",
@@ -84,35 +88,37 @@
       "before": {
         "detect_ai": {
           "person": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "vehicle": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "dog_cat": {
-            "error": "read failed"
+            "sensitivity": 30,
+            "stay_time": 2
           }
         }
       },
       "after": {
         "detect_ai": {
           "person": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "vehicle": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "dog_cat": {
-            "error": "read failed"
+            "sensitivity": 30,
+            "stay_time": 2
           }
         }
       },
-      "match": false,
-      "diffs": [
-        "outside_front_garage.detect_ai.person: read error: reolink-cli exited 1: reolink-cli --output json --camera outside_front_garage detect ai get --type person\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: outside_front_garage\",\"retryable\":false}}\n",
-        "outside_front_garage.detect_ai.vehicle: read error: reolink-cli exited 1: reolink-cli --output json --camera outside_front_garage detect ai get --type vehicle\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: outside_front_garage\",\"retryable\":false}}\n",
-        "outside_front_garage.detect_ai.dog_cat: read error: reolink-cli exited 1: reolink-cli --output json --camera outside_front_garage detect ai get --type dog_cat\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: outside_front_garage\",\"retryable\":false}}\n"
-      ]
+      "match": true,
+      "diffs": []
     },
     {
       "camera": "outside_front_solar",
@@ -121,35 +127,37 @@
       "before": {
         "detect_ai": {
           "person": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "vehicle": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "dog_cat": {
-            "error": "read failed"
+            "sensitivity": 30,
+            "stay_time": 2
           }
         }
       },
       "after": {
         "detect_ai": {
           "person": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "vehicle": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "dog_cat": {
-            "error": "read failed"
+            "sensitivity": 30,
+            "stay_time": 2
           }
         }
       },
-      "match": false,
-      "diffs": [
-        "outside_front_solar.detect_ai.person: read error: reolink-cli exited 1: reolink-cli --output json --camera outside_front_solar detect ai get --type person\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: outside_front_solar\",\"retryable\":false}}\n",
-        "outside_front_solar.detect_ai.vehicle: read error: reolink-cli exited 1: reolink-cli --output json --camera outside_front_solar detect ai get --type vehicle\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: outside_front_solar\",\"retryable\":false}}\n",
-        "outside_front_solar.detect_ai.dog_cat: read error: reolink-cli exited 1: reolink-cli --output json --camera outside_front_solar detect ai get --type dog_cat\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: outside_front_solar\",\"retryable\":false}}\n"
-      ]
+      "match": true,
+      "diffs": []
     },
     {
       "camera": "outside_front_power",
@@ -158,35 +166,37 @@
       "before": {
         "detect_ai": {
           "person": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "vehicle": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "dog_cat": {
-            "error": "read failed"
+            "sensitivity": 30,
+            "stay_time": 2
           }
         }
       },
       "after": {
         "detect_ai": {
           "person": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "vehicle": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "dog_cat": {
-            "error": "read failed"
+            "sensitivity": 30,
+            "stay_time": 2
           }
         }
       },
-      "match": false,
-      "diffs": [
-        "outside_front_power.detect_ai.person: read error: reolink-cli exited 1: reolink-cli --output json --camera outside_front_power detect ai get --type person\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: outside_front_power\",\"retryable\":false}}\n",
-        "outside_front_power.detect_ai.vehicle: read error: reolink-cli exited 1: reolink-cli --output json --camera outside_front_power detect ai get --type vehicle\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: outside_front_power\",\"retryable\":false}}\n",
-        "outside_front_power.detect_ai.dog_cat: read error: reolink-cli exited 1: reolink-cli --output json --camera outside_front_power detect ai get --type dog_cat\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: outside_front_power\",\"retryable\":false}}\n"
-      ]
+      "match": true,
+      "diffs": []
     },
     {
       "camera": "outside_back_solar",
@@ -195,40 +205,42 @@
       "before": {
         "detect_ai": {
           "person": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "vehicle": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "dog_cat": {
-            "error": "read failed"
+            "sensitivity": 30,
+            "stay_time": 2
           }
         }
       },
       "after": {
         "detect_ai": {
           "person": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "vehicle": {
-            "error": "read failed"
+            "sensitivity": 50,
+            "stay_time": 2
           },
           "dog_cat": {
-            "error": "read failed"
+            "sensitivity": 30,
+            "stay_time": 2
           }
         }
       },
-      "match": false,
-      "diffs": [
-        "outside_back_solar.detect_ai.person: read error: reolink-cli exited 1: reolink-cli --output json --camera outside_back_solar detect ai get --type person\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: outside_back_solar\",\"retryable\":false}}\n",
-        "outside_back_solar.detect_ai.vehicle: read error: reolink-cli exited 1: reolink-cli --output json --camera outside_back_solar detect ai get --type vehicle\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: outside_back_solar\",\"retryable\":false}}\n",
-        "outside_back_solar.detect_ai.dog_cat: read error: reolink-cli exited 1: reolink-cli --output json --camera outside_back_solar detect ai get --type dog_cat\nstdout: \nstderr: {\"ok\":false,\"command\":\"detect\",\"protocol\":null,\"data\":null,\"error\":{\"code\":\"INPUT_ERROR\",\"message\":\"camera not found: outside_back_solar\",\"retryable\":false}}\n"
-      ]
+      "match": true,
+      "diffs": []
     }
   ],
   "summary": {
     "total": 6,
-    "matched": 0,
-    "mismatched": 6
+    "matched": 6,
+    "mismatched": 0
   }
 }

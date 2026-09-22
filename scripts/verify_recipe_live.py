@@ -1,4 +1,3 @@
-#!/usr/bin/env python3.11
 """US-065c: end-to-end live verify of camera recipes against 6 farm cameras.
 
 Runs apply_recipe + verify_recipe on each live camera, captures before/after
@@ -16,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -28,6 +27,9 @@ _CREDS_FILE = _PROJECT_ROOT / "camera-creds.env"
 
 if _CREDS_FILE.is_file() and "FARM_CAMERA_CREDS_FILE" not in os.environ:
     os.environ["FARM_CAMERA_CREDS_FILE"] = str(_CREDS_FILE)
+
+# Gateway address — use env var or default to local gateway.
+_GATEWAY_ADDR = os.environ.get("FARM_REOLINK_GATEWAY_ADDR", "127.0.0.1:9000")
 
 # ---------------------------------------------------------------------------
 # Imports from infra.reolink
@@ -99,11 +101,11 @@ def main() -> int:
 
     Returns 0 if all cameras match the recipe, 1 if any mismatch.
     """
-    client = ReolinkClient()
+    client = ReolinkClient(gateway_addr=_GATEWAY_ADDR)
     cameras = list(CAMERA_META.keys())
     evidence: dict = {
         "prd": "PHASE-V2-065",
-        "ran_at": datetime.now(timezone.utc).isoformat(),
+        "ran_at": datetime.now(UTC).isoformat(),
         "recipe_path": RECIPE_PATH,
         "cameras": [],
         "summary": {"total": len(cameras), "matched": 0, "mismatched": 0},
@@ -116,7 +118,7 @@ def main() -> int:
 
         print(f"[2/4] Applying recipe for {cam}...", flush=True)
         try:
-            apply_results = apply_recipe(RECIPE_PATH, camera=cam)
+            apply_recipe(RECIPE_PATH, camera=cam, gateway_addr=_GATEWAY_ADDR)
         except (ReolinkCommandError, ReolinkTimeoutError) as exc:
             print(f"  ERROR applying recipe for {cam}: {exc}", flush=True)
             evidence["cameras"].append({
@@ -132,7 +134,7 @@ def main() -> int:
 
         print(f"[3/4] Verifying recipe for {cam}...", flush=True)
         try:
-            verify_results = verify_recipe(RECIPE_PATH, camera=cam)
+            verify_results = verify_recipe(RECIPE_PATH, camera=cam, gateway_addr=_GATEWAY_ADDR)
         except (ReolinkCommandError, ReolinkTimeoutError) as exc:
             print(f"  ERROR verifying recipe for {cam}: {exc}", flush=True)
             evidence["cameras"].append({

@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 
 from scripts.verify_recipe_live import _scrub_sensitive
 
-
 # ---------------------------------------------------------------------------
 # _scrub_sensitive tests
 # ---------------------------------------------------------------------------
@@ -103,7 +102,7 @@ def _make_verify_result(camera: str, match: bool = True,
 
 def _detect_ai_get_side(cam_stays: dict[str, int]):
     """Return a callable for client.detect_ai_get that returns different configs per camera."""
-    def _side(atype: str, camera: str) -> MagicMock:
+    def _side(atype: str, camera: str, **_kw: object) -> MagicMock:
         stay = cam_stays.get(camera, 2)
         return _make_detect_config(stay_time=stay, sensitivity=50)
     return _side
@@ -112,7 +111,7 @@ def _detect_ai_get_side(cam_stays: dict[str, int]):
 def _verify_side(cam_match_map: dict[str, bool],
                  cam_diff_map: dict[str, list[str]]):
     """Return a callable for apply_recipe / verify_recipe that returns per-camera results."""
-    def _side(recipe_path: str, camera: str) -> list[MagicMock]:
+    def _side(recipe_path: str, camera: str, **_kw: object) -> list[MagicMock]:
         match = cam_match_map.get(camera, True)
         diffs = cam_diff_map.get(camera, [])
         return [_make_verify_result(camera, match=match, diffs=diffs)]
@@ -147,25 +146,27 @@ class TestVerifyRecipeLiveMain:
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
             tmp_path = tmp.name
 
-        with patch("scripts.verify_recipe_live.EVIDENCE_PATH", tmp_path):
-            with patch("scripts.verify_recipe_live._PROJECT_ROOT") as root_mock:
-                root_mock.__truediv__.return_value.is_file.return_value = False
-                import scripts.verify_recipe_live as m
-                m.RECIPE_PATH = "/fake/recipe.toml"
-                m.EVIDENCE_PATH = tmp_path
-                code = m.main()
+        with (patch("scripts.verify_recipe_live.EVIDENCE_PATH", tmp_path),
+              patch("scripts.verify_recipe_live._PROJECT_ROOT") as root_mock):
+            root_mock.__truediv__.return_value.is_file.return_value = False
+            import scripts.verify_recipe_live as m
+            m.RECIPE_PATH = "/fake/recipe.toml"
+            m.EVIDENCE_PATH = tmp_path
+            code = m.main()
 
         assert code == 0
-        evidence = cast(dict, json.load(open(tmp_path)))
+        with open(tmp_path) as fh:
+            evidence = cast(dict, json.load(fh))
         assert evidence["summary"]["matched"] == 6
         assert evidence["summary"]["mismatched"] == 0
         assert all(c["match"] for c in evidence["cameras"])
         assert evidence["prd"] == "PHASE-V2-065"
         assert len(evidence["cameras"]) == 6
 
-        content = open(tmp_path).read()
+        with open(tmp_path) as fh:
+            content = fh.read()
         for kw in ("password", "token", "secret", "key", "pass", "passwd"):
-            assert not re.search(r'"' + kw + r'"\s*:', content, re.I), \
+            assert not re.search(r'"' + kw + r'"\s*:', content, re.IGNORECASE), \
                 f"Found '{kw}' in evidence"
 
     @patch("scripts.verify_recipe_live.ReolinkClient")
@@ -190,16 +191,17 @@ class TestVerifyRecipeLiveMain:
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
             tmp_path = tmp.name
 
-        with patch("scripts.verify_recipe_live.EVIDENCE_PATH", tmp_path):
-            with patch("scripts.verify_recipe_live._PROJECT_ROOT") as root_mock:
-                root_mock.__truediv__.return_value.is_file.return_value = False
-                import scripts.verify_recipe_live as m
-                m.RECIPE_PATH = "/fake/recipe.toml"
-                m.EVIDENCE_PATH = tmp_path
-                code = m.main()
+        with (patch("scripts.verify_recipe_live.EVIDENCE_PATH", tmp_path),
+              patch("scripts.verify_recipe_live._PROJECT_ROOT") as root_mock):
+            root_mock.__truediv__.return_value.is_file.return_value = False
+            import scripts.verify_recipe_live as m
+            m.RECIPE_PATH = "/fake/recipe.toml"
+            m.EVIDENCE_PATH = tmp_path
+            code = m.main()
 
         assert code == 1
-        evidence = cast(dict, json.load(open(tmp_path)))
+        with open(tmp_path) as fh:
+            evidence = cast(dict, json.load(fh))
         assert evidence["summary"]["matched"] == 5
         assert evidence["summary"]["mismatched"] == 1
 
@@ -218,16 +220,17 @@ class TestVerifyRecipeLiveMain:
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
             tmp_path = tmp.name
 
-        with patch("scripts.verify_recipe_live.EVIDENCE_PATH", tmp_path):
-            with patch("scripts.verify_recipe_live._PROJECT_ROOT") as root_mock:
-                root_mock.__truediv__.return_value.is_file.return_value = False
-                import scripts.verify_recipe_live as m
-                m.RECIPE_PATH = "/fake/recipe.toml"
-                m.EVIDENCE_PATH = tmp_path
-                m.main()
+        with (patch("scripts.verify_recipe_live.EVIDENCE_PATH", tmp_path),
+              patch("scripts.verify_recipe_live._PROJECT_ROOT") as root_mock):
+            root_mock.__truediv__.return_value.is_file.return_value = False
+            import scripts.verify_recipe_live as m
+            m.RECIPE_PATH = "/fake/recipe.toml"
+            m.EVIDENCE_PATH = tmp_path
+            m.main()
 
-        evidence = cast(dict, json.load(open(tmp_path)))
-        front = [c for c in evidence["cameras"] if c["camera"] == "front"][0]
+        with open(tmp_path) as fh:
+            evidence = cast(dict, json.load(fh))
+        front = next(c for c in evidence["cameras"] if c["camera"] == "front")
         assert "before" in front
         assert "after" in front
         assert "detect_ai" in front["before"]
@@ -251,15 +254,16 @@ class TestVerifyRecipeLiveMain:
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
             tmp_path = tmp.name
 
-        with patch("scripts.verify_recipe_live.EVIDENCE_PATH", tmp_path):
-            with patch("scripts.verify_recipe_live._PROJECT_ROOT") as root_mock:
-                root_mock.__truediv__.return_value.is_file.return_value = False
-                import scripts.verify_recipe_live as m
-                m.RECIPE_PATH = "/fake/recipe.toml"
-                m.EVIDENCE_PATH = tmp_path
-                m.main()
+        with (patch("scripts.verify_recipe_live.EVIDENCE_PATH", tmp_path),
+              patch("scripts.verify_recipe_live._PROJECT_ROOT") as root_mock):
+            root_mock.__truediv__.return_value.is_file.return_value = False
+            import scripts.verify_recipe_live as m
+            m.RECIPE_PATH = "/fake/recipe.toml"
+            m.EVIDENCE_PATH = tmp_path
+            m.main()
 
-        evidence = cast(dict, json.load(open(tmp_path)))
-        front = [c for c in evidence["cameras"] if c["camera"] == "front"][0]
+        with open(tmp_path) as fh:
+            evidence = cast(dict, json.load(fh))
+        front = next(c for c in evidence["cameras"] if c["camera"] == "front")
         assert front["ip"] == "192.168.1.39"
         assert front["model"] == "RLC-833A"
