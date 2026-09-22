@@ -45,7 +45,7 @@ def test_dispatch_text_only_sends_sendMessage(mock_llama_server):
     assert url.endswith("/bottest_token/sendMessage")
     # Body is json={"chat_id":..., "text":...}
     body = last_call.kwargs["json"]
-    assert body == {"chat_id": "12345", "text": "hello world"}
+    assert body == {"chat_id": "12345", "text": "hello world", "parse_mode": "MarkdownV2"}
 
 
 def test_dispatch_with_photos_uses_sendMediaGroup_with_photo(
