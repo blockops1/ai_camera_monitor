@@ -66,6 +66,7 @@ from infra import (
     pipeline_cooldown as infra_pipeline_cooldown,
     tg_upload_cleanup,
 )
+from infra.event_record import write_event_record
 from infra.quiet_hours import in_quiet_hours
 from listener.pipeline import (
     stage_apply_baseline_override,
@@ -227,6 +228,74 @@ def normalize_reolink(payload: dict, source_ip: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Box identifier
+# ---------------------------------------------------------------------------
+
+
+def _write_event(
+    alert_id: str,
+    camera_id: str,
+    frames: list,
+    gate_result: dict,
+    vm1_result: dict | None,
+    started_at: str,
+    dropped: str | None = None,
+    vm2_result: dict | None = None,
+    match_result: dict | None = None,
+    artifact_dir: str = "",
+) -> None:
+    """Emit an event.json record for this pipeline run.
+
+    Wraps ``write_event_record`` with pipeline-specific data assembly.
+    Does not raise -- errors are logged and the alert proceeds.
+    """
+    try:
+        finished_at = datetime.now(UTC).isoformat()
+        frame_paths = [str(f) for f in frames]
+        gate_summary = gate_result.get("gsum", {})
+        write_event_record(
+            alert_id=alert_id,
+            camera_id=camera_id,
+            box_id=_box_id(),
+            started_at=started_at,
+            finished_at=finished_at,
+            gate=gate_summary,
+            vm1=vm1_result,
+            vm2=vm2_result,
+            match=match_result,
+            dropped=dropped,
+            frame_paths=frame_paths,
+            artifact_dir=artifact_dir,
+        )
+    except Exception:
+        log.exception(
+            "event_record: alert_id=%s camera=%s failed to write event.json",
+            alert_id, camera_id,
+        )
+
+
+def _box_id() -> str:
+    """Return the multi-box namespace identifier.
+
+    Priority: FARMSURV_BOX_ID env > HOSTNAME env > os.uname().nodename > "unknown".
+    """
+    box = os.environ.get("FARMSURV_BOX_ID")
+    if box:
+        return box
+    box = os.environ.get("HOSTNAME")
+    if box:
+        return box
+    try:
+        import socket
+        box = socket.gethostname()
+        if box:
+            return box
+    except Exception:
+        pass
+    return "unknown"
+
+
+# ---------------------------------------------------------------------------
 # Segmented pipeline orchestrator
 # ---------------------------------------------------------------------------
 
@@ -238,11 +307,15 @@ def _run_pipeline(alert: dict) -> dict:
     The return dict has the same keys the rest of the /alert route expects
     (``status``, ``gate``, ``vm1_result``, ``tg1``, ``vm2_result``, ``tg2``,
     ``match_result``, ``tg3``, ``classification``, ``camera_id``, ``frames``).
+
+    After every pipeline run (whether dropped or ok), writes a per-alert
+    event.json record via ``infra.event_record.write_event_record``.
     """
     camera_id = alert.get("camera_id", "unknown")
     alert_id = alert.get("id", camera_id)
     classification = alert.get("classification", "motion")
     camera_label = alert.get("camera_label", camera_id)
+    started_at = datetime.now(UTC).isoformat()
 
     # Stage 3: load frames.
     frames = stage_load_frames(alert)
@@ -250,6 +323,10 @@ def _run_pipeline(alert: dict) -> dict:
     # Stage 4: YOLO gate.
     gate_result = _stage_gate(frames, camera_id, alert_id)
     if gate_result["status"] == "dropped":
+        _write_event(
+            alert_id, camera_id, frames, gate_result,
+            started_at, dropped="gate_dropped",
+        )
         return {
             "id": alert_id,
             "status": "dropped",
@@ -261,6 +338,10 @@ def _run_pipeline(alert: dict) -> dict:
     # Stage 7a: cooldown check.
     cooldown_result = stage_cooldown_check(camera_id, classification)
     if cooldown_result["status"] == "dropped":
+        _write_event(
+            alert_id, camera_id, frames, gate_result,
+            started_at, dropped="cooldown_dropped",
+        )
         return {
             "id": alert_id,
             "status": "dropped",
@@ -307,6 +388,10 @@ def _run_pipeline(alert: dict) -> dict:
             vm1_result.get("subclass"),
             vm1_result.get("confidence"),
         )
+        _write_event(
+            alert_id, camera_id, frames, gate_result, vm1_result,
+            started_at, dropped="vm1_unsure",
+        )
         return {
             "id": alert_id,
             "status": "dropped",
@@ -342,6 +427,14 @@ def _run_pipeline(alert: dict) -> dict:
     # Stage 13b: distant-vehicle baseline override (third layer of defense).
     alert = stage_apply_baseline_override(
         alert, vm1_result, camera_id, datetime.now(UTC)
+    )
+
+    # Write final event record (non-dropped).
+    _write_event(
+        alert_id, camera_id, frames, gate_result, vm1_result,
+        started_at,
+        vm2_result=vm2_result, match_result=match_result,
+        artifact_dir=art["composite_path"],
     )
 
     return {
