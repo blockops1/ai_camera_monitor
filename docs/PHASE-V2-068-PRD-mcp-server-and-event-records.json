@@ -1,0 +1,94 @@
+{
+  "prd_id": "V2-068",
+  "title": "MCP server for camera tools + per-alert event.json artifact",
+  "status": "open",
+  "context": "Gate-alert split: the outer-loop agent (separate repo, MCP client) needs a stable API into the inner-loop pipeline (this repo). This PRD lands the inner side of that seam: an MCP server exposing read-only camera tools over stdio or HTTP, plus a per-alert event.json record so the outer agent can audit history without re-deriving it. Behavioral change to pipeline.run() = none. Tests = still all pass.",
+  "shipping_definition": [
+    "infra/mcp_server.py registers a stdio MCP server with tools: camera_snapshot(camera_id) -> PNG bytes path, camera_last_events(camera_id, n=10) -> list[EventRecord], camera_health() -> dict, camera_list() -> list[{camera_id, display_name, model}]",
+    "pipeline.run() writes data/events/<alert_id>/event.json containing alert_id, camera_id, timestamps, gate verdict, vm1 result, vm2 result, match result, dropped reason (if any), and references to frame paths",
+    "event.json shape is the contract for the outer-loop agent; documented in docs/MCP-API.md",
+    "Existing 178 unit tests + 17 e2e tests still pass; no behavioral change to alerts reaching Telegram",
+    "MCP server is opt-in via env var FARMSURV_MCP_ENABLED=1 (1=ON, 0=OFF, default 0); launchd plist unchanged (operator rule: zero env vars in plist)",
+    "No new external dependency at runtime — stdlib `mcp` package only if already in pyproject.toml; otherwise a 100-line stdlib JSON-RPC shim over stdio"
+  ],
+  "design_principles": [
+    "Read-only tools first. camera_snapshot, camera_last_events, camera_health, camera_list. No write/mutation tools in this PRD — outer agent cannot mute cameras or enroll identities through MCP yet. That's a follow-up PRD (V2-069).",
+    "MCP server is a separate process from the listener. It reads data/events/ + ring buffers; it does not call pipeline.run() live. Stale-by-design (last 24h of events) so it can't accidentally re-trigger alerts.",
+    "event.json is the unit of truth for the outer agent. Frames + crops + diffs are referenced by path, not duplicated into the JSON.",
+    "stdio transport, not HTTP. Hermes and Pydantic AI both support stdio MCP cleanly. HTTP transport is a follow-up if a remote client ever needs it.",
+    "No Pydantic dependency added. Stdlib dataclasses for EventRecord; the shape is the contract; outer agent re-parses via JSON."
+  ],
+  "no_fallback": true,
+  "stories": [
+    {
+      "id": "US-068a",
+      "title": "Write per-alert event.json in pipeline.run()",
+      "files": [
+        "listener/pipeline.py",
+        "infra/event_record.py"
+      ],
+      "scope": [
+        "New module infra/event_record.py: EventRecord dataclass + write_event_record(alert_id, camera_id, stage_results) function",
+        "EventRecord fields: alert_id (str), camera_id (str), started_at (ISO8601), finished_at (ISO8601), gate (GateVerdict | None), vm1 (Vm1Result | None), vm2 (dict | None), match (MatchResult | None), dropped (str | None), frame_paths (list[Path]), artifact_dir (Path)",
+        "pipeline.run() calls write_event_record() once per alert, after the final stage (whether dropped or fully sent)",
+        "Output path: data/events/<alert_id>/event.json",
+        "Atomic write: write to .tmp, fsync, rename — same pattern as existing JSONL audit"
+      ],
+      "env_knobs": [],
+      "tests": [
+        "tests/test_event_record.py::test_write_event_record_atomic",
+        "tests/test_event_record.py::test_event_record_shape",
+        "Existing pipeline tests must continue to pass; event.json is a new side-effect, not a behavioral change"
+      ]
+    },
+    {
+      "id": "US-068b",
+      "title": "Add infra/mcp_server.py with read-only camera tools over stdio",
+      "files": [
+        "infra/mcp_server.py",
+        "infra/mcp_tools.py"
+      ],
+      "scope": [
+        "infra/mcp_tools.py: pure functions — list_cameras(), get_health(), get_snapshot(camera_id), get_last_events(camera_id, n)",
+        "infra/mcp_server.py: stdio MCP server (mcp package or stdlib shim) exposing the four tools above",
+        "Tool input/output schemas documented as JSON Schema in tool descriptions",
+        "camera_snapshot reads the latest saved frame from data/frames/<camera>/ — does NOT pull live RTSP (that's the listener's job)",
+        "camera_last_events reads data/events/<camera>/*/event.json — last N, newest first",
+        "camera_health returns {listener_pid, rtsp_readers_active, last_event_at, event_count_24h}",
+        "camera_list returns [{camera_id, display_name, model, ip_redacted}]",
+        "Gate behind FARMSURV_MCP_ENABLED=1; the module imports cleanly but registers no tools when 0",
+        "Standalone runnable: `python -m infra.mcp_server` starts the stdio server (for MCP client to spawn)"
+      ],
+      "env_knobs": [
+        "FARMSURV_MCP_ENABLED (1=ON, 0=OFF, default 0)"
+      ],
+      "tests": [
+        "tests/test_mcp_tools.py::test_list_cameras",
+        "tests/test_mcp_tools.py::test_get_last_events_filters_by_camera",
+        "tests/test_mcp_tools.py::test_get_snapshot_returns_existing_frame",
+        "tests/test_mcp_tools.py::test_camera_health_shape"
+      ]
+    },
+    {
+      "id": "US-068c",
+      "title": "Document MCP API contract for outer-loop consumers",
+      "files": [
+        "docs/MCP-API.md"
+      ],
+      "scope": [
+        "Document each tool: name, input schema, output schema, error cases, freshness guarantees",
+        "Reference the original design discussion: docs/original-design-discussion.md (in the gate-alert repo) is the design rationale; this file is the contract",
+        "Include a 'do not call from outer agent' section: list of things outer MUST NOT do (call live pipeline, mutate files, restart listener)",
+        "Cross-reference V2-069 (write tools) as a future extension"
+      ],
+      "env_knobs": [],
+      "tests": []
+    }
+  ],
+  "depends_on": [],
+  "blocks": [
+    "V2-069 (MCP write tools — outer-loop can mute/enroll)",
+    "gate-alert outer-loop repo creation"
+  ],
+  "estimated_complexity": "small — three stories, additive changes, no pipeline behavior change"
+}
