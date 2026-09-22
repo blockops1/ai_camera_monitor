@@ -7,8 +7,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-import pytest
-
 from infra.event_record import EventRecord, write_event_record
 
 
