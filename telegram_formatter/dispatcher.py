@@ -97,7 +97,12 @@ def _send_message(
     """sendMessage — text-only delivery (TG#3)."""
     url = f"{base_url}/bot{bot_token}/sendMessage"
     return client.post(
-        url, json={"chat_id": chat_id, "text": caption, "parse_mode": "MarkdownV2"}
+        url,
+        json={
+            "chat_id": chat_id,
+            "text": escape_markdown_v2(caption),
+            "parse_mode": "MarkdownV2",
+        },
     )
 
 
@@ -117,7 +122,11 @@ def _send_photo(
     files = [("photo", (f"photo{suffix}", data, mime))]
     return client.post(
         url,
-        data={"chat_id": chat_id, "caption": caption, "parse_mode": "MarkdownV2"},
+        data={
+            "chat_id": chat_id,
+            "caption": escape_markdown_v2(caption),
+            "parse_mode": "MarkdownV2",
+        },
         files=files,
     )
 
@@ -148,7 +157,7 @@ def _send_media_group(
         )
         if i == 0:
             # Telegram requires the first media entry to also carry caption.
-            media[-1]["caption"] = caption
+            media[-1]["caption"] = escape_markdown_v2(caption)
     files: list[tuple[str, tuple[str, bytes, str]]] = []
     for i, path in enumerate(photo_paths):
         with open(path, "rb") as f:
