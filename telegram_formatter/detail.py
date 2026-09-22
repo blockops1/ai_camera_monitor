@@ -5,8 +5,11 @@ THREAD SAFETY: thread-safe (pure function, no shared state)
 
 INPUTS:
     - mode: str (required) -- one of 'vehicle', 'person', 'animal'
-    - vm2_result: dict (required) -- VM2 detail output with v1 schema fields
+    - vm2_result: dict (required) -- VM2 detail output
     - crop_a, crop_b: Path | None (required) -- image paths
+    - camera_label: str (optional) -- camera name
+    - alert: dict | None (optional) -- alert metadata dict
+    - position: int (optional) -- TG position 1-3 for marker
 
 OUTPUTS:
     - return dict: {"caption": str, "photos": list[str]}
@@ -26,133 +29,103 @@ CALLED BY:
     - listener/pipeline.py stage 9 (TG#2 emission after VM2)
 
 CALLS INTO:
-    - stdlib str(): path-to-string conversion
+    - infra.format_ts.format_local_timestamp
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from textwrap import wrap
 from typing import Any
 
 from infra.format_ts import format_local_timestamp
 
 _MODES = ("vehicle", "person", "animal", "unsure")
 
+# Curated field lists per mode -- only these appear in the TG body.
+# Values are (label, source_key) tuples.
+# source_key maps to a key in the VM2 result (or sub-dict for person attrs).
+_PERSON_CURATED: list[tuple[str, str]] = [
+    ("Clothing upper", "clothing_upper"),
+    ("Clothing lower", "clothing_lower"),
+    ("Hat", "hat"),
+    ("Footwear", "footwear"),
+    ("Posture", "posture"),
+    ("Action", "action"),
+    ("Accessories", "accessories"),
+]
 
-# ---------------------------------------------------------------------------
-# Recursive Qwen-dict renderer (copied from v1 render_qwen.py)
-# ---------------------------------------------------------------------------
+_VEHICLE_CURATED: list[tuple[str, str]] = [
+    ("Make", "make"),
+    ("Model", "model"),
+    ("Color", "color"),
+    ("Type", "body_style_hint"),
+]
+
+# Map from VM2 top-level key to display label for distinguishing features.
+_DISTINGUISHING_KEYS: list[tuple[str, str]] = [
+    ("wheel_style", "Wheel style"),
+    ("headlight_signature", "Headlight signature"),
+    ("rear_lights_signature", "Rear lights signature"),
+    ("front_grille_style", "Front grille"),
+    ("window_tint", "Window tint"),
+    ("bed_cover", "Bed cover"),
+    ("badge_text_readable", "Badge text"),
+]
 
 
-def _render_qwen_dict_lines(
-    obj: Any,
-    indent: int = 0,
+def _build_attribute_lines(
+    mode: str,
+    vm2_result: dict[str, Any],
 ) -> list[str]:
-    """Render any dict as Telegram body lines.
+    """Build curated bullet lines for the given mode.
 
-    Args:
-        obj: The dict (or nested value) to render.
-        indent: Spaces of left-padding for the first level. Children
-            get +3 more spaces than their parent.
-
-    Returns:
-        List of body lines (no trailing newline on each).
-
-    Behavior:
-        - Walks every key in dict-insertion order.
-        - For each value:
-            * None / "" / "null" / empty-list / empty-dict → skipped
-            * dict → recurse with indent+3
-            * list → one item per line if complex, or inline if short scalars
-            * bool → "key: true" / "key: false"
-            * number → "key: N"
-            * string → "key: value"
-        - Long string values wrap at 80 chars total width, indented.
+    Returns a list of lines like:
+        \u2022 Clothing upper: white t-shirt
+        \u2022 Posture: walking
     """
     lines: list[str] = []
-    pad = " " * indent
-    child_pad = " " * (indent + 3)
 
-    if not isinstance(obj, dict):
-        if _is_empty(obj):
-            return lines
-        lines.append(f"{pad}{_format_scalar(obj)}")
-        return lines
+    if mode == "person":
+        attrs = vm2_result.get("attributes") or {}
+        for label, key in _PERSON_CURATED:
+            value = attrs.get(key)
+            if value is not None and value != "" and str(value).strip().lower() != "null":
+                lines.append(f"\u2022 {label}: {value}")
 
-    for key, value in obj.items():
-        if _is_empty(value):
-            continue
+    elif mode == "vehicle":
+        for label, key in _VEHICLE_CURATED:
+            value = vm2_result.get(key)
+            if value is not None and value != "" and str(value).strip().lower() != "null":
+                lines.append(f"\u2022 {label}: {value}")
+        # Distinguishing features from vehicle_features sub-dict
+        vf = vm2_result.get("vehicle_features")
+        if isinstance(vf, dict):
+            for vm2_key, label in _DISTINGUISHING_KEYS:
+                value = vf.get(vm2_key)
+                if value is not None and value != "" and str(value).strip().lower() != "null":
+                    lines.append(f"\u2022 {label}: {value}")
 
-        if isinstance(value, dict):
-            lines.append(f"{pad}{key}:")
-            lines.extend(_render_qwen_dict_lines(value, indent=indent + 3))
-            continue
+    elif mode == "animal":
+        # No curated list for animal -- emit all top-level scalars.
+        _animal_lines: list[str] = []
+        for key, value in vm2_result.items():
+            if key in ("better_crop",):
+                continue
+            if isinstance(value, (dict, list)):
+                continue
+            if value is not None and value != "" and str(value).strip().lower() != "null":
+                label = key.replace("_", " ").title()
+                _animal_lines.append(f"\u2022 {label}: {value}")
+        lines.extend(_animal_lines)
 
-        if isinstance(value, list):
-
-            def _short_scalar(x: Any) -> bool:
-                return not isinstance(x, (dict, list)) and len(_format_scalar(x)) < 30
-
-            if all(_short_scalar(x) for x in value) and len(value) <= 4:
-                rendered = ", ".join(_format_scalar(x) for x in value)
-                lines.append(f"{pad}{key}: [{rendered}]")
-            else:
-                lines.append(f"{pad}{key}:")
-                for item in value:
-                    if isinstance(item, dict):
-                        lines.extend(
-                            _render_qwen_dict_lines(
-                                item,
-                                indent=indent + 3,
-                            )
-                        )
-                    elif _is_empty(item):
-                        continue
-                    else:
-                        lines.append(f"{child_pad}{_format_scalar(item)}")
-            continue
-
-        # Scalar.
-        formatted = _format_scalar(value)
-        wrap_width = max(40, 80 - len(pad))
-        if len(formatted) > wrap_width:
-            wrapped = wrap(
-                formatted,
-                width=wrap_width,
-                subsequent_indent=child_pad,
-                break_long_words=False,
-                break_on_hyphens=False,
-            )
-            lines.append(f"{pad}{key}:")
-            for chunk in wrapped:
-                lines.append(f"{child_pad}{chunk}")
-        else:
-            lines.append(f"{pad}{key}: {formatted}")
+    elif mode == "unsure":
+        for key, value in vm2_result.items():
+            if isinstance(value, (dict, list)):
+                continue
+            if value is not None and value != "" and str(value).strip().lower() != "null":
+                lines.append(f"\u2022 {key}: {value}")
 
     return lines
-
-
-def _is_empty(value: Any) -> bool:
-    """True if value should be skipped entirely (no body line)."""
-    if value is None:
-        return True
-    if isinstance(value, str) and value.strip() == "":
-        return True
-    if isinstance(value, str) and value.strip().lower() == "null":
-        return True
-    return bool(isinstance(value, (list, dict)) and len(value) == 0)
-
-
-def _format_scalar(value: Any) -> str:
-    """Format a non-dict, non-list value for body output."""
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, float):
-        if value == int(value):
-            return f"{int(value)}.0"
-        return f"{value:g}"
-    return str(value)
 
 
 # ---------------------------------------------------------------------------
@@ -167,26 +140,21 @@ def build_detail_message(
     crop_b: Path | None,
     camera_label: str = "Camera",
     alert: dict[str, Any] | None = None,
+    position: int = 2,
 ) -> dict[str, Any]:
     """Build a TG#2 Telegram message dict.
 
-    When *alert* is provided, the caption includes 'Alert 2 of 3',
+    When *alert* is provided, the caption includes 'Alert {position} of 3',
     'Alert ID: <id>', and 'Timestamp: <timestamp>' in that order,
-    after Camera/Mode/Class lines and before optional body fields.
+    after Camera/Mode/Class lines and before the attribute bullet list.
 
-    Uses the v1 recursive renderer (render_qwen_dict_lines) to walk every
-    key in vm2_result, expanding nested dicts (e.g. vehicle_features,
-    attributes, signature) with indented sub-lines.
+    Emits a curated, single-line-per-attribute bullet list under a
+    '*Attributes:*' header instead of a recursive VM2 dict dump.
     """
     if mode not in _MODES:
         raise ValueError(f"mode must be one of {_MODES}, got {mode!r}")
 
     # Dispatch on mode for mode-specific VM2 outputs.
-    # VM2 returns mode-specific keys (not class_confirmed/class):
-    #   vehicle -> {color, body_style_hint, make, model, ...}
-    #   person  -> {better_crop, attributes, signature, ...}
-    #   animal  -> {species, breed, size, ...}
-    #   unsure  -> {class_confirmed: False, class: "unsure", reason: "..."}
     if mode == "unsure":
         cls = "unsure"
         cls_line = "Class: unsure"
@@ -209,9 +177,9 @@ def build_detail_message(
         cls_line,
     ]
 
-    # Alert metadata (mirrors TG#1 caption layout).
+    # Alert metadata (mirrors TG position marker).
     if alert:
-        lines.append("Alert 2 of 3")
+        lines.append(f"Alert {position} of 3")
         alert_id = alert.get("id")
         if alert_id:
             lines.append(f"Alert ID: {alert_id}")
@@ -219,11 +187,15 @@ def build_detail_message(
         if timestamp:
             lines.append(f"Timestamp: {format_local_timestamp(timestamp)}")
 
-    # Render the vm2_result dict recursively using the v1 renderer.
-    body_lines = _render_qwen_dict_lines(vm2_result)
-    if body_lines:
+    # Curated attribute bullet list (flat, no nesting).
+    attr_lines = _build_attribute_lines(mode, vm2_result)
+    if attr_lines:
         lines.append("")
-        lines.extend(body_lines)
+        lines.append("*Attributes:*")
+        lines.extend(attr_lines)
+
+    # TG position marker.
+    lines.append(f"TG {position} of 3")
 
     return {
         "caption": "\n".join(lines),
