@@ -65,11 +65,19 @@ class TestScannerInjectedLeak:
     def injected_tree(self, tmp_path: Path) -> Path:
         """Copy the repo root to tmp_path, inject one fake production IP."""
         repo = tmp_path / "repo"
+        # 2026-09-22 (operator): this test was producing 20-40 GB tmp_path dirs.
+        # The repo copy was pulling in heavy on-disk artifacts that the scanner
+        # doesn't need. Exclude every operator-local / heavy dir.
         shutil.copytree(ROOT, repo, symlinks=True,
                         ignore=shutil.ignore_patterns(
                             ".git", "__pycache__", ".venv",
                             ".pytest_cache", ".mypy_cache",
                             ".ruff_cache", ".desloppify", ".qa",
+                            ".worktrees",  # ~7 GB of worker worktrees
+                            "data",  # 20 GB of frame crops, not needed
+                            "logs",  # rolling daemon logs
+                            "models",  # 13 MB+ ML model weights
+                            "*.env",  # secrets + operator-local .env
                         ))
         # Initialise a bare git repo so the scanner's git-based scan works.
         subprocess.run(
