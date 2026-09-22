@@ -1,0 +1,104 @@
+{
+  "prd_id": "V2-067",
+  "title": "Telegram alert bodies: readable, formatted, no extraneous prose",
+  "status": "open",
+  "shipping_definition": [
+    "telegram_formatter/alert.py build_alert_message emits a 4-6 line body with Markdown (bold + emoji), no 'Classification:' / 'YOLO:' / 'Vision:' labels",
+    "telegram_formatter/detail.py build_detail_message emits a curated attribute list (clothing, colors, make, model) instead of recursive VM2 dict dump",
+    "telegram_formatter/match_alert.py build_match_message strips 'Thresholds:' / 'Mode:' debug lines; match body shows label/make/model/owner only",
+    "telegram_formatter/dispatcher.py _send_message/_send_photo/_send_media_group pass parse_mode=MarkdownV2 and emoji/bold render correctly in TG",
+    "telegram_formatter/no_match_telegram.py keeps essentials but strips the 12-line key:value dump; emits 'No match (confidence <X>)' single line",
+    "All bodies include the 'TG X of 3' marker (operator requirement: alerts come out of order and user wants flow position)",
+    "tests/test_alert_message.py + tests/test_match_alert.py + tests/test_detail_message.py cover the new shape; pytest passes",
+    "No fallback to old format. parse_mode=MarkdownV2 is the only path."
+  ],
+  "design_principles": [
+    "TG X of 3 marker on every body (operator requirement: alerts arrive out of order; user wants flow position)",
+    "Bold class/label via *bold* Markdown; emoji icons (\ud83c\udfa5 Camera, \ud83d\udc64 Person, \ud83d\ude97 Vehicle, \ud83d\udc15 Animal, \u2705 Match, \u26a0\ufe0f Unsure)",
+    "Header line '\ud83c\udfa5 *Front Door Outside* \u2014 12:21 PM' replaces 'Camera:' / 'Timestamp:' two-line preamble",
+    "alert_id shortened to first 8 chars ('72c70d5f') so it fits but stays useful for debugging",
+    "No 'YOLO:' / 'Vision:' labels \u2014 Vision is the source of truth; YOLO confidence merged into a single 'confidence: 86%' if at all",
+    "Strip 'Mode:' / 'Reason:' / 'Thresholds:' debug-only fields from TG body (still in JSON for debugging)",
+    "MarkdownV2 (not plain Markdown): operator confirmed formatting matters, MarkdownV2 is the only mode that renders bold + emoji + headers correctly across TG clients"
+  ],
+  "no_fallback": true,
+  "stories": [
+    {
+      "id": "US-067a",
+      "title": "Rewrite alert.py build_alert_message for Markdown + emoji + 4-6 line body",
+      "files": [
+        "telegram_formatter/alert.py"
+      ],
+      "scope": [
+        "Replace 8-line key:value dump with header line + class line + timestamp line + TG marker",
+        "Add TG X of 3 marker (parameter: tg_position, e.g. 'TG 1 of 3')",
+        "Return MarkdownV2-escaped body string (dispatcher.py owns the actual send; alert.py returns the body)",
+        "Markdown: *bold* around class name, emojis \ud83c\udfa5/\ud83d\udc64/\ud83d\ude97/\ud83d\udc15",
+        "Shorten alert_id to first 8 chars in the body"
+      ],
+      "env_knobs": [],
+      "tests": [
+        "tests/test_alert_message.py::test_build_alert_message_markdown",
+        "tests/test_alert_message.py::test_tg_position_marker"
+      ]
+    },
+    {
+      "id": "US-067b",
+      "title": "Rewrite detail.py build_detail_message to curated attribute list (no recursive dump)",
+      "files": [
+        "telegram_formatter/detail.py"
+      ],
+      "scope": [
+        "Walk the VM2 dict with a curated field list (clothing_upper, clothing_lower, hat, vehicle_make, vehicle_model, vehicle_color, posture, action) instead of recursive dump",
+        "Each attribute as '\u2022 Label: value' bullet, single line per attribute",
+        "Strip nested 'attributes:' / 'signature:' / 'notes:' / 'confidence:' nested-object dumps",
+        "Add TG X of 3 marker"
+      ],
+      "env_knobs": [],
+      "tests": [
+        "tests/test_detail_message.py::test_curated_attributes_only"
+      ]
+    },
+    {
+      "id": "US-067c",
+      "title": "Rewrite match_alert.py: strip threshold debug lines, keep essentials",
+      "files": [
+        "telegram_formatter/match_alert.py"
+      ],
+      "scope": [
+        "Match body: only label / make / model / owner / score / gap. No 'Thresholds:' / 'Mode:' / 'Reason:' lines",
+        "No-match body: 'No match (confidence <threshold>)' single line + runner-ups (top 1 only) + TG X of 3 marker",
+        "Use Markdown formatting consistent with US-067a (\u2705 Match / \u26a0\ufe0f Unsure)"
+      ],
+      "env_knobs": [],
+      "tests": [
+        "tests/test_match_alert.py::test_match_body_no_thresholds"
+      ]
+    },
+    {
+      "id": "US-067d",
+      "title": "Enable parse_mode=MarkdownV2 in dispatcher + escape user data safely",
+      "files": [
+        "telegram_formatter/dispatcher.py"
+      ],
+      "scope": [
+        "_send_message / _send_photo / _send_media_group pass parse_mode='MarkdownV2' to bot.* calls",
+        "Escape reserved MarkdownV2 chars in dynamic strings (alert_id, camera name, owner name) \u2014 implement escape_markdown_v2(text) helper",
+        "TG X of 3 marker propagated via a dispatcher-side wrapper that knows the alert's tg_position",
+        "Verify with a dry-run script: send sample alert to a test chat (or print to stdout) and confirm emoji + bold render"
+      ],
+      "env_knobs": [],
+      "tests": [
+        "tests/test_dispatcher_markdown.py::test_parse_mode_markdown_v2"
+      ]
+    }
+  ],
+  "env_knobs_global": [],
+  "non_goals": [
+    "No new Telegram bot",
+    "No new alert routing rules",
+    "No TG-side polling / interaction (alerts are one-way)",
+    "Not touching the 2-bbox flow (V2-066 owns that)"
+  ],
+  "open_questions": []
+}
