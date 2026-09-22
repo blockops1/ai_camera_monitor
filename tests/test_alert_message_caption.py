@@ -293,9 +293,9 @@ class TestTg2CaptionAlertMetadata:
         assert idx_alert2 < idx_alert_id < idx_ts
         # Camera line comes first
         assert parts[0] == "Camera: Front Gate"
-        # Nested vehicle_features expanded on own lines (indent +3 per level)
-        assert "vehicle_features:" in caption
-        assert "   headlight_signature: LED" in caption
+        # Curated vehicle fields rendered as bullet list (US-067b)
+        assert "\u2022 Make: Ford" in caption
+        assert "\u2022 Wheel style: alloy" in caption
 
     def test_tg2_caption_omits_alert_metadata_when_alert_none(self):
         """TG#2 caption omits Alert lines when alert is None."""
@@ -442,12 +442,14 @@ class TestTg2NestedDictExpansion:
             camera_label="Front Gate",
         )
         caption = result["caption"]
-        assert "vehicle_features:" in caption
-        assert "   wheel_style: alloy" in caption
-        assert "   headlight_signature: LED" in caption
-        assert "   rear_lights_signature: strip" in caption
-        # vehicle_features lines come AFTER top-level fields
-        assert caption.index("body_style_hint:") < caption.index("vehicle_features:")
+        # Curated vehicle fields as bullet list (US-067b)
+        assert "\u2022 Make: Ford" in caption
+        assert "\u2022 Model: F-150" in caption
+        assert "\u2022 Wheel style: alloy" in caption
+        assert "\u2022 Headlight signature: LED" in caption
+        assert "\u2022 Rear lights signature: strip" in caption
+        # No nested vehicle_features: parent header
+        assert "vehicle_features:" not in caption
 
     def test_person_mode_expands_attributes_and_signature(self):
         """person mode: attributes + signature.stable/transient each on own line."""
@@ -476,12 +478,17 @@ class TestTg2NestedDictExpansion:
             camera_label="Back Yard",
         )
         caption = result["caption"]
-        assert "attributes:" in caption
-        assert "   clothing_upper: black hoodie" in caption
-        assert "   carrying: [backpack, umbrella]" in caption
-        assert "signature:" in caption
-        assert "   stable: [tattoo on right forearm]" in caption
-        assert "   transient: [carrying a backpack]" in caption
+        # Curated person fields as bullet list (US-067b)
+        assert "\u2022 Clothing upper: black hoodie" in caption
+        assert "\u2022 Clothing lower: blue jeans" in caption
+        assert "\u2022 Action: walking" in caption
+        # No nested attributes:/signature: parent headers
+        assert "attributes:" not in caption
+        assert "signature:" not in caption
+        # Non-curated fields omitted (carrying, confidence, notable_details)
+        assert "carrying" not in caption
+        assert "confidence" not in caption
+        assert "notable_details" not in caption
 
     def test_animal_mode_expands_distinctive_features_as_inline_list(self):
         """animal mode: distinctive_features rendered as inline list."""
@@ -505,8 +512,11 @@ class TestTg2NestedDictExpansion:
             camera_label="Farm Entrance",
         )
         caption = result["caption"]
-        assert "species: dog" in caption
-        assert "breed: labrador" in caption
-        assert "distinctive_features: [blue collar, tag with name]" in caption
-        assert "action: walking" in caption
-        assert "confidence: 0.95" in caption
+        # Animal mode: all top-level scalars as bullets (US-067b)
+        assert "\u2022 Species: dog" in caption
+        assert "\u2022 Breed: labrador" in caption
+        assert "\u2022 Size: large" in caption
+        assert "\u2022 Action: walking" in caption
+        # Lists and dicts skipped
+        assert "distinctive_features" not in caption
+        assert "confidence" not in caption
