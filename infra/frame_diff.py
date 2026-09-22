@@ -19,6 +19,8 @@ PUBLIC API:
   - compute_diff_bbox(frame_a_path, frame_b_path, threshold=25, min_area=64)
       -> (x, y, w, h) — convenience wrapper, never returns None
   - crop_frame_to_bbox(frame_path, bbox) -> str | None
+  - bbox_from_mask_with_intersection(mask_prior, mask_curr, ...)
+      -> tuple[int,int,int,int] | None  # cross-diff intersection anchor
 DOES NOT DO:
   - Does NOT classify what's in the bbox (that's quick_classifier's job)
   - Does NOT persist anything to disk (caller saves crops)
@@ -285,6 +287,118 @@ def bbox_from_mask(
 
     # Expand by percentage, round UP to mult of 32, clamp to image bounds.
     h_img, w_img = mask.shape
+    return _expand_bbox_pct((x, y, w, h), pad_pct, w_img, h_img)
+
+
+def _compute_iou(
+    a: tuple[int, int, int, int],
+    b: tuple[int, int, int, int],
+) -> float:
+    """Standard intersection-over-union for two (x, y, w, h) bboxes.
+
+    Returns 0.0 for non-overlapping bboxes.
+    """
+    x1, y1, w1, h1 = a
+    x2, y2, w2, h2 = b
+
+    # Intersection box
+    ix1 = max(x1, x2)
+    iy1 = max(y1, y2)
+    ix2 = min(x1 + w1, x2 + w2)
+    iy2 = min(y1 + h1, y2 + h2)
+
+    inter_w = max(0, ix2 - ix1)
+    inter_h = max(0, iy2 - iy1)
+    intersection = inter_w * inter_h
+
+    area1 = w1 * h1
+    area2 = w2 * h2
+    union = area1 + area2 - intersection
+
+    if union == 0:
+        return 0.0
+    return intersection / union
+
+
+def _labels_to_bboxes(
+    num_labels: int,
+    labels: np.ndarray,
+    min_area_px: int,
+) -> list[tuple[int, int, int, int]]:
+    """Extract bboxes for all connected components meeting min_area_px.
+
+    Returns list of (x, y, w, h) bboxes in label order (excluding background).
+    """
+    bboxes = []
+    for i in range(1, num_labels + 1):
+        area = int(np.sum(labels == i))
+        if area < min_area_px:
+            continue
+        rows = np.where(labels == i)[0]
+        cols = np.where(labels == i)[1]
+        x = int(cols.min())
+        y = int(rows.min())
+        w = int(cols.max() - cols.min() + 1)
+        h = int(rows.max() - rows.min() + 1)
+        bboxes.append((x, y, w, h))
+    return bboxes
+
+
+def bbox_from_mask_with_intersection(
+    mask_prior: np.ndarray | None,
+    mask_curr: np.ndarray | None,
+    min_area_px: int = DEFAULT_MIN_AREA_PX,
+    pad_pct: float = DEFAULT_BBOX_PAD_PCT,
+    iou_threshold: float = 0.50,
+) -> tuple[int, int, int, int] | None:
+    """Find the bbox anchored to the current frame by cross-diff intersection.
+
+    Computes connected components in each mask, iterates all pairs (skipping
+    those below ``min_area_px``), and returns the expanded bbox of the pair
+    with the highest IoU above ``iou_threshold``. If no pair meets the
+    threshold, returns ``None``.
+
+    The caller is expected to pass ``diff(1,2)`` as ``mask_prior`` and
+    ``diff(2,3)`` as ``mask_curr``. The component that exists in BOTH diffs
+    (IoU >= threshold) is the one anchored to frame 2 (the subject).
+
+    Reuses ``_expand_bbox_pct`` for padding and round-mult-32.
+
+    Returns (x, y, w, h) of the highest-IoU matched pair's expanded bbox,
+    or ``None`` if no match is found.
+    """
+    if mask_prior is None or mask_prior.size == 0 or mask_curr is None or mask_curr.size == 0:
+        return None
+
+    num_labels_prior, labels_prior = _connected_components(mask_prior)
+    num_labels_curr, labels_curr = _connected_components(mask_curr)
+
+    if num_labels_prior < 1 or num_labels_curr < 1:
+        return None
+
+    # Get bboxes for components meeting min_area_px
+    bboxes_prior = _labels_to_bboxes(num_labels_prior, labels_prior, min_area_px)
+    bboxes_curr = _labels_to_bboxes(num_labels_curr, labels_curr, min_area_px)
+
+    if not bboxes_prior or not bboxes_curr:
+        return None
+
+    best_iou = -1.0
+    best_bbox = None
+
+    for bp in bboxes_prior:
+        for bc in bboxes_curr:
+            iou = _compute_iou(bp, bc)
+            if iou > best_iou:
+                best_iou = iou
+                best_bbox = bc  # expand the current-frame bbox
+
+    if best_iou < iou_threshold or best_bbox is None:
+        return None
+
+    # Expand using _expand_bbox_pct (same as bbox_from_mask)
+    x, y, w, h = best_bbox
+    h_img, w_img = mask_curr.shape
     return _expand_bbox_pct((x, y, w, h), pad_pct, w_img, h_img)
 
 
