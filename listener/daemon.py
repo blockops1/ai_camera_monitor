@@ -277,7 +277,7 @@ def _write_event(
 def _box_id() -> str:
     """Return the multi-box namespace identifier.
 
-    Priority: FARMSURV_BOX_ID env > HOSTNAME env > os.uname().nodename > "unknown".
+    Priority: FARMSURV_BOX_ID env > HOSTNAME env > "unknown".
     """
     box = os.environ.get("FARMSURV_BOX_ID")
     if box:
@@ -285,13 +285,6 @@ def _box_id() -> str:
     box = os.environ.get("HOSTNAME")
     if box:
         return box
-    try:
-        import socket
-        box = socket.gethostname()
-        if box:
-            return box
-    except Exception:
-        pass
     return "unknown"
 
 
