@@ -100,6 +100,20 @@ DEFAULT_BBOX_PAD_PCT = 0.10
 DEFAULT_INTERSECTION_DILATE_PCT = 0.01
 
 
+def _get_intersection_dilate_pct() -> float:
+    """Read BBOX_INTERSECTION_DILATE_PCT at call time.
+
+    Reading at call time (not import time) means operator changes to the
+    env var take effect on the next test run / next listener start without
+    needing a Python ``importlib.reload()``. Cached module-level constants
+    on env vars also leak state across pytest runs when a test mutates
+    the env var and reloads the module.
+    """
+    return float(
+        os.environ.get("BBOX_INTERSECTION_DILATE_PCT", DEFAULT_INTERSECTION_DILATE_PCT)
+    )
+
+
 def _connected_components(
     mask: np.ndarray,
 ) -> tuple[int, np.ndarray]:
@@ -374,12 +388,6 @@ def _labels_to_bboxes(
     return bboxes
 
 
-# Read env var once at import time (module-level constant fallback)
-_INTERSECTION_DILATE_PCT = float(
-    os.environ.get("BBOX_INTERSECTION_DILATE_PCT", DEFAULT_INTERSECTION_DILATE_PCT)
-)
-
-
 def bbox_from_mask_with_intersection(
     mask_prior: np.ndarray | None,
     mask_curr: np.ndarray | None,
@@ -407,9 +415,9 @@ def bbox_from_mask_with_intersection(
     if mask_prior is None or mask_prior.size == 0 or mask_curr is None or mask_curr.size == 0:
         return None
 
-    # Dilate percentage: caller override, then env var, then default constant.
+    # Dilate percentage: caller override, then env var (read at call time), then default.
     if dilate_pct is None:
-        dilate_pct = _INTERSECTION_DILATE_PCT
+        dilate_pct = _get_intersection_dilate_pct()
 
     # Step 1: pixel-wise AND
     intersection = ((mask_prior > 0) & (mask_curr > 0)).astype(np.uint8) * 255
