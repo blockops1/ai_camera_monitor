@@ -2,7 +2,7 @@
 
 STATUS: provisional (Phase 6B.107 §11.37, 2026-08-23; 6B.171 subject bbox 2026-09-01,
         STRICT commit — no size floor, no diff-bbox fallback; 6B.173 two-mask
-        intersection anchor 2026-09-01)
+        intersection anchor 2026-09-01; V2-071 pixel-wise AND + dilate + CC 2026-09-22)
 INPUTS: file paths to two image files (JPEG/PNG, any resolution); OR in-memory
         uint8 ndarrays (already loaded)
 OUTPUTS: tuple of (motion_mask: np.ndarray uint8 HxW, bbox: (x, y, w, h) | None,
@@ -74,6 +74,7 @@ Phase 6B.171 NOTES (subject bbox — why this exists, why STRICT):
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -91,6 +92,12 @@ DEFAULT_MIN_AREA_PX = 64
 # context regardless of subject size and makes YOLO's pad-to-multiple-of-32
 # a no-op (dimensions are already multiples of 32).
 DEFAULT_BBOX_PAD_PCT = 0.10
+
+# Default dilation percentage for pixel-wise intersection of two consecutive
+# diff masks.  Applied BEFORE connected-components on the AND result.
+# 1% = 0.01 of the smaller frame dimension (e.g. ~13 px on 1296-height
+# frames).  Tunable via env var BBOX_INTERSECTION_DILATE_PCT.
+DEFAULT_INTERSECTION_DILATE_PCT = 0.01
 
 
 def _connected_components(
@@ -197,6 +204,29 @@ def _expand_bbox_pct(
     new_y = max(0, min(new_y, frame_h - new_h))
 
     return (int(new_x), int(new_y), int(new_w), int(new_h))
+
+
+def _dilate_mask(
+    mask: np.ndarray,
+    px: int,
+) -> np.ndarray:
+    """Dilate a binary uint8 mask by *px* pixels in all directions.
+
+    Uses a rolling-sum approach: for each pixel in the structuring element
+    (square of size ``2*px+1``), roll the mask and take the element-wise
+    maximum.  This is equivalent to a morphological dilation with a
+    square structuring element.
+
+    Returns a uint8 ndarray (0 or 255).
+    """
+    if px <= 0:
+        return mask.copy()
+    dilated = np.zeros_like(mask)
+    for ky in range(-px, px + 1):
+        for kx in range(-px, px + 1):
+            shifted = np.roll(mask, (ky, kx), axis=(0, 1))
+            dilated = np.maximum(dilated, shifted)
+    return dilated
 
 
 def load_frame(path: str) -> np.ndarray | None:
@@ -344,62 +374,78 @@ def _labels_to_bboxes(
     return bboxes
 
 
+# Read env var once at import time (module-level constant fallback)
+_INTERSECTION_DILATE_PCT = float(
+    os.environ.get("BBOX_INTERSECTION_DILATE_PCT", DEFAULT_INTERSECTION_DILATE_PCT)
+)
+
+
 def bbox_from_mask_with_intersection(
     mask_prior: np.ndarray | None,
     mask_curr: np.ndarray | None,
     min_area_px: int = DEFAULT_MIN_AREA_PX,
     pad_pct: float = DEFAULT_BBOX_PAD_PCT,
-    iou_threshold: float = 0.50,
+    dilate_pct: float | None = None,
 ) -> tuple[int, int, int, int] | None:
-    """Find the bbox anchored to the current frame by cross-diff intersection.
+    """Find the bbox anchored to the current frame by pixel-wise AND + dilate.
 
-    Computes connected components in each mask, iterates all pairs (skipping
-    those below ``min_area_px``), and returns the expanded bbox of the pair
-    with the highest IoU above ``iou_threshold``. If no pair meets the
-    threshold, returns ``None``.
+    Computes the pixel-wise AND of two consecutive diff masks, dilates the
+    result by 1% of the smaller frame dimension (configurable via
+    ``dilate_pct`` or env var ``BBOX_INTERSECTION_DILATE_PCT``), then takes
+    the largest connected component and bboxes it.
 
     The caller is expected to pass ``diff(1,2)`` as ``mask_prior`` and
-    ``diff(2,3)`` as ``mask_curr``. The component that exists in BOTH diffs
-    (IoU >= threshold) is the one anchored to frame 2 (the subject).
+    ``diff(2,3)`` as ``mask_curr``.  The AND result captures regions that
+    changed in BOTH consecutive time windows — i.e. the subject's persistent
+    motion footprint.
 
-    Reuses ``_expand_bbox_pct`` for padding and round-mult-32.
+    Uses ``_expand_bbox_pct`` for padding and round-mult-32.
 
-    Returns (x, y, w, h) of the highest-IoU matched pair's expanded bbox,
-    or ``None`` if no match is found.
+    Returns (x, y, w, h) of the largest connected component's expanded bbox,
+    or ``None`` if no component meets the area threshold.
     """
     if mask_prior is None or mask_prior.size == 0 or mask_curr is None or mask_curr.size == 0:
         return None
 
-    num_labels_prior, labels_prior = _connected_components(mask_prior)
-    num_labels_curr, labels_curr = _connected_components(mask_curr)
+    # Dilate percentage: caller override, then env var, then default constant.
+    if dilate_pct is None:
+        dilate_pct = _INTERSECTION_DILATE_PCT
 
-    if num_labels_prior < 1 or num_labels_curr < 1:
+    # Step 1: pixel-wise AND
+    intersection = ((mask_prior > 0) & (mask_curr > 0)).astype(np.uint8) * 255
+
+    # Step 2: dilate
+    h, w = mask_curr.shape
+    min_dim = min(h, w)
+    dilate_px = round(dilate_pct * min_dim)
+    intersection = _dilate_mask(intersection, dilate_px)
+
+    # Step 3: connected components, take largest by area
+    num_labels, labels = _connected_components(intersection)
+    if num_labels < 1:
         return None
 
-    # Get bboxes for components meeting min_area_px
-    bboxes_prior = _labels_to_bboxes(num_labels_prior, labels_prior, min_area_px)
-    bboxes_curr = _labels_to_bboxes(num_labels_curr, labels_curr, min_area_px)
+    largest_idx = 1
+    largest_area = 0
+    for i in range(1, num_labels + 1):
+        area = int(np.sum(labels == i))
+        if area > largest_area:
+            largest_area = area
+            largest_idx = i
 
-    if not bboxes_prior or not bboxes_curr:
+    if largest_area < min_area_px:
         return None
 
-    best_iou = -1.0
-    best_bbox = None
+    rows = np.where(labels == largest_idx)[0]
+    cols = np.where(labels == largest_idx)[1]
+    y_cc = int(rows.min())
+    x_cc = int(cols.min())
+    h_cc = int(rows.max() - rows.min() + 1)
+    w_cc = int(cols.max() - cols.min() + 1)
 
-    for bp in bboxes_prior:
-        for bc in bboxes_curr:
-            iou = _compute_iou(bp, bc)
-            if iou > best_iou:
-                best_iou = iou
-                best_bbox = bc  # expand the current-frame bbox
-
-    if best_iou < iou_threshold or best_bbox is None:
-        return None
-
-    # Expand using _expand_bbox_pct (same as bbox_from_mask)
-    x, y, w, h = best_bbox
+    # Step 4: expand and clamp
     h_img, w_img = mask_curr.shape
-    return _expand_bbox_pct((x, y, w, h), pad_pct, w_img, h_img)
+    return _expand_bbox_pct((x_cc, y_cc, w_cc, h_cc), pad_pct, w_img, h_img)
 
 
 def diff_pair_with_bbox(
@@ -527,7 +573,6 @@ def compute_cross_diff_bboxes(
     threshold: int = DEFAULT_DIFF_THRESHOLD,
     min_area_px: int = DEFAULT_MIN_AREA_PX,
     pad_pct: float = DEFAULT_BBOX_PAD_PCT,
-    iou_threshold: float = 0.50,
 ) -> tuple[tuple[int, int, int, int] | None, tuple[int, int, int, int] | None]:
     """Compute cross-diff bboxes for the motion gate pipeline.
 
@@ -537,7 +582,7 @@ def compute_cross_diff_bboxes(
       - bbox_b = bbox_from_mask_with_intersection(mask_23, mask_34, ...)
         (anchored to frame_3 — the subject IS here)
 
-    Either may be None if no IoU match is found above threshold.
+    Either may be None if no component meets the area threshold.
 
     Returns (bbox_a, bbox_b).
     """
@@ -558,13 +603,11 @@ def compute_cross_diff_bboxes(
         mask_12, mask_23,
         min_area_px=min_area_px,
         pad_pct=pad_pct,
-        iou_threshold=iou_threshold,
     )
     bbox_b = bbox_from_mask_with_intersection(
         mask_23, mask_34,
         min_area_px=min_area_px,
         pad_pct=pad_pct,
-        iou_threshold=iou_threshold,
     )
 
     return bbox_a, bbox_b
