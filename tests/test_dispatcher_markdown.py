@@ -11,11 +11,9 @@ Verifies:
 from __future__ import annotations
 
 import httpx
-import pytest
 
 from telegram_formatter import dispatcher
 from telegram_formatter.dispatcher import escape_markdown_v2
-
 
 # ---------------------------------------------------------------------------
 # escape_markdown_v2 unit tests
@@ -65,9 +63,6 @@ class TestEscapeMarkdownV2:
 
     def test_no_false_escapes(self):
         """Letters, digits, spaces, and common punctuation are NOT escaped."""
-        safe = "Hello World 123 @#%,;:!?\"'()"
-        # Only !, ?, (, ) are in the reserved set from that string.
-        # Wait — ! and ? and ( and ) are reserved. Let's use a clean string.
         assert escape_markdown_v2("abc123 xyz") == "abc123 xyz"
 
     def test_empty_string(self):
@@ -100,7 +95,8 @@ class TestParseModeMarkdownV2:
         json_body = last_call.kwargs["json"]
         assert json_body["parse_mode"] == "MarkdownV2"
         assert json_body["chat_id"] == "100"
-        assert json_body["text"] == "hello *bold*"
+        # * is a reserved MarkdownV2 char, so it is escaped to \*
+        assert json_body["text"] == "hello \\*bold\\*"
 
     def test_send_photo_has_parse_mode(self, mock_llama_server, tmp_path):
         """_send_photo routes to sendPhoto with parse_mode=MarkdownV2."""
