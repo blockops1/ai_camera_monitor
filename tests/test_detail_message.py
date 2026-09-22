@@ -17,7 +17,6 @@ import pytest
 
 from telegram_formatter.detail import build_detail_message
 
-
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------

@@ -48,8 +48,9 @@ def test_build_match_alert_body_uses_real_label_and_id():
     assert "plate_ABC123" in body
     assert "John Smith" in body
     assert "Color: silver" in body
-    assert "Make/Model: Toyota Camry" in body
-    assert "Body: sedan" in body
+    assert "Make: Toyota" in body
+    assert "Model: Camry" in body
+    # US-067c: no Body field in match body
 
     # CRITICAL: no '?' placeholders in label or id positions
     assert "Match \u2014 ?" not in body
@@ -78,11 +79,10 @@ def test_build_match_alert_body_no_match_renders_top_candidates():
     )
     caption = result["caption"]
 
-    assert "unrecognized vehicle" in caption
-    assert "below confidence threshold" in caption
-    assert "Top candidates:" in caption
-    assert "plate_unknown" in caption
-    assert "Thresholds:" in caption
+    # US-067c: no-match body is slimmed — no Status:, no Thresholds:
+    assert "⚠️ No match" in caption
+    assert "Thresholds:" not in caption
+    assert "Reason:" not in caption
 
 
 # ---------------------------------------------------------------------------

@@ -22,7 +22,8 @@ PUBLIC API:
     build_match_alert_body(match_result, vm2_result, score, gap, runner_ups) -> str
         Build the matched-vehicle details block for TG#3 (label, ID,
         owner, color, make/model, confidence, gap, runner-ups).
-    build_match_message(match_result, vm2_result, camera_label, alert=None) -> dict
+    build_match_message(match_result, vm2_result, camera_label, alert=None,
+                        position=None) -> dict
         Build a Telegram-ready message dict for TG#3 (match result).
     pick_alert_image_path(vm2_result, crop_a_path, crop_b_path) -> str | None
         Pure helper: choose which crop image path to use based on
@@ -40,6 +41,7 @@ DOES NOT DO:
 CALLS INTO:
     - telegram_formatter.dispatcher: _send_message, send_photo
     - stdlib str(): path-to-string conversion
+    - infra.format_ts.format_local_timestamp
 
 RELATED:
     - vehicle_matcher.match.match_vehicle
@@ -98,6 +100,20 @@ def pick_alert_image_path(
     return crop_a_path  # 'crop_a', 'neither', or missing -> fallback to crop_a
 
 
+def _format_score(score: float) -> str:
+    """Format a score value — decimal for [0,1], one-decimal for >1."""
+    if 0 <= score <= 1:
+        return f"{score:.2f}"
+    return f"{score:.1f}"
+
+
+def _format_runner_score(score: float) -> str:
+    """Format a runner-up score for display."""
+    if 0 <= score <= 1:
+        return f"{score:.2f}"
+    return f"{score:.1f}"
+
+
 def build_match_alert_body(
     match_result: dict[str, Any],
     vm2_result: dict[str, Any],
@@ -107,21 +123,15 @@ def build_match_alert_body(
 ) -> str:
     """Build the matched-vehicle body for a TG#3 match alert.
 
-    Slimmed v1 layout (Phase 6B.121):
-        ✅ Match — <label>
-
+    Slimmed layout (US-067c — stripped debug lines):
+        Match — <label>
           ID: <id>
           Label: <label>
           Owner: <owner>    (if present)
           Color: <color>    (if present)
-          Make/Model: <make> <model>   (if present)
-          Body: <type>      (if present)
-
-        Confidence: <score>   (gap: <gap>)
-
-        Runner-ups:           (if present)
-          #1 <kv_id>: <score>
-          #2 <kv_id>: <score>
+          Make: <make>      (if present)
+          Model: <model>    (if present)
+          Gap: <gap>        (if gap is known and non-zero)
 
     Args:
         match_result: Match result dict (must have 'matched' and 'known_vehicle').
@@ -141,8 +151,10 @@ def build_match_alert_body(
         kv = match_result.get("known_vehicle") or {}
     else:
         kv = match_result if isinstance(match_result, dict) else {}
-    lines: list[str] = [f"✅ Match \u2014 {kv.get('label', '?')}"]
-    lines.append("")
+
+    label = kv.get("label", "?")
+    lines: list[str] = [f"✅ Match \u2014 *{label}*"]
+
     parts: list[str] = [
         f"  ID: {kv.get('id', '?')}",
         f"  Label: {kv.get('label', '?')}",
@@ -151,22 +163,16 @@ def build_match_alert_body(
         parts.append(f"  Owner: {kv['owner']}")
     if kv.get("color"):
         parts.append(f"  Color: {kv['color']}")
-    if kv.get("make") or kv.get("model"):
-        parts.append(f"  Make/Model: {kv.get('make', '?')} {kv.get('model', '')}".rstrip())
-    if kv.get("type"):
-        parts.append(f"  Body: {kv['type']}")
+    if kv.get("make"):
+        parts.append(f"  Make: {kv['make']}")
+    if kv.get("model"):
+        parts.append(f"  Model: {kv['model']}")
+
     lines.extend(parts)
-    lines.append("")
 
-    score_str = f"{score:.2f}" if 0 <= score <= 1 else f"{score:.1f}"
-    lines.append(f"Confidence: {score_str}   (gap: {gap:.2f})")
-    lines.append("")
-
-    if runner_ups:
-        lines.append("Runner-ups:")
-        for i, (kid, s) in enumerate(runner_ups[:2], 1):
-            s_str = f"{s:.2f}" if 0 <= s <= 1 else f"{s:.1f}"
-            lines.append(f"  #{i} {kid}: {s_str}")
+    # Gap line (US-067c: keep gap if non-zero, drop Confidence line)
+    if gap and gap > 0:
+        lines.append(f"  Gap: {_format_runner_score(gap)}")
 
     return "\n".join(lines)
 
@@ -226,6 +232,7 @@ def build_match_message(
     top_candidates: list[tuple[str, float]] | None = None,
     match_threshold: float = 0.0,
     gap_threshold: float = 0.0,
+    position: int | None = None,
 ) -> dict[str, Any]:
     """Build a TG#3 Telegram message dict for the match result.
 
@@ -234,9 +241,8 @@ def build_match_message(
     Status line, mirroring the TG#2 / TG#1 layout.
 
     On match, uses build_match_alert_body for the matched-vehicle details
-    (label, ID, owner, color, make/model, body, confidence, gap, runner-ups).
-    On no-match, uses build_no_match_alert_body (from no_match_telegram)
-    which shows reason, top candidates, and thresholds.
+    (label, ID, owner, color, make/model, gap).
+    On no-match, uses a slimmed body with only the top runner-up (US-067c).
 
     Args:
         match_result: Match result dict with 'matched' key.
@@ -248,15 +254,12 @@ def build_match_message(
         top_candidates: Top-N (kv_id, score) tuples for no-match display.
         match_threshold: Score threshold used for match/no-match decision.
         gap_threshold: Gap threshold used for match/no-match decision.
+        position: TG message position (1-3), used for the 'TG X of 3' marker.
 
     Returns:
         Telegram-ready message dict with 'caption' and 'photos' keys.
     """
-    from telegram_formatter.no_match_telegram import build_no_match_alert_body
-
-    lines: list[str] = [
-        f"Camera: {camera_label}",
-    ]
+    lines: list[str] = [f"Camera: {camera_label}"]
 
     # Determine classification from vm2_result if not provided.
     cls = classification or vm2_result.get("class", "vehicle")
@@ -282,22 +285,17 @@ def build_match_message(
                 if len(all_scores) > 1:
                     gap = best_val - all_scores[1][1]
                     runner_ups = all_scores[1:]
-                else:
-                    gap = best_val
+                # When there's only one score, gap stays 0 (no next-best to compare).
 
             lines.append(build_match_alert_body(match_result, vm2_result, score, gap, runner_ups))
     else:
-        # No-match: use classification-aware wording + full no-match body.
-        status = status_wording_for(cls, False)
-        lines.append(f"Status: {status}")
+        # No-match: slimmed body (US-067c) — header + runner-up only.
+        lines.append("\u26a0\ufe0f No match (confidence below threshold)")
+
+        # Top runner-up if available.
         if top_candidates:
-            lines.append(build_no_match_alert_body(
-                reason=reason,
-                top_candidates=top_candidates,
-                match_threshold=match_threshold,
-                gap_threshold=gap_threshold,
-                captured_at=alert.get("timestamp", "") if alert else "",
-            ))
+            top_id, top_score = top_candidates[0]
+            lines.append(f"  Runner-up: *{top_id}* ({_format_runner_score(top_score)})")
 
     # Alert metadata (mirrors TG#1 / TG#2 caption layout).
     if alert:
@@ -309,9 +307,9 @@ def build_match_message(
         if timestamp:
             lines.append(f"Timestamp: {format_local_timestamp(timestamp)}")
 
-    features = vm2_result.get("distinctive_features")
-    if features:
-        lines.append(f"Distinctive features: {', '.join(features)}")
+    # TG marker (US-067c: consistent with 067a/067b).
+    if position is not None:
+        lines.append(f"TG {position} of 3")
 
     return {
         "caption": "\n".join(lines),

@@ -1,16 +1,19 @@
-"""Tests for telegram_formatter.match_alert — build_match_alert_body + full message."""
+"""Tests for telegram_formatter.match_alert — build_match_alert_body + full message.
+
+Updated for US-067c: stripped debug lines, TG marker, individual Make/Model fields.
+"""
 
 from __future__ import annotations
 
 from telegram_formatter.match_alert import build_match_alert_body, build_match_message
 
 # ---------------------------------------------------------------------------
-# AC1: build_match_alert_body — high-confidence match
+# build_match_alert_body — high-confidence match
 # ---------------------------------------------------------------------------
 
 
 def test_body_high_confidence_match():
-    """Matched alert contains label, confidence, and runner-ups."""
+    """Matched alert contains label, and gap (no Confidence/Runner-ups lines)."""
     match_result = {
         "matched": True,
         "known_vehicle": {
@@ -28,20 +31,21 @@ def test_body_high_confidence_match():
                                    runner_ups=[("v_other", 2.0), ("v_third", 1.0)])
     assert "Match" in body
     assert "Test car" in body
-    assert "Confidence: 8.5" in body
-    assert "gap: 3.00" in body
-    assert "Runner-ups:" in body
-    assert "v_other" in body
-    assert "v_third" in body
+    # US-067c: individual Make/Model fields
+    assert "Make: Ford" in body
+    assert "Model: F150" in body
     assert "ID: v_test" in body
     assert "Color: red" in body
-    assert "Make/Model: Ford F150" in body
-    assert "Body: pickup" in body
     assert "Owner: Jane Doe" in body
+    assert "Label: Test car" in body
+    assert "Gap: 3.0" in body
+    # Debug lines removed
+    assert "Confidence:" not in body
+    assert "Runner-ups:" not in body
 
 
 def test_body_low_confidence_with_gap_zero():
-    """Matched alert with score in [0,1] range shows decimal format and gap=0."""
+    """Matched alert with score in [0,1] range and gap=0."""
     match_result = {
         "matched": True,
         "known_vehicle": {
@@ -51,13 +55,14 @@ def test_body_low_confidence_with_gap_zero():
     }
     body = build_match_alert_body(match_result, {}, score=0.85, gap=0.0,
                                    runner_ups=[("v2_copy", 0.85)])
-    assert "0.85" in body
-    assert "gap: 0.00" in body
-    assert "v2_copy" in body
+    assert "Blue sedan" in body
+    # US-067c: gap=0 -> no Gap line, no runner-ups section
+    assert "Gap:" not in body
+    assert "Runner-ups:" not in body
     # No color/make/model/body lines
     assert "Color:" not in body
-    assert "Make/Model:" not in body
-    assert "Body:" not in body
+    assert "Make:" not in body
+    assert "Model:" not in body
 
 
 def test_body_no_plate_no_optional_fields():
@@ -76,7 +81,6 @@ def test_body_no_plate_no_optional_fields():
     # No optional fields present
     assert "Owner:" not in body
     assert "Color:" not in body
-    assert "Runner-ups:" not in body
 
 
 def test_body_no_runner_ups():
@@ -93,7 +97,7 @@ def test_body_no_runner_ups():
 
 
 def test_body_label_fallback():
-    """When known_vehicle has no label, body shows '?'."""
+    """When known_vehicle has no label, body shows '*'?*' (bold fallback)."""
     match_result = {
         "matched": True,
         "known_vehicle": {
@@ -101,7 +105,9 @@ def test_body_label_fallback():
         },
     }
     body = build_match_alert_body(match_result, {}, score=3.0, gap=0.5)
-    assert "Match \u2014 ?" in body
+    # US-067c: label is always bold
+    assert "Match \u2014 *?*" in body
+    assert "Gap: 0.5" in body
 
 
 # ---------------------------------------------------------------------------
@@ -123,37 +129,50 @@ def test_message_match_includes_details():
         "score": 8.5,
         "all_scores": [("v_test", 8.5), ("v_other", 5.5)],
     }
-    result = build_match_message(match_result, {}, camera_label="Front Gate")
+    result = build_match_message(match_result, {}, camera_label="Front Gate", position=2)
     caption = result["caption"]
     assert "Camera: Front Gate" in caption
     assert "Match" in caption
     assert "Test car" in caption
-    assert "Confidence: 8.5" in caption
-    assert "gap: 3.00" in caption
-    assert "v_other" in caption
+    # US-067c: no Confidence line, gap instead
+    assert "Gap:" in caption
+    assert "Confidence:" not in caption
+    assert "Runner-ups:" not in caption
+    # TG marker
+    assert "TG 2 of 3" in caption
 
 
 def test_message_unmatched():
-    """Unmatched alert shows 'unrecognized vehicle' (default class fallback)."""
+    """Unmatched alert shows minimal format with runner-up."""
     match_result = {"matched": False}
-    result = build_match_message(match_result, {}, camera_label="Gate")
+    result = build_match_message(match_result, {}, camera_label="Gate",
+                                  top_candidates=[("v_a", 5.0)],
+                                  position=1)
     caption = result["caption"]
-    assert "unrecognized vehicle" in caption
+    assert "⚠️ No match (confidence below threshold)" in caption
+    assert "Runner-up: *v_a* (5.0)" in caption
+    assert "TG 1 of 3" in caption
     assert "Match" not in caption
+    assert "Thresholds:" not in caption
+    assert "Reason:" not in caption
 
 
 def test_message_unmatched_person_classification():
-    """Unmatched alert uses classification-aware wording: 'unrecognized person'."""
+    """Unmatched alert uses classification-aware wording."""
     match_result = {"matched": False}
     vm2_result = {"class": "person"}
-    result = build_match_message(match_result, vm2_result, camera_label="Gate")
+    result = build_match_message(match_result, vm2_result, camera_label="Gate",
+                                  top_candidates=[("v_a", 5.0)],
+                                  position=1)
     caption = result["caption"]
-    assert "unrecognized person" in caption
-    assert "Match" not in caption
+    # No-match: no status line, just emoji header
+    assert "unrecognized person" not in caption  # old behavior removed
+    # But the header is still the no-match header
+    assert "⚠️ No match" in caption
 
 
 def test_message_unmatched_with_top_candidates():
-    """Unmatched alert with top_candidates shows full no-match body."""
+    """Unmatched alert with top_candidates shows slimmed body."""
     match_result = {"matched": False}
     vm2_result = {"class": "vehicle"}
     result = build_match_message(
@@ -165,14 +184,16 @@ def test_message_unmatched_with_top_candidates():
         top_candidates=[("v_a", 5.0), ("v_b", 2.0)],
         match_threshold=6.0,
         gap_threshold=1.5,
+        position=1,
     )
     caption = result["caption"]
-    assert "Status: unrecognized vehicle" in caption
-    assert "below confidence threshold" in caption
-    assert "Top candidates:" in caption
-    assert "Thresholds:" in caption
-    assert "Match: 6.0" in caption
-    assert "Gap: 1.5" in caption
+    # US-067c: no Status: line, no Thresholds:, no Reason:
+    assert "Status:" not in caption
+    assert "Thresholds:" not in caption
+    assert "Reason:" not in caption
+    # Only top 1 runner-up
+    assert "Runner-up: *v_a*" in caption
+    assert "v_b" not in caption
 
 
 def test_message_alert_metadata_included():
@@ -185,7 +206,7 @@ def test_message_alert_metadata_included():
     }
     alert = {"id": "evt-001", "timestamp": "2026-09-14T10:00:00Z"}
     result = build_match_message(
-        match_result, {}, camera_label="Cam1", alert=alert,
+        match_result, {}, camera_label="Cam1", alert=alert, position=3,
     )
     caption = result["caption"]
     assert "Alert 3 of 3" in caption
@@ -238,8 +259,9 @@ def test_body_flat_match_result_shape():
     assert "v_flat" in body, f"id missing: {body!r}"
     assert "Color: blue" in body
     assert "Owner: Bob" in body
-    assert "Make/Model: Chevy Silverado" in body
-    assert "Body: pickup" in body
+    # US-067c: individual Make/Model lines
+    assert "Make: Chevy" in body
+    assert "Model: Silverado" in body
     # CRITICAL: the bug rendered "?" when flat dict was passed. Make sure
     # that "?" is NOT in label/id positions.
     assert "Match \u2014 ?" not in body, f"label collapsed to ?: {body!r}"
