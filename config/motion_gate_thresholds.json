@@ -22,7 +22,8 @@
     "vehicle": 0.50,
     "person": 0.40,
     "gate_cooldown": {"vehicle": 90, "person": 45, "default": 60},
-    "gate_enabled": {"vehicle": true, "person": true, "motion": true}
+    "gate_enabled": {"vehicle": true, "person": true, "motion": true},
+    "subjects": ["person", "animal"]
   },
   "OUTSIDE_FRONT_POWER": {
     "_note": "Outside Front Power — perimeter",
