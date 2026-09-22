@@ -24,6 +24,27 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# All reserved MarkdownV2 characters (Telegram Bot API docs).
+# Each must be prefixed with a single backslash to be sent literally.
+_MARKDOWNV2_RESERVED = r"_*[]()~`>#+-=|{}.!"
+
+
+def escape_markdown_v2(text: str) -> str:
+    """Escape all reserved MarkdownV2 characters in *text*.
+
+    Every character in ``_MARKDOWNV2_RESERVED`` is prefixed with a single
+    backslash so Telegram renders it as literal text instead of Markdown.
+
+    Static formatting (emoji, *bold*, etc.) is NOT escaped — the caller
+    builds those strings and only passes the *dynamic* user-data portion
+    through this helper.
+    """
+    result = list(text)
+    for i, ch in enumerate(result):
+        if ch in _MARKDOWNV2_RESERVED:
+            result[i] = "\\" + ch
+    return "".join(result)
+
 
 class ConfigError(RuntimeError):
     """Raised when bot_token or chat_id is empty/missing."""
@@ -75,7 +96,9 @@ def _send_message(
 ) -> httpx.Response:
     """sendMessage — text-only delivery (TG#3)."""
     url = f"{base_url}/bot{bot_token}/sendMessage"
-    return client.post(url, json={"chat_id": chat_id, "text": caption})
+    return client.post(
+        url, json={"chat_id": chat_id, "text": caption, "parse_mode": "MarkdownV2"}
+    )
 
 
 def _send_photo(
@@ -92,7 +115,11 @@ def _send_photo(
     with open(photo_path, "rb") as f:
         data = f.read()
     files = [("photo", (f"photo{suffix}", data, mime))]
-    return client.post(url, data={"chat_id": chat_id, "caption": caption}, files=files)
+    return client.post(
+        url,
+        data={"chat_id": chat_id, "caption": caption, "parse_mode": "MarkdownV2"},
+        files=files,
+    )
 
 
 def _send_media_group(
@@ -130,7 +157,11 @@ def _send_media_group(
         files.append((f"photo_{i}", (f"photo_{i}{suffix}", data, mime)))
     return client.post(
         url,
-        data={"chat_id": chat_id, "media": json.dumps(media)},
+        data={
+            "chat_id": chat_id,
+            "media": json.dumps(media),
+            "parse_mode": "MarkdownV2",
+        },
         files=files,
     )
 
