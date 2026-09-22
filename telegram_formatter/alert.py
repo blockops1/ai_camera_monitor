@@ -62,19 +62,12 @@ def _truncate_caption(caption: str) -> str:
     return caption[: _CAPTION_MAX_LENGTH - 3] + "..."
 
 
-def _escape_markdown_v2(text: str) -> str:
-    """Escape all MarkdownV2 special characters in *text*.
-
-    Telegram MarkdownV2 reserves: *_\\][`()>#!-+={}.
-
-    Per Telegram docs: escape these chars with a backslash so they render
-    literally in the message body.
-    """
-    # MarkdownV2 reserved chars + backslash itself.
-    # MarkdownV2 reserved chars: _, *, [, ], (, ), ~, `, >, #, +, =, -, |, {, }, ., !
-    # Plus backslash itself (which must be doubled for literal output).
-    ESCAPED = "_*[]()~`>#+-=|{}." + chr(92)
-    return "".join(f"\\{ch}" if ch in ESCAPED else ch for ch in text)
+# No local MarkdownV2 escape — the dispatcher (telegram_formatter.dispatcher)
+# runs the single canonical escape pass on the assembled caption. Local
+# escaping here would double-escape dynamic content like the timestamp
+# dashes, producing literal "\\-" artifacts in the rendered message
+# (operator-visible 2026-09-22 — "pipes" in the TG#1 header were actually
+# double-escaped backslash+dash pairs).
 
 
 def _emoji_for_class(cls: str) -> str:
@@ -118,15 +111,15 @@ def build_alert_message(
     else:
         time_str = ""
     if time_str:
-        header = f"{_CAMERA_EMOJI} *{_escape_markdown_v2(camera_label)}* -- {_escape_markdown_v2(time_str)}"
+        header = f"{_CAMERA_EMOJI} *{camera_label}* -- {time_str}"
     else:
-        header = f"{_CAMERA_EMOJI} *{_escape_markdown_v2(camera_label)}*"
+        header = f"{_CAMERA_EMOJI} *{camera_label}*"
     lines.append(header)
 
     # Line 2: class with emoji and confidence.
     emoji = _emoji_for_class(cls)
-    conf_str = _escape_markdown_v2(str(conf))
-    class_line = f"{emoji} *{_escape_markdown_v2(cls)}* \u2022 confidence {conf_str}%"
+    conf_str = str(conf)
+    class_line = f"{emoji} *{cls}* \u2022 confidence {conf_str}%"
     lines.append(class_line)
 
     # Line 3: TG position marker.
@@ -138,7 +131,7 @@ def build_alert_message(
 
     # Line 5 (optional): notes.
     if notes:
-        lines.append(_escape_markdown_v2(notes))
+        lines.append(notes)
 
     # Join with newlines, truncate to Telegram caption limit.
     caption = "\n".join(lines)
