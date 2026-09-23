@@ -10,6 +10,7 @@ RESOURCE GROUPS:
     cooldowns    — Cooldown, list_active_cooldowns
     identities   — PersonIdentity, VehicleIdentity, AnimalIdentity, list_*
     listener     — ListenerStatus, ErrorRecord, get_listener_status, get_recent_errors
+    telegram     — TelegramStatus, get_telegram_status
     vision       — VisionStatus, get_vision_status
     config       — ConfigView, get_config
 
@@ -25,5 +26,6 @@ from infra.farm_api import (
     config,  # noqa: F401 — exposes config view
     gate,  # noqa: F401 — exposes gate resources
     listener,  # noqa: F401 — exposes listener status
+    telegram,  # noqa: F401 — exposes telegram dispatch status
     vision,  # noqa: F401 — exposes vision status
 )
