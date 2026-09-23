@@ -178,6 +178,8 @@ class TestHealthEndpoint:
         assert data["ok"] is True
         assert data["box_id"] == "test-box-01"
         assert data["api_enabled"] is True
+        assert isinstance(data["uptime_seconds"], (int, float))
+        assert data["uptime_seconds"] >= 0
 
 
 # ---------------------------------------------------------------------------
