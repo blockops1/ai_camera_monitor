@@ -61,6 +61,7 @@ class TelegramStatus:
     last_send_status: str
     errors_last_24h: int
 
+
 # ---------------------------------------------------------------------------
 # Log parsing
 # ---------------------------------------------------------------------------
@@ -91,9 +92,7 @@ _TG_ERROR_RE = re.compile(
 # Matches the bot token log line:
 # env load complete: total=31 (telegram_token_len=65)
 # We also capture chat_id from any log line that mentions TELEGRAM_HOME_CHAT_ID
-_CHAT_ID_RE = re.compile(
-    r"TELEGRAM_HOME_CHAT_ID[^=]*=\s*(\S+)"
-)
+_CHAT_ID_RE = re.compile(r"TELEGRAM_HOME_CHAT_ID[^=]*=\s*(\S+)")
 
 
 def _parse_ts_to_iso(ts_str: str | None) -> str | None:
