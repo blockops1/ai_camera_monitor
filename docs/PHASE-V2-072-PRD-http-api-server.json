@@ -1,0 +1,184 @@
+{
+  "prd_id": "V2-072",
+  "title": "HTTP API server surface (read-only, Tailscale-bound, bearer-token)",
+  "status": "open",
+  "context": "Operator directive 2026-09-23: V2-068 lands 'API-first, MCP-second' as a typed-Python-module + a streamable-HTTP MCP server. But there's a third audience the MCP transport doesn't cover cleanly: external HTTP integrations (n8n, Home Assistant, debugging scripts, Grafana, ad-hoc curl during outages). MCP-over-streamable-HTTP works for AI agents but is awkward for scripting + dashboards. This PRD adds a parallel HTTP API server (separate process, separate port) that exposes the same `infra.farm_api.*` resource groups as plain JSON REST. Strictly read-only. Auth and bind rules mirror the MCP server so operators only learn one security model.\n\nThis is the third service in a three-process architecture:\n  - Listener `:8090`   — Reolink webhook ingest, alert pipeline (existing, V2-049+).\n  - API server `:8092` — read-only JSON HTTP, THIS PRD, GET routes only.\n  - MCP server `:8091` — read-only JSON-RPC / streamable-HTTP for AI clients (V2-068).\n\nEach process has its own PID, its own logs, its own restart story. They share the filesystem (`data/state/`, `data/events/`, `~/.env`) but no shared memory. A crash in API does NOT stop alerts. A crash in MCP does NOT stop the listener.",
+  "shipping_definition": [
+    "New process `infra/api_server.py` — stdlib `http.server.HTTPServer` + `BaseHTTPRequestHandler` (no Flask dep; the MCP server pattern already proves stdlib suffices for read-only multi-threaded services). Daemon-threadable so a launchd plist can call it as a singleton.",
+    "Binds to `:8092` by default, override via `FARMSURV_API_PORT`. Binds to Tailscale (100.64.0.0/10) by default, override via `FARMSURV_API_BIND=tailnet-only|all|<interface>` (mirror V2-068 binding contract; reuse `_resolve_bind_address()` from `infra/mcp_server.py` if possible, factor out into `infra/net_bind.py` as part of US-072a1).",
+    "Bearer-token auth required: env `FARMSURV_API_TOKEN` (≥32 chars). Reject with HTTP 401 if missing or wrong. Same abort-at-startup pattern as MCP server.",
+    "Routes (all GET, all read-only):",
+    "  GET /healthz                                -> {ok: true, box_id, uptime_seconds, api_enabled, started_at}",
+    "  GET /api/v1/cameras                        -> list of CameraInfo (delegates to infra.farm_api.cameras.list_cameras)",
+    "  GET /api/v1/cameras/{camera_id}/health     -> CameraHealth",
+    "  GET /api/v1/cameras/{camera_id}/snapshot   -> binary PNG (delegates to get_camera_snapshot)",
+    "  GET /api/v1/events                         -> list_events(limit=N, since=T)",
+    "  GET /api/v1/events/{alert_id}              -> get_event(alert_id)",
+    "  GET /api/v1/gate                           -> get_gate_config()",
+    "  GET /api/v1/gate/suppression-rules         -> list_suppression_rules()",
+    "  GET /api/v1/cooldowns                      -> list_active_cooldowns()",
+    "  GET /api/v1/identities/people              -> list_known_people()",
+    "  GET /api/v1/identities/vehicles            -> list_known_vehicles()",
+    "  GET /api/v1/identities/animals             -> list_known_animals()",
+    "  GET /api/v1/listener/status                -> get_listener_status()",
+    "  GET /api/v1/listener/errors                -> get_recent_errors(limit=N)",
+    "  GET /api/v1/telegram/status                -> get_telegram_status()",
+    "  GET /api/v1/vision/status                  -> get_vision_status()",
+    "  GET /api/v1/config                         -> get_config()",
+    "  (Total 17 routes — one per MCP tool + healthz. Add new routes only when adding new farm_api functions.)",
+    "Listener-spawn hook: when `FARMSURV_API_ENABLED=1`, `listener/daemon.py` spawns `infra.api_server.run()` on a daemon thread at boot. Same pattern as US-068g1 will define for MCP. Both processes spawnable independently: enable API without MCP, MCP without API, both, or neither.",
+    "Existing `infra/farm_api/*` modules are reused as-is — no changes to the typed Python contract.",
+    "All knobs env-tunable, listed in `.env.example` with the 1=ON/0=OFF convention comment per AGENTS.md.",
+    "Existing 178 unit + 17 e2e tests + 16 MCP tests continue to pass. New tests: 17 route tests (one per route) + 1 healthz + 4 auth tests (token missing / wrong / valid / too short) + 1 bind-refusal test = ≥23 new tests.",
+    "Live verification per AGENTS.md Step 2: spawn listener (Python subprocess), wait 5s, curl `:8092/healthz` with bearer token, assert JSON shape matches; curl `:8092/api/v1/gate`, assert presence of `night_suppress_cameras` field; curl without bearer, assert HTTP 401.",
+    "Forgejo mirror pushed after merge to main (US-068e auto-push hook covers this)."
+  ],
+  "design_principles": [
+    "Reuse `infra.farm_api.*` verbatim. Routes are 3-line adapters — exactly the same pattern as MCP tools in V2-068. If we ever change the typed Python contract, both transports move in lockstep because they're parsed from the same dataclasses.",
+    "Mirror MCP's security model, don't innovate. Bearer token from env, abort-at-startup if missing/short, Tailscale-only bind, HTTP 401 on bad token. One policy, one docs page. Operators learn it once.",
+    "Three-process architecture. API crashes do not affect listener (alert pipeline) or MCP (agent clients). Each has independent restart cadence, independent launchd entry, independent log file.",
+    "No write routes in this PRD. Mute-camera, enroll-identity, set-cooldown, restart-listener are V2-073 (write surface). This PRD scopes read-only explicitly.",
+    "Cross-process filesystem is the contract. API reads `data/state/`, `data/events/`, `data/frames/{camera}/{alert_id}/event.json`. Same paths the listener writes. No shared memory, no shared DB connection, no live pipeline coupling. Stale-by-design (within last 24h) is acceptable — caller can retry.",
+    "Bind mirror: factor `_resolve_bind_address()` out of `infra/mcp_server.py:583` into `infra/net_bind.py:resolve_bind_address()` and reuse from both `infra/mcp_server.py` and `infra/api_server.py`. Single source of truth for Tailscale-bound semantics."
+  ],
+  "no_fallback": true,
+  "deployment_modes": {
+    "single_host": "All three processes on the Mac mini (current deployment). Listeners on `:8090`, API on `:8092`, MCP on `:8091`.",
+    "split_api": "Listener stays on Mac mini. API server moves to a Tailscale-attached Linux box that mounts the same Synology NAS. Listen on `:8092` pointed at the NAS — read-only filesystem mounts are sufficient for the API surface since the contract is read-mostly.",
+    "split_mcp": "API server + listener co-located. MCP server moves to a Tailscale-attached Linux box with `infra/mcp_server.py` reading from NAS. The MCP server needs read access to `data/state/` and `data/events/` only.",
+    "full_split": "All three processes on different hosts, sharing the Synology NAS as the only filesystem coupling. Auth tokens rotate per process; `FARMSURV_*_BOX_ID` identifies which host each query originated from."
+  },
+  "stories": [
+    {
+      "id": "US-072a",
+      "title": "infra/net_bind.py: shared Tailscale-binding helper (factor out from mcp_server.py:583)",
+      "files": [
+        "infra/net_bind.py",
+        "tests/test_net_bind.py"
+      ],
+      "scope": [
+        "Create `infra/net_bind.py:resolve_bind_address(spec: str) -> str` — accepts 'tailnet-only', 'all', or a literal interface name. Returns the bind address string. Lifts the body of `_resolve_bind_address()` in `infra/mcp_server.py:583` verbatim, with proper docstring.",
+        "Add `infra/net_bind.py:is_tailnet_ip(addr: str) -> bool` helper. Detects 100.64.0.0/10.",
+        "Re-export from `infra/net_bind` so `infra.mcp_server` and `infra.api_server` both `from infra.net_bind import resolve_bind_address, is_tailnet_ip`.",
+        "Update `infra/mcp_server.py:_resolve_bind_address()` to delegate to the new helper. Existing behavior unchanged. Existing 16 MCP tests continue to pass.",
+        "Add `tests/test_net_bind.py` covering: 'tailnet-only' resolves to a 100.x address; 'all' resolves to '0.0.0.0'; literal interface name resolves to that interface's IP; raises ValueError on unknown spec."
+      ],
+      "env_knobs": [],
+      "tests": [
+        "tests/test_net_bind.py::test_tailnet_only_resolves_100",
+        "tests/test_net_bind.py::test_all_resolves_0_0_0_0",
+        "tests/test_net_bind.py::test_custom_interface_resolves",
+        "tests/test_net_bind.py::test_unknown_spec_raises",
+        "tests/test_net_bind.py::test_is_tailnet_ip_recognizes_cgnat"
+      ],
+      "deps": [],
+      "standalone": true
+    },
+    {
+      "id": "US-072b",
+      "title": "infra/api_server.py: HTTP API server (read-only, bearer-token, Tailscale-only)",
+      "files": [
+        "infra/api_server.py",
+        "tests/test_api_server.py"
+      ],
+      "scope": [
+        "New module `infra/api_server.py` — stdlib `http.server.HTTPServer` + `ThreadingMixIn` + `BaseHTTPRequestHandler`. Mirrors `infra/mcp_server.py:611` shape.",
+        "Class `_APIHandler(BaseHTTPRequestHandler)` with `do_GET()` — dispatches by URL path to a `_ROUTES` dict mapping path-prefix → callables.",
+        "Bearer-token middleware in `_APIHandler._check_auth()` — exact same logic as `infra/mcp_server.py` (validate `Authorization: Bearer {token}` against `FARMSURV_API_TOKEN`, HTTP 401 on miss).",
+        "Each route is a 3-line adapter — calls the underlying `infra.farm_api.*` function, serializes via `dataclasses.asdict()`, returns JSON. Binary routes (`get_camera_snapshot`) return raw PNG bytes with `Content-Type: image/png`.",
+        "`/healthz` route returns `{ok: true, box_id, uptime_seconds, api_enabled, started_at}` — mirrors MCP server `/healthz` schema.",
+        "Function `run() -> None` — reads `FARMSURV_API_ENABLED`, `FARMSURV_API_PORT`, `FARMSURV_API_BIND`, `FARMSURV_API_TOKEN`, aborts if `FARMSURV_API_ENABLED=1` and token missing or shorter than 32 chars. Mirrors `infra/mcp_server.py:643`.",
+        "Bind via `infra.net_bind.resolve_bind_address()`. Same Tailscale-only default.",
+        "Add to `infra/__init__.py` exports.",
+        "Add `.env.example` entries with the 1=ON/0=OFF convention comment per AGENTS.md Step 3.",
+        "Add `tests/test_api_server.py` with: 17 route tests (one per documented route), 1 healthz test, 4 auth tests (missing/wrong/valid/short), 1 bind-refusal test = ≥23 tests. Use `urllib.request` (same pattern as `tests/test_mcp_server.py`)."
+      ],
+      "env_knobs": [
+        "FARMSURV_API_ENABLED (1 = ON, 0 = OFF; default 0)",
+        "FARMSURV_API_PORT (default 8092)",
+        "FARMSURV_API_BIND (tailnet-only | all | <interface>; default tailnet-only)",
+        "FARMSURV_API_TOKEN (no default; required when FARMSURV_API_ENABLED=1; ≥32 chars)"
+      ],
+      "tests": [
+        "tests/test_api_server.py::test_healthz_returns_ok",
+        "tests/test_api_server.py::test_route_cameras",
+        "tests/test_api_server.py::test_route_cameras_health",
+        "tests/test_api_server.py::test_route_cameras_snapshot_returns_png",
+        "tests/test_api_server.py::test_route_events",
+        "tests/test_api_server.py::test_route_events_by_id",
+        "tests/test_api_server.py::test_route_gate",
+        "tests/test_api_server.py::test_route_gate_suppression_rules",
+        "tests/test_api_server.py::test_route_cooldowns",
+        "tests/test_api_server.py::test_route_identities_people",
+        "tests/test_api_server.py::test_route_identities_vehicles",
+        "tests/test_api_server.py::test_route_identities_animals",
+        "tests/test_api_server.py::test_route_listener_status",
+        "tests/test_api_server.py::test_route_listener_errors",
+        "tests/test_api_server.py::test_route_telegram_status",
+        "tests/test_api_server.py::test_route_vision_status",
+        "tests/test_api_server.py::test_route_config",
+        "tests/test_api_server.py::test_bearer_token_missing_returns_401",
+        "tests/test_api_server.py::test_bearer_token_wrong_returns_401",
+        "tests/test_api_server.py::test_bearer_token_valid_passes",
+        "tests/test_api_server.py::test_token_too_short_aborts_at_startup",
+        "tests/test_api_server.py::test_refuses_to_bind_when_token_missing",
+        "tests/test_api_server.py::test_refuses_to_bind_tailnet_only"
+      ],
+      "deps": ["US-072a"],
+      "standalone": false
+    },
+    {
+      "id": "US-072c",
+      "title": "listener/daemon.py: spawn API server on daemon thread when FARMSURV_API_ENABLED=1",
+      "files": [
+        "listener/daemon.py",
+        "tests/test_daemon_api_spawn.py"
+      ],
+      "scope": [
+        "In `listener/daemon.py:bootstrap()` — after MCP server spawn hook (US-068g1), check `FARMSURV_API_ENABLED`. If 1, spawn `infra.api_server.run()` on a daemon thread. Log `{event: 'api_server_spawned', port, bind_address}`.",
+        "Same thread + log pattern as MCP server spawn.",
+        "Add `tests/test_daemon_api_spawn.py` — spawn listener subprocess in test mode, wait 5s, curl `:8092/healthz` with bearer token (test-mode sets a known token), assert JSON shape. Tear down at end.",
+        "Live verification per AGENTS.md Step 2 — operator restart needed before this takes effect on PID 51669. Pre-populated `.env` carries `FARMSURV_API_ENABLED=0` (default), so a manual operator-driven `FARMSURV_API_ENABLED=1` is the next step after merge. Documented as a follow-up, not part of shipping_definition."
+      ],
+      "env_knobs": [],
+      "tests": [
+        "tests/test_daemon_api_spawn.py::test_api_server_spawns_when_enabled",
+        "tests/test_daemon_api_spawn.py::test_api_server_does_not_spawn_when_disabled",
+        "tests/test_daemon_api_spawn.py::test_api_server_healthz_reachable_after_spawn"
+      ],
+      "deps": ["US-072b", "US-068g1"],
+      "standalone": false
+    },
+    {
+      "id": "US-072d",
+      "title": "docs/API.md: document HTTP routes + auth + bind model",
+      "files": [
+        "docs/API.md"
+      ],
+      "scope": [
+        "Add a new section 'HTTP API (cross-process)' at the top of `docs/API.md` covering: routes (path, method, returns, example curl), auth (bearer token env name), bind model (Tailscale-only), how to enable (FARMSURV_API_ENABLED=1 + token), deployment modes (single-host, split-api, split-mcp, full-split).",
+        "Cross-reference: API surface mirrors MCP tools 1:1 — when MCP gets a new tool, API gets a new route. Document the rule.",
+        "Cross-reference: V2-068 PRD for MCP transport, V2-072 PRD for HTTP transport; both back to the same `infra.farm_api.*` typed Python contract."
+      ],
+      "env_knobs": [],
+      "tests": [],
+      "deps": ["US-072b", "US-072c"],
+      "standalone": false
+    }
+  ],
+  "constraints": [
+    "No new runtime dependencies. Use stdlib (http.server, urllib.request, json, threading) the same way `infra/mcp_server.py` does. Adding Flask/FastAPI/Starlette would force a venv rebuild and a separate dep-tree audit; out of scope.",
+    "No write routes in this PRD. Mute-camera, enroll-identity, set-cooldown, restart-listener are explicitly V2-073 (write surface). The API surface remains strictly read-only.",
+    "Bind / auth / token rules are MIRRORED from V2-068. Do not introduce a new security policy. Operators learn one model.",
+    "No shared state with listener. The API reads the filesystem (`data/state/`, `data/events/`, `data/frames/`) the same way the MCP server does. Read-only is the contract; cross-process file reads are fine, file writes are forbidden.",
+    "Listener restart on production requires operator approval per AGENTS.md Step 2.1 / Step 4. After merge, operator must restart before the API server is reachable on PID 51669. Document this; do not auto-restart the listener.",
+    "Card body soft limit 2,500 chars, operational ceiling ~4,500 per AGENTS.md Step 5. Decompose further if any card exceeds this.",
+    "Forgejo mirror pushed after merge. US-068e auto-push hook (just shipped) covers this PRD's branches automatically."
+  ],
+  "open_questions": [
+    "Should the API server log requests at INFO or DEBUG level? INFO = ops visibility, DEBUG = noise. Default INFO; the API logs request path + response status, never request body (we don't auth via POST yet, but be ready).",
+    "Should the API server emit a `box_id` per response (per `FARMSURV_BOX_ID` env var, default 'test-box-01'/'unidentified') so callers can tell which physical host returned the JSON? Useful in split-deployment mode. Default: yes for `/healthz`, optional elsewhere.",
+    "Should the API server support CORS? Probably no for v1 — call from server-side scripts only. Browser dashboards would need a CORS layer; defer until a real browser dashboard ships.",
+    "Rate limiting? Currently no. Tailscale-only bind means LAN-side brute force isn't a vector. Add if a public-internet deployment becomes a future ask (V2-074?)."
+  ]
+}
