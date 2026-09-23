@@ -70,6 +70,7 @@ import numpy as np
 import onnxruntime as ort
 from PIL import Image
 
+from infra.env_utils import parse_csv_env
 from scripts.export_yolo_dynamic import pad_to_multiple_of_32
 
 log = logging.getLogger("quick_classifier")
@@ -112,6 +113,21 @@ if NIGHT_SUPPRESS_ENABLED:
         f"quick_classifier: night suppression ENABLED "
         f"(conf_floor={NIGHT_CONF_FLOOR}, brightness_ratio={NIGHT_BRIGHTNESS_RATIO}, "
         f"implausible_classes={len(NIGHT_IMPLAUSIBLE_CLASSES)})"
+    )
+
+# V2-069: per-camera + per-class night suppress (motion-gate layer).
+# Comma-separated camera slugs; empty default = current behavior (no per-camera suppress).
+_NIGHT_SUPPRESS_CAMERAS = parse_csv_env("FARMSURV_NIGHT_SUPPRESS_CAMERAS")
+# Optional comma-separated class names; empty = suppress all classes on listed cameras.
+_NIGHT_SUPPRESS_CLASSES = parse_csv_env("FARMSURV_NIGHT_SUPPRESS_CLASSES")
+
+# Warn if classes are listed but cameras is empty -- this is almost certainly
+# a config mistake and we don't want to silently drop every vehicle at night
+# on every camera.
+if not _NIGHT_SUPPRESS_CAMERAS and _NIGHT_SUPPRESS_CLASSES:
+    log.warning(
+        f"quick_classifier: night_suppress_class_without_camera "
+        f"classes={_NIGHT_SUPPRESS_CLASSES} cameras=[] -- no-op until cameras listed"
     )
 
 # COCO 80 classes (YOLOv8n output order — class index 0..79)
@@ -297,7 +313,10 @@ class QuickClassifier:
         )
 
     def classify_frame(
-        self, frame: str | Image.Image, timestamp: datetime | None = None
+        self,
+        frame: str | Image.Image,
+        timestamp: datetime | None = None,
+        camera_id: str | None = None,
     ) -> QuickVerdict:
         """Run inference on a single frame and return the gate verdict.
 
@@ -309,6 +328,8 @@ class QuickClassifier:
             (Phase 6B.116 §11.47). When None and frame is a path, falls back
             to the file's mtime. When None and frame is a PIL.Image, the
             day/night signal is unknown → suppression skipped.
+          camera_id: optional camera slug for per-camera night suppress
+            (V2-069). When None, per-camera suppress is skipped.
 
         Returns:
           QuickVerdict with decision ∈ {"suppress", "pass_with_hint", "pass"}
@@ -452,6 +473,24 @@ class QuickClassifier:
                 reason = "night_implausible_class"
             else:
                 reason = "night_low_confidence"
+
+        # V2-069: per-camera + per-class night suppress.
+        # When the timestamp is in the night window AND the camera is in the
+        # suppress list AND (classes list is empty OR class is in the list),
+        # suppress regardless of confidence. This is additive to the
+        # existing night suppression block above.
+        if (
+            camera_id is not None
+            and night_suppress_match(camera_id, top_class)
+            and timestamp is not None
+            and _is_night_at_edt(timestamp)
+        ):
+            log.info(
+                f"quick_classifier: night_suppressed "
+                f"camera={camera_id} class={top_class} conf={top_conf:.2f}"
+            )
+            decision = "suppress"
+            reason = "night_suppress_camera_class"
 
         raw = [
             (COCO_NAMES[cls], conf, bbox) for cls, conf, bbox in detections
@@ -829,3 +868,49 @@ def _should_apply_night_suppression(
     except Exception:
         return False
     return ratio > NIGHT_BRIGHTNESS_RATIO
+
+
+# ---------------------------------------------------------------------------
+# V2-069: per-camera + per-class night suppress
+# ---------------------------------------------------------------------------
+
+
+def _is_night_at_edt(ts: datetime) -> bool:
+    """Return True if *ts* falls in the night window for the farm.
+
+    Lazy-imports ``infra.time_of_day.is_night_at_edt`` so the import
+    is only needed when the night check is actually exercised.
+    """
+    try:
+        from infra.time_of_day import is_night_at_edt
+
+        return is_night_at_edt(ts)
+    except Exception:
+        return False
+
+
+def night_suppress_match(camera_id: str, class_name: str) -> bool:
+    """Return True if this camera+class pair is suppressed at night.
+
+    Returns True when BOTH conditions hold:
+      1. *camera_id* is in FARMSURV_NIGHT_SUPPRESS_CAMERAS
+      2. FARMSURV_NIGHT_SUPPRESS_CLASSES is empty (match all) OR
+         *class_name* is in FARMSURV_NIGHT_SUPPRESS_CLASSES
+
+    This is a pure function -- no side effects, testable without a classifier.
+    The caller (classify_frame or gate layer) checks is_night_at_edt separately.
+
+    Args:
+        camera_id: camera slug (e.g. "OUTSIDE_BACK_SOLAR").
+        class_name: detection class name (e.g. "vehicle", "car", "person").
+
+    Returns:
+        True if this camera+class should be suppressed at night.
+    """
+    if not _NIGHT_SUPPRESS_CAMERAS:
+        return False
+    if camera_id not in _NIGHT_SUPPRESS_CAMERAS:
+        return False
+    if not _NIGHT_SUPPRESS_CLASSES:
+        return True
+    return class_name in _NIGHT_SUPPRESS_CLASSES
