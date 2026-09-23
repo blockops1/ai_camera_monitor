@@ -57,9 +57,6 @@ _MCP_BIND_MODE = os.environ.get("FARMSURV_MCP_BIND", "tailnet-only")
 _MCP_PORT = int(os.environ.get("FARMSURV_MCP_PORT", "8091"))
 _BOX_ID = os.environ.get("FARMSURV_BOX_ID", socket.gethostname())
 
-# Tailscale CGNAT range: 100.64.0.0/10
-TAILNET_BIND = "100.64.0.1"
-
 # Server uptime at boot
 _SERVER_START = datetime.datetime.now(datetime.UTC)
 
@@ -583,29 +580,14 @@ class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 def _resolve_bind_address() -> str:
     """Resolve the bind address based on FARMSURV_MCP_BIND.
 
+    Delegates to infra.net_bind.resolve_bind_address.
+
     Returns:
         The IP address string to bind to.
-
-    Raises:
-        ValueError: If the bind mode is unknown.
     """
-    if _MCP_BIND_MODE == "all":
-        log.warning(
-            "MCP server binding to 0.0.0.0 (all interfaces). "
-            "This exposes the server to LAN. Ensure FARMSURV_MCP_TOKEN "
-            "is set to a strong value."
-        )
-        return "0.0.0.0"
+    from infra.net_bind import resolve_bind_address
 
-    if _MCP_BIND_MODE == "tailnet-only":
-        return TAILNET_BIND
-
-    # Treat as a specific interface IP
-    log.warning(
-        "MCP server binding to custom address %s. Verify this interface exists.",
-        _MCP_BIND_MODE,
-    )
-    return _MCP_BIND_MODE
+    return resolve_bind_address(_MCP_BIND_MODE)
 
 
 def _start_server() -> _ThreadingHTTPServer | None:
