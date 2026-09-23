@@ -39,9 +39,7 @@ _LOG_WITH_ERRORS = (
     "TG#2 error=TimeoutError: timed out\n"
 )
 
-_LOG_NO_CHAT_ID = (
-    "2026-09-22 20:51:31,035 INFO daemon: env load complete: total=31\n"
-)
+_LOG_NO_CHAT_ID = "2026-09-22 20:51:31,035 INFO daemon: env load complete: total=31\n"
 
 
 # ---------------------------------------------------------------------------
@@ -57,8 +55,9 @@ def _test_log_dir(tmp_path: Path):
 
     # Patch infra.paths.LOGS_DIR so all infra functions read from temp
     # Also patch in the telegram module (it reads from infra.paths)
-    with patch("infra.paths.LOGS_DIR", str(log_dir)), patch(
-        "infra.farm_api.telegram.LOGS_DIR", str(log_dir)
+    with (
+        patch("infra.paths.LOGS_DIR", str(log_dir)),
+        patch("infra.farm_api.telegram.LOGS_DIR", str(log_dir)),
     ):
         yield tmp_path
 

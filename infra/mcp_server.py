@@ -55,9 +55,7 @@ log = logging.getLogger(__name__)
 _MCP_ENABLED = os.environ.get("FARMSURV_MCP_ENABLED", "0") == "1"
 _MCP_BIND_MODE = os.environ.get("FARMSURV_MCP_BIND", "tailnet-only")
 _MCP_PORT = int(os.environ.get("FARMSURV_MCP_PORT", "8091"))
-_BOX_ID = os.environ.get(
-    "FARMSURV_BOX_ID", socket.gethostname()
-)
+_BOX_ID = os.environ.get("FARMSURV_BOX_ID", socket.gethostname())
 
 # Tailscale CGNAT range: 100.64.0.0/10
 TAILNET_BIND = "100.64.0.1"
@@ -107,6 +105,7 @@ class _ToolRegistry:
         input_schema: dict[str, Any],
     ):
         """Decorator: register a farm_api function as an MCP tool."""
+
         def decorator(func):
             self._tools[name] = _Tool(
                 name=name,
@@ -115,6 +114,7 @@ class _ToolRegistry:
                 handler=lambda **kw: self._wrap(func, **kw),
             )
             return func
+
         return decorator
 
     def _wrap(self, func, **kwargs):
@@ -343,6 +343,16 @@ def _register_tools(registry: _ToolRegistry) -> None:
         input_schema={"type": "object", "properties": {}},
     )(vision.get_vision_status)
 
+    # ---- telegram ----
+
+    from infra.farm_api import telegram
+
+    registry.tool(
+        name="get_telegram_status",
+        description="Get Telegram dispatch status (chat_id redacted, last-send health).",
+        input_schema={"type": "object", "properties": {}},
+    )(telegram.get_telegram_status)
+
     # ---- config ----
 
     registry.tool(
@@ -355,17 +365,6 @@ def _register_tools(registry: _ToolRegistry) -> None:
 # ---------------------------------------------------------------------------
 # JSON-RPC 2.0 handler
 # ---------------------------------------------------------------------------
-
-
-def _json_response(code: int, body: Any, headers: list[tuple[str, str]] | None = None) -> tuple[int, list[tuple[str, str]], str]:
-    """Build an HTTP response tuple."""
-    resp_headers = [
-        ("Content-Type", "application/json"),
-        ("Connection", "close"),
-    ]
-    if headers:
-        resp_headers.extend(headers)
-    return code, resp_headers, json.dumps(body)
 
 
 def _handle_request(
@@ -407,23 +406,21 @@ def _handle_request(
         arguments = params.get("arguments", {})
         try:
             result = registry.call_tool(tool_name, arguments)
-            return 200, _json_ok(id_val, {"content": [{"type": "text", "text": json.dumps(result)}]})
+            return 200, _json_ok(
+                id_val, {"content": [{"type": "text", "text": json.dumps(result)}]}
+            )
         except KeyError as exc:
             return 404, _json_error(id_val, -32601, str(exc))
         except Exception as exc:
             log.exception("mcp: tool call %s failed", tool_name)
-            return 500, _json_error(
-                id_val, -32603, f"Internal error: {exc}"
-            )
+            return 500, _json_error(id_val, -32603, f"Internal error: {exc}")
 
     if method == "notifications/initialized":
         # Notification, no response needed
         return 200, None
 
     # Unknown method
-    return 400, _json_error(
-        id_val, -32601, f"Method not found: {method}"
-    )
+    return 400, _json_error(id_val, -32601, f"Method not found: {method}")
 
 
 def _json_ok(id_val, result) -> dict:
@@ -472,41 +469,50 @@ class _MCPHandler(BaseHTTPRequestHandler):
         # Auth check
         auth_header = self.headers.get("Authorization")
         if not authenticate(auth_header):
-            self._send_json(401, {
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32000,
-                    "message": "Unauthorized: missing or invalid bearer token",
+            self._send_json(
+                401,
+                {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32000,
+                        "message": "Unauthorized: missing or invalid bearer token",
+                    },
+                    "id": None,
                 },
-                "id": None,
-            })
+            )
             return
 
         # Read body
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length == 0:
-            self._send_json(400, {
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32700,
-                    "message": "Parse error: empty body",
+            self._send_json(
+                400,
+                {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32700,
+                        "message": "Parse error: empty body",
+                    },
+                    "id": None,
                 },
-                "id": None,
-            })
+            )
             return
 
         body = self.rfile.read(content_length)
         try:
             message = json.loads(body)
         except json.JSONDecodeError:
-            self._send_json(400, {
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32700,
-                    "message": "Parse error: invalid JSON",
+            self._send_json(
+                400,
+                {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32700,
+                        "message": "Parse error: invalid JSON",
+                    },
+                    "id": None,
                 },
-                "id": None,
-            })
+            )
             return
 
         method = message.get("method", "")
@@ -534,14 +540,17 @@ class _MCPHandler(BaseHTTPRequestHandler):
         self._send_json(200, response)
 
     def _not_found(self):
-        self._send_json(404, {
-            "jsonrpc": "2.0",
-            "error": {
-                "code": -32601,
-                "message": "Not found",
+        self._send_json(
+            404,
+            {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32601,
+                    "message": "Not found",
+                },
+                "id": None,
             },
-            "id": None,
-        })
+        )
 
     def _send_json(self, status_code, body):
         """Send a JSON response."""
@@ -561,6 +570,7 @@ class _MCPHandler(BaseHTTPRequestHandler):
 
 class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     """HTTPServer that handles each request in a new thread."""
+
     daemon_threads = True
     allow_reuse_address = True
 
@@ -592,8 +602,8 @@ def _resolve_bind_address() -> str:
 
     # Treat as a specific interface IP
     log.warning(
-        "MCP server binding to custom address %s. "
-        "Verify this interface exists.", _MCP_BIND_MODE
+        "MCP server binding to custom address %s. Verify this interface exists.",
+        _MCP_BIND_MODE,
     )
     return _MCP_BIND_MODE
 
@@ -618,13 +628,14 @@ def _start_server() -> _ThreadingHTTPServer | None:
 
     bind_addr = _resolve_bind_address()
 
-    server = _ThreadingHTTPServer(
-        (bind_addr, _MCP_PORT), _MCPHandler
-    )
+    server = _ThreadingHTTPServer((bind_addr, _MCP_PORT), _MCPHandler)
 
     log.info(
         "MCP server starting on %s:%d (bind=%s, box_id=%s)",
-        bind_addr, _MCP_PORT, _MCP_BIND_MODE, _BOX_ID,
+        bind_addr,
+        _MCP_PORT,
+        _MCP_BIND_MODE,
+        _BOX_ID,
     )
     return server
 
