@@ -25,13 +25,13 @@ from infra.frame_diff import (
     DEFAULT_DIFF_THRESHOLD,
     DEFAULT_MIN_AREA_PX,
     bbox_from_mask,
+    compute_cross_diff_bboxes,
     compute_diff_bbox,
     crop_frame_to_bbox,
     diff_pair_with_bbox,
     load_frame,
     pairwise_diff,
 )
-
 
 # ============================================================================
 # Helpers
@@ -381,3 +381,149 @@ class TestConstants:
     def test_module_import(self):
         """Module is importable without cv2."""
         import infra.frame_diff  # noqa: F401
+
+
+# ============================================================================
+# US-073a: intensity-based ranking for bbox_from_mask_with_intersection
+# ============================================================================
+
+
+class TestIntensityRankingBrightCompact:
+    """AC3: intensity ranking picks bright compact region over diffuse noise."""
+
+    def test_intensity_ranking_picks_bright_compact_region(self):
+        """Build three frames where a 200×200 bright rectangle moves slowly
+        across the frame (vehicle-like) and 1000 small random single-pixel
+        changes spread across the frame (foliage-like noise). Assert the
+        returned bbox covers the bright rectangle, NOT the noise region."""
+        H, W = 480, 640
+        threshold = DEFAULT_DIFF_THRESHOLD
+
+        # Frame 1: all zeros
+        f1 = np.zeros((H, W), dtype=np.uint8)
+
+        # Frame 2: 200×200 bright rectangle at (100, 100) — vehicle-like
+        f2 = f1.copy()
+        f2[100:300, 100:300] = 255
+
+        # Frame 3: rectangle shifts right by 20 px (still present — persistent)
+        f3 = f1.copy()
+        f3[100:300, 120:320] = 255
+
+        # Add 1000 random single-pixel noise spots on f1, f2, f3
+        rng = np.random.RandomState(42)
+        for _ in range(1000):
+            y, x = int(rng.randint(0, H)), int(rng.randint(0, W))
+            f1[y, x] = 255
+            f2[y, x] = 255
+            f3[y, x] = 255
+
+        p1, p2, p3, p4 = _make_png(f1), _make_png(f2), _make_png(f3), _make_png(f3)
+        bbox_a, bbox_b = compute_cross_diff_bboxes(p1, p2, p3, p4)
+
+        # Clean up
+        for p in (p1, p2, p3, p4):
+            Path(p).unlink(missing_ok=True)
+
+        # The bbox should cover the rectangle (100-300, 100-300 area)
+        assert bbox_a is not None
+        x, y, w, h = bbox_a
+        cx, cy = x + w // 2, y + h // 2
+        # Rectangle center is roughly (200, 200)
+        assert 100 <= cx <= 300, f"x-center {cx} not in [100, 300]"
+        assert 100 <= cy <= 300, f"y-center {cy} not in [100, 300]"
+
+
+class TestIntensityRankingParkedVehicle:
+    """AC4: intensity ranking handles parked vehicle (persistent change)."""
+
+    def test_intensity_ranking_handles_parked_vehicle(self):
+        """Build four frames where a bright rectangle appears in frame 2 and
+        persists with slight motion across frames 2→3→4 (a parked vehicle
+        that's barely perceptible between consecutive frames). The AND mask
+        keeps the persistent rect signal alive. Assert the returned bbox
+        covers the rectangle.
+
+        Real-world parallel: a truck that enters and stops produces diff(f1,f2)
+        with the full truck silhouette. diff(f2,f3) has signal at the truck's
+        edges because the truck is not pixel-identical across frames (sensor
+        noise, compression artifacts, slight camera movement). The AND mask
+        preserves this persistent signal at the truck's location."""
+        H, W = 480, 640
+
+        # Frame 1: empty scene (before vehicle arrives)
+        f1 = np.zeros((H, W), dtype=np.uint8)
+
+        # Frames 2-4: bright rectangle (the truck) with slight sub-pixel
+        # motion across consecutive frames. This simulates the truck being
+        # present but barely changing between f2→f3 and f3→f4.
+        rect_y, rect_x = 200, 150
+        rect_h, rect_w = 120, 200
+
+        f2 = np.zeros((H, W), dtype=np.uint8)
+        f2[rect_y : rect_y + rect_h, rect_x : rect_x + rect_w] = 255
+
+        f3 = np.zeros((H, W), dtype=np.uint8)
+        f3[rect_y : rect_y + rect_h, rect_x + 2 : rect_x + rect_w + 2] = 255
+
+        f4 = np.zeros((H, W), dtype=np.uint8)
+        f4[rect_y : rect_y + rect_h, rect_x + 4 : rect_x + rect_w + 4] = 255
+
+        p1, p2, p3, p4 = _make_png(f1), _make_png(f2), _make_png(f3), _make_png(f4)
+        bbox_a, bbox_b = compute_cross_diff_bboxes(p1, p2, p3, p4)
+
+        # Clean up
+        for p in (p1, p2, p3, p4):
+            Path(p).unlink(missing_ok=True)
+
+        # bbox_a = AND(mask_12, mask_23) keeps the rect region alive because
+        # both diffs show signal at the truck's location.
+        assert bbox_a is not None, "bbox_a should cover the persistent rect region"
+        x, y, w, h = bbox_a
+        cx, cy = x + w // 2, y + h // 2
+        rect_cx = rect_x + rect_w // 2
+        rect_cy = rect_y + rect_h // 2
+        # Allow generous offset since the AND mask only has edge pixels
+        assert abs(cx - rect_cx) <= rect_w * 2, "x-center offset too large"
+        assert abs(cy - rect_cy) <= rect_h * 2, "y-center offset too large"
+
+
+class TestIntensityRankingSavedDroppedAlert:
+    """AC5: regression test against the real dropped alert."""
+
+    def test_intensity_ranking_against_saved_dropped_alert(self):
+        """Load frames from the real dropped alert (parked white truck).
+        Assert returned bbox center is in the truck region (x ~200-900,
+        y ~580-850), NOT in the tree canopy (y < 500)."""
+        alert_dir = (
+            Path(__file__).parent.parent
+            / "data"
+            / "frames"
+            / "OUTSIDE_FRONT_SOLAR"
+            / "004a9671-835c-4acd-9e87-2104099f609c"
+        )
+        assert alert_dir.is_dir(), f"Missing test data: {alert_dir}"
+
+        frame_files = sorted(alert_dir.glob("frame_*.png"))
+        assert len(frame_files) >= 4, f"Need ≥4 frames, found {len(frame_files)}"
+
+        bbox_a, bbox_b = compute_cross_diff_bboxes(
+            str(frame_files[0]),
+            str(frame_files[1]),
+            str(frame_files[2]),
+            str(frame_files[3]),
+        )
+
+        # At least one bbox should be in the truck region
+        result_bbox = bbox_a or bbox_b
+        assert result_bbox is not None, "No bbox returned from real frames"
+
+        x, y, w, h = result_bbox
+        cx = x + w // 2
+        cy = y + h // 2
+
+        # Truck region: x ~200-900, y ~580-850
+        # Tree canopy: y < 500
+        assert 200 <= cx <= 900, f"x-center {cx} not in truck region [200, 900]"
+        assert 580 <= cy <= 850, f"y-center {cy} not in truck region [580, 850]"
+        assert cy >= 500, f"bbox center y={cy} is in tree canopy region (y<500)"

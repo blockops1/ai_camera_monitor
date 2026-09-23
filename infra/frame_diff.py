@@ -428,24 +428,39 @@ def bbox_from_mask_with_intersection(
     dilate_px = round(dilate_pct * min_dim)
     intersection = _dilate_mask(intersection, dilate_px)
 
-    # Step 3: connected components, take largest by area
+    # Step 3: connected components, rank by intensity sum (not area).
+    #
+    # A vehicle that is driving onto the property and stopping produces a
+    # compact region of HIGH pixel-difference values (bright, concentrated
+    # motion) across both consecutive diff pairs.  A diffuse foliage / tree
+    # canopy region produces many more changed pixels but each one is only
+    # weakly different (low per-pixel intensity).  Ranking by area on the
+    # AND mask therefore rewards the diffuse noise and hides the vehicle —
+    # see US-073a regression analysis (truck bbox (403,497) 598x287 had
+    # 30.6 M intensity vs canopy's 13.8 M at 138k area).  Summing the raw
+    # uint8 intensity (np.sum of the mask values, not np.count_nonzero)
+    # across the AND mask gives us the total "brightness" of the
+    # persistent-motion region and correctly surfaces bright, compact
+    # vehicles above diffuse foliage noise.
     num_labels, labels = _connected_components(intersection)
     if num_labels < 1:
         return None
 
-    largest_idx = 1
-    largest_area = 0
+    best_intensity = 0
+    best_idx = 1
     for i in range(1, num_labels + 1):
-        area = int(np.sum(labels == i))
-        if area > largest_area:
-            largest_area = area
-            largest_idx = i
+        comp_mask = (labels == i)
+        intensity = int(np.sum(mask_prior[comp_mask]))
+        if intensity > best_intensity:
+            best_intensity = intensity
+            best_idx = i
 
-    if largest_area < min_area_px:
+    best_area = int(np.sum(labels == best_idx))
+    if best_area < min_area_px:
         return None
 
-    rows = np.where(labels == largest_idx)[0]
-    cols = np.where(labels == largest_idx)[1]
+    rows = np.where(labels == best_idx)[0]
+    cols = np.where(labels == best_idx)[1]
     y_cc = int(rows.min())
     x_cc = int(cols.min())
     h_cc = int(rows.max() - rows.min() + 1)
