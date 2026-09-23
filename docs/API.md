@@ -16,7 +16,6 @@ may import directly.
 | `infra.farm_api.cooldowns` | `list_active_cooldowns` | Active cooldown entries (stub, returns []) |
 | `infra.farm_api.identities` | `list_known_people`, `list_known_vehicles`, `list_known_animals` | Known people/vehicles/animals |
 | `infra.farm_api.listener` | `get_listener_status`, `get_recent_errors` | Listener PID, uptime, recent log errors |
-| `infra.farm_api.telegram` | `get_telegram_status` | Telegram send status (stub) |
 | `infra.farm_api.vision` | `get_vision_status` | Vision analyzer env config (runtime fields None) |
 | `infra.farm_api.config` | `get_config` | Operational env knobs, redacted |
 
@@ -188,19 +187,6 @@ source: str                 # Python module name
 `get_recent_errors(n=20)` returns the 20 most recent ERROR lines from
 daemon.log, newest first.
 
-### TelegramStatus (telegram.py)
-
-```
-chat_id_redacted: str       # Digits replaced with [REDACTED-CHAT-ID]
-last_send_at: str | None
-last_send_status: str | None # "ok" or error message
-errors_last_24h: int
-```
-
-NOTE: `get_telegram_status()` is a stub in V2-068b7. It parses logs/
-daemon.log for Telegram send lines and returns the status. Chat IDs
-are redacted.
-
 ### VisionStatus (vision.py:56)
 
 ```
@@ -252,7 +238,6 @@ gracefully:
 | Camera IPs | 192.168.x.x | `[REDACTED-LAN-IP]` |
 | Vision base_url | any IPv4 | `[REDACTED-IP]` |
 | Config secrets | Name matches /token|password|key|secret/i | `[REDACTED]` |
-| Telegram chat_id | digit sequences | `[REDACTED-CHAT-ID]` |
 
 ## Usage
 
@@ -261,7 +246,11 @@ from infra.farm_api.cameras import list_cameras
 from infra.farm_api.events import list_events, get_event
 from infra.farm_api.gate import get_gate_config, list_suppression_rules
 from infra.farm_api.cooldowns import list_active_cooldowns
-from infra.farm_api.identities import list_known_people, list_known_vehicles, list_known_animals
+from infra.farm_api.identities import (
+    list_known_people,
+    list_known_vehicles,
+    list_known_animals,
+)
 from infra.farm_api.listener import get_listener_status, get_recent_errors
 from infra.farm_api.vision import get_vision_status
 from infra.farm_api.config import get_config

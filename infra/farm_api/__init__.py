@@ -10,7 +10,6 @@ RESOURCE GROUPS:
     cooldowns    — Cooldown, list_active_cooldowns
     identities   — PersonIdentity, VehicleIdentity, AnimalIdentity, list_*
     listener     — ListenerStatus, ErrorRecord, get_listener_status, get_recent_errors
-    telegram     — TelegramStatus, get_telegram_status
     vision       — VisionStatus, get_vision_status
     config       — ConfigView, get_config
 
