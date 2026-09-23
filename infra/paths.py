@@ -113,7 +113,11 @@ DATA_DIR = (
 SRC_DIR = os.path.join(PROJECT_ROOT, "src")
 
 # Operational logs (rotated, kept long-term)
-LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
+# NOTE: LOGS_DIR can be overridden via FARMSURV_LOGS_DIR (used by tests)
+_LOGS_DIR_OVERRIDE = os.environ.get("FARMSURV_LOGS_DIR")
+LOGS_DIR = (
+    _LOGS_DIR_OVERRIDE if _LOGS_DIR_OVERRIDE else os.path.join(PROJECT_ROOT, "logs")
+)
 
 # Captured frames, grouped by alert_id in dated folders (auto-cleaned after FRAME_RETENTION_HOURS)
 # NOTE: DATA_DIR is set above (lines 21-25) with FARMSURV_DATA_DIR override
