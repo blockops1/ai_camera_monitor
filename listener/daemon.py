@@ -971,6 +971,65 @@ def _start_mcp_server() -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# API server spawn (US-072c)
+# ---------------------------------------------------------------------------
+
+
+def _api_server_thread_target() -> None:
+    """Thread target: call infra.api_server.run() with error logging.
+
+    Wraps run() so that any exception (including sys.exit/SystemExit
+    from token validation failure) is caught and logged at ERROR level
+    rather than silently killing the thread.
+    """
+    import infra.api_server as _api
+
+    try:
+        _api.run()
+    except SystemExit as exc:
+        log.error("api_server: run() SystemExit=%s", exc.code)
+    except Exception:
+        log.exception("api_server: run() raised")
+
+
+def _start_api_server() -> None:
+    """Spawn infra.api_server.run() on a daemon thread when enabled.
+
+    Reads FARMSURV_API_ENABLED (1=ON, 0=OFF, default 0). When enabled,
+    starts the API server on a daemon thread and logs spawn info.
+    When disabled, logs a disabled message.
+
+    The API server's own run() handles token validation and abort-on-error.
+    We catch any failure and log it (never swallow silently).
+    """
+    api_enabled = os.environ.get("FARMSURV_API_ENABLED", "0") == "1"
+    api_port = int(os.environ.get("FARMSURV_API_PORT", "8092"))
+    api_bind = os.environ.get("FARMSURV_API_BIND", "tailnet-only")
+
+    if not api_enabled:
+        log.info(
+            "{event: 'api_server_disabled', reason: 'FARMSURV_API_ENABLED!=1'}"
+        )
+        return
+
+    token = os.environ.get("FARMSURV_API_TOKEN", "")
+
+    thread = threading.Thread(
+        target=_api_server_thread_target,
+        name="api-server",
+        daemon=True,
+    )
+    thread.start()
+
+    log.info(
+        "{event: 'api_server_spawned', port=%d, bind_address=%s, api_token_len=%d}",
+        api_port,
+        api_bind,
+        len(token),
+    )
+
+
 def main():
     """Entry point for `python -m listener.daemon`.
 
@@ -1030,6 +1089,9 @@ def main():
 
     # US-068g1: spawn the MCP server on a daemon thread when enabled.
     _start_mcp_server()
+
+    # US-072c: spawn the API server on a daemon thread when enabled.
+    _start_api_server()
 
     app.run(host=host, port=port)
 
