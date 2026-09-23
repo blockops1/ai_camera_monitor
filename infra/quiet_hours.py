@@ -25,10 +25,14 @@ CALLED BY:
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 
+from infra.quick_classifier import night_suppress_match
 from infra.time_of_day import is_night_at_edt
+
+log = logging.getLogger("quiet_hours")
 
 # ---------------------------------------------------------------------------
 # Env-var defaults
@@ -54,7 +58,7 @@ def _parse_cameras(raw: str) -> frozenset[str]:
     return frozenset(cam.strip() for cam in raw.split(",") if cam.strip())
 
 
-def in_quiet_hours(dt: datetime, camera_name: str) -> bool:
+def in_quiet_hours(dt: datetime, camera_name: str, class_name: str | None = None) -> bool:
     """Return True if the given UTC datetime falls in the quiet hours for
     *camera_name*.
 
@@ -63,14 +67,39 @@ def in_quiet_hours(dt: datetime, camera_name: str) -> bool:
     2. *camera_name* is in FARMSURV_QUIET_HOURS_CAMERAS.
     3. is_night_at_edt(dt) is True (suntime-driven night window).
 
+    Defense-in-depth (V2-069): when *class_name* is provided AND
+    *camera_name* matches the per-camera night-suppress list
+    (night_suppress_match), this function returns True regardless of
+    FARMSURV_QUIET_HOURS_CAMERAS scoping, so an alert that slipped past
+    the motion-gate layer is still silenced at dispatch time.
+
     Args:
         dt: UTC datetime to check. May be naive (treated as UTC) or
             timezone-aware.
         camera_name: The camera identifier to check against the env list.
+        class_name: Optional detection class (e.g. "car", "vehicle").
+            When provided AND the camera+class pair matches the night
+            suppress list, returns True (suppress at TG-dispatch layer).
+            When None, falls back to the existing global quiet-hours logic
+            without silently suppressing.
 
     Returns:
         True if the alert should be suppressed by the quiet-hours gate.
     """
+    # V2-069 defense-in-depth: per-camera + per-class night suppress.
+    # Belt-and-suspenders: if the motion-gate missed this alert (e.g. race
+    # with config reload), the TG-dispatch layer still silences it.
+    # Mirrors the motion-gate check: night_suppress_match AND is_night.
+    if (
+        class_name is not None
+        and night_suppress_match(camera_name, class_name)
+        and is_night_at_edt(dt)
+    ):
+        log.info(
+            f"quiet_hours: tg_night_suppressed "
+            f"camera={camera_name} class={class_name}"
+        )
+        return True
     # Ensure time_of_day has lat/lon set (third os.environ.get for AC7).
     os.environ.setdefault(
         "FARMSURV_FARM_LAT",
