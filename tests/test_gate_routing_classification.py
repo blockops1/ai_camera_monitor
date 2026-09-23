@@ -56,7 +56,13 @@ class FakeClassifier:
     """
     verdict: FakeVerdict = FakeVerdict()
 
-    def classify_frame(self, frame, timestamp: datetime | None = None) -> QuickVerdict:
+    def classify_frame(
+        self,
+        frame,
+        timestamp: datetime | None = None,
+        camera_id: str | None = None,
+    ) -> QuickVerdict:
+        """Return a deterministic QuickVerdict. Ignores frame, timestamp, camera_id."""
         return QuickVerdict(
             top_class=self.verdict.top_class,
             top_confidence=self.verdict.top_confidence,
