@@ -144,12 +144,12 @@ def build_detail_message(
 ) -> dict[str, Any]:
     """Build a TG#2 Telegram message dict.
 
-    When *alert* is provided, the caption includes 'Alert {position} of 3',
+    When *alert* is provided, the caption includes 'TG {position} of 3',
     'Alert ID: <id>', and 'Timestamp: <timestamp>' in that order,
     after Camera/Mode/Class lines and before the attribute bullet list.
 
     Emits a curated, single-line-per-attribute bullet list under a
-    '*Attributes:*' header instead of a recursive VM2 dict dump.
+    'Attributes:' header instead of a recursive VM2 dict dump.
     """
     if mode not in _MODES:
         raise ValueError(f"mode must be one of {_MODES}, got {mode!r}")
@@ -179,7 +179,7 @@ def build_detail_message(
 
     # Alert metadata (mirrors TG position marker).
     if alert:
-        lines.append(f"Alert {position} of 3")
+        lines.append(f"TG {position} of 3")
         alert_id = alert.get("id")
         if alert_id:
             lines.append(f"Alert ID: {alert_id}")
@@ -191,7 +191,7 @@ def build_detail_message(
     attr_lines = _build_attribute_lines(mode, vm2_result)
     if attr_lines:
         lines.append("")
-        lines.append("*Attributes:*")
+        lines.append("Attributes:")
         lines.extend(attr_lines)
 
     # TG position marker.
