@@ -912,6 +912,65 @@ def _cleanup_loop(interval_min: int) -> None:
         time.sleep(interval_s)
 
 
+# ---------------------------------------------------------------------------
+# MCP server spawn (US-068g1)
+# ---------------------------------------------------------------------------
+
+
+def _mcp_server_thread_target() -> None:
+    """Thread target: call infra.mcp_server.run() with error logging.
+
+    Wraps run() so that any exception (including sys.exit/SystemExit
+    from token validation failure) is caught and logged at ERROR level
+    rather than silently killing the thread.
+    """
+    import infra.mcp_server as _mcp
+
+    try:
+        _mcp.run()
+    except SystemExit as exc:
+        log.error("mcp_server: run() SystemExit=%s", exc.code)
+    except Exception:
+        log.exception("mcp_server: run() raised")
+
+
+def _start_mcp_server() -> None:
+    """Spawn infra.mcp_server.run() on a daemon thread when enabled.
+
+    Reads FARMSURV_MCP_ENABLED (1=ON, 0=OFF, default 0). When enabled,
+    starts the MCP server on a daemon thread and logs spawn info.
+    When disabled, logs a disabled message.
+
+    The MCP server's own run() handles token validation and abort-on-error.
+    We catch any failure and log it (never swallow silently).
+    """
+    mcp_enabled = os.environ.get("FARMSURV_MCP_ENABLED", "0") == "1"
+    mcp_port = int(os.environ.get("FARMSURV_MCP_PORT", "8091"))
+    mcp_bind = os.environ.get("FARMSURV_MCP_BIND", "tailnet-only")
+
+    if not mcp_enabled:
+        log.info(
+            "{event: 'mcp_server_disabled', reason: 'FARMSURV_MCP_ENABLED!=1'}"
+        )
+        return
+
+    token = os.environ.get("FARMSURV_MCP_TOKEN", "")
+
+    thread = threading.Thread(
+        target=_mcp_server_thread_target,
+        name="mcp_server",
+        daemon=True,
+    )
+    thread.start()
+
+    log.info(
+        "{event: 'mcp_server_spawned', port=%d, bind_address=%s, far_msurv_mcp_token_len=%d}",
+        mcp_port,
+        mcp_bind,
+        len(token),
+    )
+
+
 def main():
     """Entry point for `python -m listener.daemon`.
 
@@ -968,6 +1027,9 @@ def main():
         )
     else:
         log.info("cleanup thread skipped; interval=0")
+
+    # US-068g1: spawn the MCP server on a daemon thread when enabled.
+    _start_mcp_server()
 
     app.run(host=host, port=port)
 
