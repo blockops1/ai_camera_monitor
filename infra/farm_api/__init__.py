@@ -24,4 +24,5 @@ No transport awareness — the MCP server is the only consumer today.
 from infra.farm_api import (
     cameras,  # noqa: F401 — exposes camera resources
     gate,  # noqa: F401 — exposes gate resources
+    listener,  # noqa: F401 — exposes listener status
 )
