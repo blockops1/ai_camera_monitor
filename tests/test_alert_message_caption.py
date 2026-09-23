@@ -113,8 +113,10 @@ class TestCaptionWithBbox:
             position=1,
             alert=_make_alert(),
         )
-        # Confidence appears in class line.
-        assert "87%" in result["caption"]
+        # Confidence appears in class line as the enum word.
+        # (Test passes confidence="87" as a string; after fix it renders as plain word.)
+        assert "87" in result["caption"]
+        assert "%" not in result["caption"]
 
     def test_caption_has_no_old_labels(self):
         """Caption does NOT have old YOLO:/Vision:/Classification: labels."""
@@ -282,15 +284,15 @@ class TestTg2CaptionAlertMetadata:
             alert=alert,
         )
         caption = result["caption"]
-        assert "Alert 2 of 3" in caption
+        assert "TG 2 of 3" in caption
         assert "Alert ID: evt-xyz-789" in caption
         assert "Timestamp: 2026-09-12 04:00:00 EDT" in caption
-        # Verify order: Camera -> Mode -> Class -> Alert lines
+        # Verify order: Camera -> Mode -> Class -> TG marker lines
         parts = caption.split("\n")
-        idx_alert2 = parts.index("Alert 2 of 3")
+        idx_tg2 = parts.index("TG 2 of 3")
         idx_alert_id = parts.index("Alert ID: evt-xyz-789")
         idx_ts = parts.index("Timestamp: 2026-09-12 04:00:00 EDT")
-        assert idx_alert2 < idx_alert_id < idx_ts
+        assert idx_tg2 < idx_alert_id < idx_ts
         # Camera line comes first
         assert parts[0] == "Camera: Front Gate"
         # Curated vehicle fields rendered as bullet list (US-067b)
@@ -322,6 +324,8 @@ class TestTg2CaptionAlertMetadata:
         assert "Alert 2 of 3" not in caption
         assert "Alert ID:" not in caption
         assert "Timestamp:" not in caption
+        # TG position marker is always present (line 198 in detail.py).
+        assert "TG 2 of 3" in caption
         # Basic lines still present
         assert "Camera: Back Yard" in caption
         assert "Mode: person" in caption

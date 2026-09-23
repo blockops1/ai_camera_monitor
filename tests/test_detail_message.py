@@ -35,7 +35,7 @@ def _make_alert(
 
 
 class TestAttributesHeader:
-    """AC: *Attributes:* bold header is present when attributes exist."""
+    """AC: Attributes: plain text header (no bold markers) when attributes exist."""
 
     def test_person_has_attributes_header(self):
         result = build_detail_message(
@@ -50,7 +50,8 @@ class TestAttributesHeader:
             crop_a=Path("/mock/a.png"),
             crop_b=Path("/mock/b.png"),
         )
-        assert "*Attributes:*" in result["caption"]
+        assert "Attributes:" in result["caption"]
+        assert "*Attributes:*" not in result["caption"]
 
     def test_vehicle_has_attributes_header(self):
         result = build_detail_message(
@@ -64,7 +65,8 @@ class TestAttributesHeader:
             crop_a=Path("/mock/a.png"),
             crop_b=Path("/mock/b.png"),
         )
-        assert "*Attributes:*" in result["caption"]
+        assert "Attributes:" in result["caption"]
+        assert "*Attributes:*" not in result["caption"]
 
     def test_empty_attrs_no_header(self):
         """No attributes → no *Attributes:* line."""
@@ -74,7 +76,7 @@ class TestAttributesHeader:
             crop_a=Path("/mock/a.png"),
             crop_b=Path("/mock/b.png"),
         )
-        assert "*Attributes:*" not in result["caption"]
+        assert "Attributes:" not in result["caption"]
 
 
 # ---------------------------------------------------------------------------
@@ -419,7 +421,7 @@ class TestSkipEmpty:
             crop_a=Path("/mock/a.png"),
             crop_b=Path("/mock/b.png"),
         )
-        assert "*Attributes:*" not in result["caption"]
+        assert "Attributes:" not in result["caption"]
 
 
 # ---------------------------------------------------------------------------
@@ -536,7 +538,7 @@ class TestGeneralBehavior:
             alert=alert,
         )
         caption = result["caption"]
-        assert "Alert 2 of 3" in caption
+        assert "TG 2 of 3" in caption
         assert "Alert ID: 72c70d5f-e9ce-40da-885d-d74471a22259" in caption
         assert "Timestamp:" in caption
 
@@ -549,7 +551,6 @@ class TestGeneralBehavior:
             alert=None,
         )
         caption = result["caption"]
-        assert "Alert" not in caption
         assert "Alert ID" not in caption
         assert "Timestamp" not in caption
 
