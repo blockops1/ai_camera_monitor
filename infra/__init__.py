@@ -38,6 +38,9 @@ from infra.reolink import (
 )
 from infra.time_of_day import get_night_window, is_night_at_edt
 
+# api_server exports
+from infra import api_server  # noqa: F401
+
 __all__ = [
     "AudioConfig",
     "CapabilitiesResult",
