@@ -30,6 +30,7 @@ USAGE:
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import os
@@ -53,6 +54,9 @@ _API_BIND_MODE = os.environ.get("FARMSURV_API_BIND", "tailnet-only")
 _API_PORT = int(os.environ.get("FARMSURV_API_PORT", "8092"))
 _API_TOKEN = os.environ.get("FARMSURV_API_TOKEN", "")
 _BOX_ID = os.environ.get("FARMSURV_BOX_ID", os.environ.get("FARM_BOX_ID", ""))
+
+# Server uptime at boot
+_SERVER_START = datetime.datetime.now(datetime.UTC)
 
 # ---------------------------------------------------------------------------
 # Token validation (mirrors MCP server pattern)
@@ -300,9 +304,13 @@ class _APIHandler(BaseHTTPRequestHandler):
 
     def _handle_healthz(self):
         """Return health status."""
+        uptime = (
+            datetime.datetime.now(datetime.UTC) - _SERVER_START
+        ).total_seconds()
         response = {
             "ok": _API_ENABLED,
             "box_id": _BOX_ID,
+            "uptime_seconds": round(uptime, 1),
             "api_enabled": _API_ENABLED,
         }
         self._send_json(200, response)
