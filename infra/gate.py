@@ -280,7 +280,10 @@ class ClassifierProtocol(Protocol):
     """
 
     def classify_frame(
-        self, frame: str | Image.Image, timestamp: datetime | None = None
+        self,
+        frame: str | Image.Image,
+        timestamp: datetime | None = None,
+        camera_id: str | None = None,
     ) -> QuickVerdict: ...
 
 
@@ -637,6 +640,7 @@ def _classify_crop(
     crop: str | Image.Image | None,
     thresholds: dict[str, float],
     timestamp: datetime | None = None,
+    camera_id: str | None = None,
 ) -> QuickVerdict:
     """Classify a single crop. Returns QuickVerdict from quick_classifier.
 
@@ -650,6 +654,10 @@ def _classify_crop(
     mtime fallback, and the timestamp was never threaded through. Now the
     webhook's ISO timestamp flows listener -> dispatch -> run_gate ->
     _classify_crop -> classify_frame.
+
+    V2-069 (camera_id-fix): `camera_id` is forwarded to classify_frame() so the
+    per-camera + per-class night suppress heuristic can gate on the camera slug.
+    When None, per-camera suppress is skipped (legacy behavior preserved).
     """
     if crop is None:
         return QuickVerdict(
@@ -658,7 +666,7 @@ def _classify_crop(
             decision="suppress",
             reason="no_crop",
         )
-    verdict = classifier.classify_frame(crop, timestamp=timestamp)
+    verdict = classifier.classify_frame(crop, timestamp=timestamp, camera_id=camera_id)
     # Day-gate threshold check — re-stamp decision to "pass" / "suppress".
     # IMPORTANT (Phase 6B.116 timestamp-fix): only re-stamp if the classifier
     # didn't already suppress. The night heuristic inside classify_frame()
@@ -1124,8 +1132,12 @@ def run(
     # (PRD-V2-024 US-024c). Gate disk writes for crop_a_path/crop_b_path
     # were legacy artifacts — zero consumers in single_pipeline or
     # per-class pipelines. classify_frame accepts PIL directly.
-    verdict_a = _classify_crop(classifier, crop_a_pil, thresholds, timestamp=timestamp)
-    verdict_b = _classify_crop(classifier, crop_b_pil, thresholds, timestamp=timestamp)
+    verdict_a = _classify_crop(
+        classifier, crop_a_pil, thresholds, timestamp=timestamp, camera_id=camera_name
+    )
+    verdict_b = _classify_crop(
+        classifier, crop_b_pil, thresholds, timestamp=timestamp, camera_id=camera_name
+    )
 
     log.debug(
         f"[{alert_id}] motion_gate: "
