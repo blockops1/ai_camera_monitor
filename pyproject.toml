@@ -1,9 +1,12 @@
-[pytest]
+[tool.pytest.ini_options]
 # 2026-09-22 (operator): pytest tmp_path retention was leaving 40+ GB per run.
 # Workers were filling /private/var/.../pytest-of-jill/ with multi-GB per-test dirs.
 # Keep tmp dirs only for FAILED tests, and only one generation back.
 tmp_path_retention_count = 1
 tmp_path_retention_policy = "failed"
+markers = [
+    "slow: marks tests as slow (E2E listener subprocess tests; skipped with -m 'not slow')",
+]
 
 [project]
 name = "farm-surveillance-v2"
