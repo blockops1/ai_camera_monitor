@@ -14,9 +14,6 @@ DOES NOT DO:
     - Make live network calls — all HTTP is mocked via httpx
 
 CALLED BY:
-    - tests/test_pipeline_cooldown.py
-    - tests/test_vision_analyzer.py
-    - tests/test_pipeline.py
     - tests/test_alert_route.py
 """
 
