@@ -3,27 +3,30 @@
   "_default_thresholds_reference": "infra/gate.py:THRESHOLDS_BY_CLASS",
   "FRONT": {
     "_note": "Front Door Outside — primary entry, no relaxation",
-    "vehicle": 0.50,
+    "vehicle": 0.45,
     "person": 0.35,
+    "bicycle": 0.45,
     "gate_cooldown": {"vehicle": 60, "person": 30, "default": 45},
     "gate_enabled": {"vehicle": true, "person": true, "motion": true},
-    "subjects": ["person", "animal"]
+    "subjects": ["person", "animal", "vehicle", "bicycle"]
   },
   "BACK": {
     "_note": "Back Door Inside — secondary entry",
-    "vehicle": 0.50,
+    "vehicle": 0.45,
     "person": 0.35,
+    "bicycle": 0.45,
     "gate_cooldown": {"vehicle": 60, "person": 30, "default": 45},
     "gate_enabled": {"vehicle": true, "person": true, "motion": true},
-    "subjects": ["person", "animal"]
+    "subjects": ["person", "animal", "vehicle", "bicycle"]
   },
   "OUTSIDE_FRONT_GARAGE": {
     "_note": "Outside Front Garage — driveway area",
-    "vehicle": 0.50,
+    "vehicle": 0.45,
     "person": 0.40,
+    "bicycle": 0.45,
     "gate_cooldown": {"vehicle": 90, "person": 45, "default": 60},
     "gate_enabled": {"vehicle": true, "person": true, "motion": true},
-    "subjects": ["person", "animal"]
+    "subjects": ["person", "animal", "vehicle", "bicycle"]
   },
   "OUTSIDE_FRONT_POWER": {
     "_note": "Outside Front Power — perimeter",
