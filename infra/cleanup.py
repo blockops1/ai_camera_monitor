@@ -38,6 +38,7 @@ RELATED:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -52,6 +53,12 @@ if not log.handlers:
     log.addHandler(_handler)
     log.setLevel(logging.INFO)
 log.propagate = False
+
+# ---------------------------------------------------------------------------
+# Runtime state — exposed for health-heartbeat consumers (US-073i).
+# ---------------------------------------------------------------------------
+last_tick_monotonic: float | None = None
+last_reclaimed_bytes: int | None = None
 
 
 def _now_epoch() -> float:
@@ -169,6 +176,10 @@ def run() -> dict:
             f"cleanup exceeded 20 GB cap: {total_bytes / 1e9:.2f} GB"
         )
         telegram_alerts.send(alert_msg)
+
+    global last_tick_monotonic, last_reclaimed_bytes
+    last_tick_monotonic = time.monotonic()
+    last_reclaimed_bytes = stats["freed_bytes"]
 
     log.info(
         "cleanup: %d dirs, %d bytes freed, %d errors",
