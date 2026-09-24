@@ -57,6 +57,11 @@ from infra.vm1_prompt import SCHEMA_JSON as VM1_SCHEMA, build_vm1_prompt
 _VISION_URL = "http://localhost:8080/v1/chat/completions"
 _VISION_MODEL = "qwen3-vl-8b"
 
+# ---------------------------------------------------------------------------
+# Runtime state — exposed for health-heartbeat consumers (US-073i).
+# ---------------------------------------------------------------------------
+_last_call_timestamp: float | None = None
+
 
 def _response_format(schema: dict, name: str) -> dict:
     """Wrap a JSON Schema dict in the llama-server strict-mode envelope.
@@ -128,7 +133,12 @@ def _post_vision(payload: dict, timeout: float) -> dict:
         )
     try:
         raw = resp.json()["choices"][0]["message"]["content"]
-        return json.loads(raw)
+        import time  # local to avoid circular import in hot path
+
+        parsed = json.loads(raw)
+        global _last_call_timestamp
+        _last_call_timestamp = time.monotonic()
+        return parsed
     except (KeyError, json.JSONDecodeError, IndexError) as exc:
         raise VisionAnalyzerError(
             f"failed to parse response: {exc}"

@@ -30,10 +30,18 @@ from __future__ import annotations
 
 import logging
 import os
+import time
+from collections import deque
 
 import httpx
 
 log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Runtime state — exposed for health-heartbeat consumers (US-073i).
+# ---------------------------------------------------------------------------
+_last_send_timestamp: float | None = None
+_send_errors: deque[float] = deque(maxlen=100)  # ring buffer of error timestamps
 
 
 def send(message: str) -> bool:
@@ -55,6 +63,8 @@ def send(message: str) -> bool:
             "not set — skipping alert: %s",
             message[:120],
         )
+        now = time.monotonic()
+        _send_errors.append(now)
         return False
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -70,8 +80,11 @@ def send(message: str) -> bool:
                     resp.status_code,
                     resp.text[:200],
                 )
+                _send_errors.append(time.monotonic())
                 return False
             log.info("telegram_alerts.send: message delivered")
+            global _last_send_timestamp
+            _last_send_timestamp = time.monotonic()
             return True
     except (httpx.HTTPError, OSError, RuntimeError) as err:
         log.error(
@@ -79,4 +92,5 @@ def send(message: str) -> bool:
             message[:120],
             err,
         )
+        _send_errors.append(time.monotonic())
         return False
