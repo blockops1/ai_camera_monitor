@@ -31,4 +31,15 @@ if ! bash "${V2_ROOT}/bin/check_motion_gate_config.sh"; then
   exit 1
 fi
 
+# US-068h: run the MCP smoke harness (fast, no camera needed).
+# Failure blocks the commit — it catches broken listener/MCP early.
+if [ -f "${V2_ROOT}/bin/mcp_live_smoke.sh" ] && [ -x "${V2_ROOT}/bin/mcp_live_smoke.sh" ]; then
+  echo "Running MCP smoke harness (US-068h)..."
+  if ! bash "${V2_ROOT}/bin/mcp_live_smoke.sh"; then
+    echo "ERROR: MCP smoke harness failed" >&2
+    exit 1
+  fi
+  echo "OK: MCP smoke harness passed."
+fi
+
 echo "OK: confirmed cwd=$CWD is the v2 project root."
