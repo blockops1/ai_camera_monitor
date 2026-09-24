@@ -99,15 +99,15 @@ class TestNightSuppressMatch:
         importlib.reload(self.qc)
         assert self.qc.night_suppress_match("FRONT_DOOR", "car") is False
 
-    def test_night_and_camera_match_but_class_not_in_filter_passes(
+    def test_night_and_camera_bucket_name_matches(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """When classes list is set and top_class not in it, returns False."""
+        """Bucket name 'vehicle' matches concrete COCO class 'car' (US-073d fix)."""
         monkeypatch.setenv("FARMSURV_NIGHT_SUPPRESS_CAMERAS", "OUTSIDE_BACK_SOLAR")
         monkeypatch.setenv("FARMSURV_NIGHT_SUPPRESS_CLASSES", "vehicle")
         importlib.reload(self.qc)
-        # 'car' is NOT in the classes list, so no suppress.
-        assert self.qc.night_suppress_match("OUTSIDE_BACK_SOLAR", "car") is False
+        # 'car' maps to the 'vehicle' bucket, so suppress IS applied.
+        assert self.qc.night_suppress_match("OUTSIDE_BACK_SOLAR", "car") is True
 
     def test_empty_camera_list_current_behavior(
         self, monkeypatch: pytest.MonkeyPatch
@@ -122,14 +122,16 @@ class TestNightSuppressMatch:
     def test_class_match_when_classes_listed(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """When classes list is set, only listed classes are suppressed."""
+        """When classes list is set, bucket name expands to concrete classes."""
         monkeypatch.setenv("FARMSURV_NIGHT_SUPPRESS_CAMERAS", "OUTSIDE_BACK_SOLAR")
         monkeypatch.setenv("FARMSURV_NIGHT_SUPPRESS_CLASSES", "vehicle")
         importlib.reload(self.qc)
-        assert self.qc.night_suppress_match("OUTSIDE_BACK_SOLAR", "vehicle") is True
-        # Note: 'car' is not 'vehicle' (COCO class name is 'car', not 'vehicle')
-        # But the test class filter uses the raw class name.
-        assert self.qc.night_suppress_match("OUTSIDE_BACK_SOLAR", "car") is False
+        # Bucket 'vehicle' expands to all COCO vehicle classes.
+        assert self.qc.night_suppress_match("OUTSIDE_BACK_SOLAR", "car") is True
+        assert self.qc.night_suppress_match("OUTSIDE_BACK_SOLAR", "truck") is True
+        assert self.qc.night_suppress_match("OUTSIDE_BACK_SOLAR", "bicycle") is True
+        # Non-vehicle should not match.
+        assert self.qc.night_suppress_match("OUTSIDE_BACK_SOLAR", "person") is False
 
     def test_class_without_camera_logs_warning_no_op(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -197,3 +199,88 @@ class TestClassifyFrameNightSuppress:
     ) -> None:
         """Non-listed camera returns False regardless of class."""
         assert self.qc.night_suppress_match("FRONT_DOOR", "car") is False
+
+
+# ---------------------------------------------------------------------------
+# Bucket-name expansion (US-073d)
+# ---------------------------------------------------------------------------
+
+class TestBucketExpansion:
+    """Tests for US-073d: bucket-name expansion in night_suppress_match."""
+
+    @pytest.fixture(autouse=True)
+    def _setup_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("FARMSURV_NIGHT_SUPPRESS_CAMERAS", "OUTSIDE_BACK_SOLAR")
+        monkeypatch.setenv("FARMSURV_NIGHT_SUPPRESS_CLASSES", "")
+        import infra.quick_classifier as qc
+
+        importlib.reload(qc)
+        self.qc = qc
+
+    def _match(self, class_name: str) -> bool:
+        return self.qc.night_suppress_match("OUTSIDE_BACK_SOLAR", class_name)
+
+    def test_bucket_vehicle_expands_to_car(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """'vehicle' bucket matches 'car' (the bug fix for US-073d)."""
+        monkeypatch.setenv("FARMSURV_NIGHT_SUPPRESS_CLASSES", "vehicle")
+        importlib.reload(self.qc)
+        assert self._match("car") is True
+
+    def test_bucket_vehicle_matches_all_vehicle_classes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """'vehicle' bucket matches all COCO vehicle classes."""
+        monkeypatch.setenv("FARMSURV_NIGHT_SUPPRESS_CLASSES", "vehicle")
+        importlib.reload(self.qc)
+        for cls in ("bicycle", "car", "motorcycle", "bus", "truck"):
+            assert self._match(cls) is True, f"vehicle should match {cls}"
+
+    def test_bucket_vehicle_does_not_match_person(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """'vehicle' bucket does NOT match 'person'."""
+        monkeypatch.setenv("FARMSURV_NIGHT_SUPPRESS_CLASSES", "vehicle")
+        importlib.reload(self.qc)
+        assert self._match("person") is False
+
+    def test_bucket_vehicle_does_not_match_animal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """'vehicle' bucket does NOT match 'dog'."""
+        monkeypatch.setenv("FARMSURV_NIGHT_SUPPRESS_CLASSES", "vehicle")
+        importlib.reload(self.qc)
+        assert self._match("dog") is False
+
+    def test_mixed_bucket_and_literal(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mixed set: 'vehicle,person' matches both vehicle classes and person."""
+        monkeypatch.setenv("FARMSURV_NIGHT_SUPPRESS_CLASSES", "vehicle,person")
+        importlib.reload(self.qc)
+        assert self._match("car") is True
+        assert self._match("person") is True
+        assert self._match("dog") is False
+
+    def test_backward_compat_literal_only(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Literal class names: 'car,truck' matches only car and truck, NOT bicycle."""
+        monkeypatch.setenv("FARMSURV_NIGHT_SUPPRESS_CLASSES", "car,truck")
+        importlib.reload(self.qc)
+        assert self._match("car") is True
+        assert self._match("truck") is True
+        assert self._match("bicycle") is False
+        assert self._match("bus") is False
+
+    def test_expands_person_bucket(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """'person' bucket matches 'person'."""
+        monkeypatch.setenv("FARMSURV_NIGHT_SUPPRESS_CLASSES", "person")
+        importlib.reload(self.qc)
+        assert self._match("person") is True
+        assert self._match("car") is False
+
+    def test_expands_animal_bucket(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """'animal' bucket matches all animal classes."""
+        monkeypatch.setenv("FARMSURV_NIGHT_SUPPRESS_CLASSES", "animal")
+        importlib.reload(self.qc)
+        for cls in ("cat", "dog", "horse", "sheep", "cow", "bear", "bird"):
+            assert self._match(cls) is True, f"animal should match {cls}"
+        assert self._match("car") is False
