@@ -310,11 +310,23 @@ def _run_pipeline(alert: dict) -> dict:
     camera_label = alert.get("camera_label", camera_id)
     started_at = datetime.now(UTC).isoformat()
 
+    # Parse the webhook's ISO 8601 timestamp so the gate can use it for
+    # night-suppression checks.  _stage_gate falls back to datetime.now(UTC)
+    # when the key is missing (same as the existing _parse_alarm fallback).
+    ts_raw = alert.get("timestamp")
+    if ts_raw:
+        try:
+            alert_ts = datetime.fromisoformat(ts_raw)
+        except (TypeError, ValueError):
+            alert_ts = datetime.now(UTC)
+    else:
+        alert_ts = datetime.now(UTC)
+
     # Stage 3: load frames.
     frames = stage_load_frames(alert)
 
     # Stage 4: YOLO gate.
-    gate_result = _stage_gate(frames, camera_id, alert_id)
+    gate_result = _stage_gate(frames, camera_id, alert_id, alert_ts)
     if gate_result["status"] == "dropped":
         _write_event(
             alert_id, camera_id, frames, gate_result, None,
@@ -446,11 +458,14 @@ def _run_pipeline(alert: dict) -> dict:
     }
 
 
-def _stage_gate(frames, camera_id, alert_id):
+def _stage_gate(frames, camera_id, alert_id, timestamp):
     """Stage 4: run YOLO gate on frames.
 
     Thin wrapper around ``infra.gate.run`` to keep the orchestrator
     import-free (avoids a circular import with listener.pipeline).
+
+    Args:
+        timestamp: tz-aware datetime from the webhook (used by night-suppress).
     """
     from infra.gate import run as run_gate
 
@@ -459,6 +474,7 @@ def _stage_gate(frames, camera_id, alert_id):
         camera_name=camera_id,
         alert_id=alert_id,
         output_dir=str(infra_paths.data_dir_for(camera_id, alert_id)),
+        timestamp=timestamp,
     )
 
     if gate_verdict.is_none():
