@@ -98,16 +98,16 @@ def build_alert_message(
     conf = vm1_result.get("confidence", "likely")
     notes = vm1_result.get("notes")
 
-    # Extract alert metadata.
-    alert_id = alert.get("id") if alert else None
     timestamp = alert.get("timestamp") if alert else None
 
     # Build the MarkdownV2 body lines.
     lines: list[str] = []
 
     # Line 1: camera header with emoji and time.
+    # Wrap timestamp in <code> tags so Telegram renders dashes/colons literally
+    # without MarkdownV2 escape artifacts in the MediaGroup caption path.
     if timestamp:
-        time_str = format_local_timestamp(timestamp)
+        time_str = f"<code>{format_local_timestamp(timestamp)}</code>"
     else:
         time_str = ""
     # NOTE: bold markers (*...*) intentionally absent — the dispatcher escapes
@@ -130,11 +130,7 @@ def build_alert_message(
     # Line 3: TG position marker.
     lines.append(f"TG {position} of 3")
 
-    # Line 4: short alert ID (first 8 chars).
-    if alert_id:
-        lines.append(alert_id[:8])
-
-    # Line 5 (optional): notes.
+    # Line 4 (optional): notes.
     if notes:
         lines.append(notes)
 

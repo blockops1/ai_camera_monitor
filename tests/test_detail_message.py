@@ -526,6 +526,7 @@ class TestGeneralBehavior:
         assert result["photos"] == ["", ""]
 
     def test_alert_metadata_included(self):
+        """TG#2 includes TG marker + timestamp in <code> tags (Alert ID removed per US-073g)."""
         alert = _make_alert(
             alert_id="72c70d5f-e9ce-40da-885d-d74471a22259",
             timestamp="2026-09-22T16:21:00Z",
@@ -539,8 +540,12 @@ class TestGeneralBehavior:
         )
         caption = result["caption"]
         assert "TG 2 of 3" in caption
-        assert "Alert ID: 72c70d5f-e9ce-40da-885d-d74471a22259" in caption
+        # Alert ID removed per US-073g
+        assert "Alert ID:" not in caption
+        assert "72c70d5f" not in caption
+        # Timestamp present, wrapped in <code> tags (US-073g)
         assert "Timestamp:" in caption
+        assert "<code>" in caption and "</code>" in caption
 
     def test_alert_none_omits_metadata(self):
         result = build_detail_message(

@@ -178,14 +178,14 @@ def build_detail_message(
     ]
 
     # Alert metadata (mirrors TG position marker).
+    # Alert ID lines removed per US-073g — operator doesn't need these in TG captions.
     if alert:
         lines.append(f"TG {position} of 3")
-        alert_id = alert.get("id")
-        if alert_id:
-            lines.append(f"Alert ID: {alert_id}")
         timestamp = alert.get("timestamp")
         if timestamp:
-            lines.append(f"Timestamp: {format_local_timestamp(timestamp)}")
+            # Wrap in <code> tags so Telegram renders dashes/colons literally
+            # without MarkdownV2 escape artifacts.
+            lines.append(f"Timestamp: <code>{format_local_timestamp(timestamp)}</code>")
 
     # Curated attribute bullet list (flat, no nesting).
     attr_lines = _build_attribute_lines(mode, vm2_result)

@@ -298,14 +298,14 @@ def build_match_message(
             lines.append(f"  Runner-up: *{top_id}* ({_format_runner_score(top_score)})")
 
     # Alert metadata (mirrors TG#1 / TG#2 caption layout).
+    # Alert ID lines removed per US-073g — operator doesn't need these in TG captions.
     if alert:
         lines.append("Alert 3 of 3")
-        alert_id = alert.get("id")
-        if alert_id:
-            lines.append(f"Alert ID: {alert_id}")
         timestamp = alert.get("timestamp")
         if timestamp:
-            lines.append(f"Timestamp: {format_local_timestamp(timestamp)}")
+            # Wrap in <code> tags so Telegram renders dashes/colons literally
+            # without MarkdownV2 escape artifacts.
+            lines.append(f"Timestamp: <code>{format_local_timestamp(timestamp)}</code>")
 
     # TG marker (US-067c: consistent with 067a/067b).
     if position is not None:
