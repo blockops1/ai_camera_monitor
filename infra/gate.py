@@ -919,7 +919,7 @@ def _init_gate_drop_log() -> None:
         return
     from infra.paths import PROJECT_ROOT
 
-    _GATE_DROP_LOG_DIR = PROJECT_ROOT / "data"
+    _GATE_DROP_LOG_DIR = Path(PROJECT_ROOT) / "data"
     _GATE_DROP_LOG_DIR.mkdir(parents=True, exist_ok=True)
     assert _GATE_DROP_LOG_DIR is not None  # mypy guard — just set above
     _GATE_DROP_LOG_FILE = str(_GATE_DROP_LOG_DIR / "gate_drops.jsonl")
@@ -1124,7 +1124,10 @@ def run(
 
     # ---- unified cross-diff: compute both bboxes in one pass ----
     bbox_a, bbox_b = compute_cross_diff_bboxes(
-        frame_1_path, frame_2_path, frame_3_path, frame_4_path,
+        frame_1_path,
+        frame_2_path,
+        frame_3_path,
+        frame_4_path,
         threshold=diff_threshold,
         min_area_px=min_area_px,
         pad_pct=DEFAULT_BBOX_PAD_PCT,
@@ -1251,7 +1254,9 @@ def run(
     )
     # Pick the higher-confidence verdict's raw top_class/top_confidence
     # for the debug fields on GateVerdict.
-    top_verdict = verdict_a if verdict_a.top_confidence >= verdict_b.top_confidence else verdict_b
+    top_verdict = (
+        verdict_a if verdict_a.top_confidence >= verdict_b.top_confidence else verdict_b
+    )
     top_class = top_verdict.top_class
     top_confidence = top_verdict.top_confidence
 
