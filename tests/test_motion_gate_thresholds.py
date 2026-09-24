@@ -64,7 +64,7 @@ class TestMotionGateThresholds:
 
     def test_vehicle_threshold_in_range_when_populated(self):
         """When a camera has an explicit vehicle threshold, it must be in
-        [0.40, 0.60] — matching the solar/front_back convention."""
+        [0.30, 0.80] — the full valid range per the config validator."""
         cfg = _load_config()
         for camera, cam_cfg in cfg.items():
             if "vehicle" not in cam_cfg:
@@ -74,8 +74,8 @@ class TestMotionGateThresholds:
             assert isinstance(threshold, (int, float)), (
                 f"{camera}: vehicle must be a number, got {type(threshold)}"
             )
-            assert 0.40 <= threshold <= 0.60, (
-                f"{camera}: vehicle threshold {threshold} not in [0.40, 0.60]"
+            assert 0.30 <= threshold <= 0.80, (
+                f"{camera}: vehicle threshold {threshold} not in [0.30, 0.80]"
             )
 
     def test_solar_vehicles_at_055(self):

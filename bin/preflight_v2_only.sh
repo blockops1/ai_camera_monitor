@@ -24,4 +24,11 @@ if [ "$CWD" != "$V2_ROOT" ]; then
   exit 1
 fi
 
+# US-073c: validate motion gate config (subjects allowlist, thresholds).
+echo "Checking motion gate config..."
+if ! bash "${V2_ROOT}/bin/check_motion_gate_config.sh"; then
+  echo "ERROR: motion gate config validation failed" >&2
+  exit 1
+fi
+
 echo "OK: confirmed cwd=$CWD is the v2 project root."

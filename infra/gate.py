@@ -5,6 +5,7 @@ STATUS: provisional (Phase 6B.107 §11.37, 2026-08-23; Phase 6B.109 §11.39 v2 f
         Phase 6B.144 §11.66 YOLO-tighten revert + pairwise diff image 2026-08-27;
         Phase 6B.169 §11.93 crop source-frame fix 2026-08-31;
         Phase 6B.170 vision-confidence floor 2026-09-01;
+        US-073c gate-drop WARNING + JSONL logging + rate-limit 2026-09-23;
         Phase 6B.174 gatekeeper offset shift +4s 2026-09-01;
         Phase 6B.175 (reverted 2026-09-13): single-bbox invariant restored;
         Phase 6B.181 (2026-09-13): crop uses diff bbox — 10% per-side pad +
@@ -128,7 +129,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -889,6 +890,105 @@ def _route_decision(
 
 
 # ---------------------------------------------------------------------------
+# Gate-drop logging (US-073c)
+# ---------------------------------------------------------------------------
+#
+# When the gate suppresses a detection (top_class not in subjects allowlist),
+# emit a WARNING log + append a record to data/gate_drops.jsonl.
+# Rate-limit: if the same camera+class combo drops 50+ times in a 5-minute
+# window, suppress to a single INFO every 5 min with a count.
+#
+# Env var: GATE_DROP_LOG_ENABLED=0 disables (default 1 = enabled).
+# ---------------------------------------------------------------------------
+
+_GATE_DROP_LOG_DIR: Path | None = None
+_GATE_DROP_LOG_FILE: str | None = None
+_GATE_DROP_SUPPRESSION: dict[str, list[float]] = {}  # key -> [timestamps]
+
+
+def _gate_drop_log_enabled() -> bool:
+    """Return True if GATE_DROP_LOG_ENABLED is truthy (default True)."""
+    val = os.environ.get("GATE_DROP_LOG_ENABLED", "1").strip().lower()
+    return val not in ("0", "false", "no", "off")
+
+
+def _init_gate_drop_log() -> None:
+    """Lazily resolve the gate_drops.jsonl path and ensure the dir exists."""
+    global _GATE_DROP_LOG_DIR, _GATE_DROP_LOG_FILE
+    if _GATE_DROP_LOG_DIR is not None:
+        return
+    from infra.paths import PROJECT_ROOT
+
+    _GATE_DROP_LOG_DIR = PROJECT_ROOT / "data"
+    _GATE_DROP_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    assert _GATE_DROP_LOG_DIR is not None  # mypy guard — just set above
+    _GATE_DROP_LOG_FILE = str(_GATE_DROP_LOG_DIR / "gate_drops.jsonl")
+
+
+def _emit_gate_drop_log(
+    *,
+    alert_id: str,
+    camera: str,
+    top_class: str,
+    confidence: float,
+    reason: str,
+) -> None:
+    """Log a gate-drop event at WARNING level + append to gate_drops.jsonl.
+
+    Rate-limited: same camera+class combo drops 50+ times in a 5-min window
+    → suppress to a single INFO every 5 min with a count.
+    """
+    if not _gate_drop_log_enabled():
+        return
+
+    # Only log drops where the reason indicates a subjects allowlist match.
+    if not reason.startswith("top_class_") or not reason.endswith("_not_in_subjects"):
+        return
+
+    now_ts = datetime.now(UTC)
+
+    # Rate-limit check (sliding window).
+    dedup_key = f"{camera}/{top_class}"
+    window = _GATE_DROP_SUPPRESSION.get(dedup_key, [])
+    cutoff = now_ts.timestamp() - 300  # 5 minutes
+    window = [t for t in window if t > cutoff]
+    if len(window) >= 50:
+        # Suppressed — log a single INFO with count.
+        log.info(
+            f"[{alert_id}] gate_drop SUPPRESSED camera={camera} "
+            f"top_class={top_class} recent_drops={len(window)} "
+            f"reason={reason} (rate-limited: >50 in 5 min)"
+        )
+        _GATE_DROP_SUPPRESSION[dedup_key] = window
+        return
+
+    window.append(now_ts.timestamp())
+    _GATE_DROP_SUPPRESSION[dedup_key] = window
+
+    # WARNING-level log (first 50 drops per 5-min window).
+    log.warning(
+        f"gate_drop camera={camera} top_class={top_class} "
+        f"conf={confidence:.2f} reason={reason}"
+    )
+
+    # Append to JSONL.
+    try:
+        _init_gate_drop_log()
+        assert _GATE_DROP_LOG_FILE is not None  # just set above
+        record = {
+            "ts": now_ts.isoformat(),
+            "camera": camera,
+            "top_class": top_class,
+            "confidence": confidence,
+            "reason": reason,
+        }
+        with open(_GATE_DROP_LOG_FILE, "a") as f:
+            f.write(json.dumps(record) + "\n")
+    except OSError as e:
+        log.warning(f"gate_drop: failed to write JSONL: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Public entry point: run()
 # ---------------------------------------------------------------------------
 
@@ -1154,6 +1254,19 @@ def run(
     top_verdict = verdict_a if verdict_a.top_confidence >= verdict_b.top_confidence else verdict_b
     top_class = top_verdict.top_class
     top_confidence = top_verdict.top_confidence
+
+    # Gate-drop warning + JSONL logging (US-073c).
+    # When the gate suppresses a detection because top_class is not in the
+    # camera's subjects allowlist, emit a WARNING-level log and append a
+    # record to data/gate_drops.jsonl. This ensures operators can see every
+    # drop even when it's "by design" (per the allowlist).
+    _emit_gate_drop_log(
+        alert_id=alert_id,
+        camera=camera_name,
+        top_class=top_class,
+        confidence=top_confidence,
+        reason=reason,
+    )
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
     log.info(

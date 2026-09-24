@@ -132,12 +132,14 @@ def test_mcp_list_cameras_round_trip():
         )
 
         # 4. Call list_cameras via MCP
-        mcp_result = _mcp_post({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": "list_cameras", "arguments": {}},
-        })
+        mcp_result = _mcp_post(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "list_cameras", "arguments": {}},
+            }
+        )
 
         # Parse the MCP response: result.content[0].text is JSON-encoded payload
         mcp_payload = json.loads(mcp_result["result"]["content"][0]["text"])
