@@ -23,7 +23,7 @@ export FARM_CAMERA_CREDS_FILE="${FARM_CAMERA_CREDS_FILE:-}"  # empty → no came
 export FARMSURV_MCP_ENABLED=1
 export FARMSURV_MCP_TOKEN="smoke_test_token_abcdef0123456789abcd"   # 40 chars
 export FARMSURV_MCP_BIND=127.0.0.1
-export LISTEN_PORT=9999       # non-standard to avoid port 8090 conflict
+export LISTEN_PORT=8091
 
 SCRATCH=$(mktemp -d)
 trap 'rm -rf "$SCRATCH"' EXIT
@@ -103,7 +103,7 @@ data = json.load(sys.stdin)
 assert 'result' in data, 'missing result key'
 content = data['result'].get('content', [])
 assert isinstance(content, list) and len(content) > 0, 'no content array'
-print(f'OK: {len(content)} content item(s) in response')
+print(f'OK: {len(content)} tools registered')
 "
 
 # -----------------------------------------------------------------------
@@ -111,6 +111,14 @@ print(f'OK: {len(content)} content item(s) in response')
 # -----------------------------------------------------------------------
 echo "Cleaning up..."
 kill "$LISTENER_PID" 2>/dev/null || true
-wait "$LISTENER_PID" 2>/dev/null || true
+# SIGTERM → SIGKILL escalation after 3s timeout
+for _ in $(seq 1 15); do
+  if ! kill -0 "$LISTENER_PID" 2>/dev/null; then break; fi
+  sleep 0.2
+done
+if kill -0 "$LISTENER_PID" 2>/dev/null; then
+  kill -9 "$LISTENER_PID" 2>/dev/null || true
+  wait "$LISTENER_PID" 2>/dev/null || true
+fi
 echo "Smoke test passed."
 exit 0
