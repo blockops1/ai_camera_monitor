@@ -122,8 +122,14 @@ class _ToolRegistry:
         if isinstance(result, dict):
             result = dict(result)
             result["box_id"] = self._box_id
+        elif isinstance(result, list):
+            # List of dataclasses (e.g. list[CameraInfo]) — map asdict over items
+            try:
+                result = [{**asdict(item), "box_id": self._box_id} for item in result]
+            except TypeError:
+                result = [{"box_id": self._box_id}]
         else:
-            # Dataclass or other — convert via asdict or dict
+            # Single dataclass or other — convert via asdict or dict
             try:
                 result = {**asdict(result), "box_id": self._box_id}
             except TypeError:
