@@ -1,25 +1,33 @@
-"""test_daemon_mcp_spawn_disabled -- Verify MCP server does NOT spawn when disabled.
+"""test_daemon_api_spawn_disabled_e2e — E2E test for API server disabled.
 
-AC5: Same setup as test_daemon_mcp_spawn but FARMSURV_MCP_ENABLED=0.
-After 5s, :8091 is closed (connection refused). Listener logs include
-mcp_server_disabled.
+US-080c: replaces tests/test_daemon_api_spawn_disabled.py (deleted in US-080b).
+Spawns the listener with FARMSURV_API_ENABLED=0 and asserts the API port
+(8092) is closed and the daemon log includes the disabled message.
+
+Bug classes covered:
+    - API server starts despite FARMSURV_API_ENABLED=0.
+    - Disabled message not logged.
 """
 
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 
-_WORKSPACE = os.path.join(os.path.dirname(__file__), "..")
+import pytest
+
+_WORKSPACE = str(Path(__file__).resolve().parents[1])
 _LOG_FILE = os.path.join(_WORKSPACE, "logs", "daemon.log")
 
 
-def _build_disabled_env():
-    """Build an env dict with MCP disabled."""
+def _build_disabled_env() -> dict:
+    """Build an env dict with API disabled."""
     env = os.environ.copy()
-    env["FARMSURV_MCP_ENABLED"] = "0"
+    env["FARMSURV_API_ENABLED"] = "0"
     env["FARMSURV_BOX_ID"] = "test-box-disabled"
     env["LISTEN_HOST"] = "127.0.0.1"
     env["LISTEN_PORT"] = "0"
@@ -30,11 +38,12 @@ def _build_disabled_env():
     return env
 
 
-class TestDaemonMCPDisabled:
-    """AC5: MCP server not reachable when FARMSURV_MCP_ENABLED=0."""
+@pytest.mark.slow
+class TestDaemonAPIDisabledE2E:
+    """E2E: API server not reachable when FARMSURV_API_ENABLED=0."""
 
-    def test_mcp_disabled_no_listener(self):
-        """MCP server is not listening when FARMSURV_MCP_ENABLED=0."""
+    def test_api_disabled_no_listener(self):
+        """API server is not listening when FARMSURV_API_ENABLED=0."""
         proc = subprocess.Popen(
             [sys.executable, "-m", "listener.daemon"],
             cwd=_WORKSPACE,
@@ -46,31 +55,28 @@ class TestDaemonMCPDisabled:
             # Wait for the daemon to fully start (RTSP readers + cleanup)
             time.sleep(6)
 
-            # Port 8091 should NOT be listening
-            import socket
+            # Port 8092 should NOT be listening
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2)
-            result = sock.connect_ex(("127.0.0.1", 8091))
+            result = sock.connect_ex(("127.0.0.1", 8092))
             sock.close()
             assert result != 0, (
-                "Port 8091 is open but MCP should be disabled "
-                "(FARMSURV_MCP_ENABLED=0)"
+                "Port 8092 is open but API server should be disabled "
+                "(FARMSURV_API_ENABLED=0)"
             )
 
-            # Check logs include mcp_server_disabled
+            # Check logs include api_server_disabled
             proc.terminate()
             proc.wait(timeout=5)
 
-            # The daemon's logging goes to logs/daemon.log via RotatingFileHandler,
-            # not stdout. Read the log file for the disabled message.
             if os.path.exists(_LOG_FILE):
                 with open(_LOG_FILE, "r") as f:
                     log_output = f.read()
             else:
                 log_output = ""
 
-            assert "mcp_server_disabled" in log_output, (
-                f"Expected 'mcp_server_disabled' in daemon log. "
+            assert "api_server_disabled" in log_output, (
+                f"Expected 'api_server_disabled' in daemon log. "
                 f"Log contents:\n{log_output[:1000]}"
             )
         finally:
