@@ -28,6 +28,21 @@ logger = logging.getLogger(__name__)
 # Each must be prefixed with a single backslash to be sent literally.
 _MARKDOWNV2_RESERVED = r"_*[]()~`>#+-=|{}.!"
 
+# HTML <code> tags are special-cased: Telegram MarkdownV2 does not require
+# escaping of reserved characters inside <code> blocks (only backtick and
+# backslash are reserved inside code spans).  This lets us wrap dynamic
+# timestamps in <code> so dashes/colons render cleanly on the operator's
+# phone without the MarkdownV2 escape pass mangling them.
+
+
+def _escape_chunk(text: str) -> str:
+    """Escape every MarkdownV2 reserved character in *text*."""
+    result = list(text)
+    for i, ch in enumerate(result):
+        if ch in _MARKDOWNV2_RESERVED:
+            result[i] = "\\" + ch
+    return "".join(result)
+
 
 def escape_markdown_v2(text: str) -> str:
     """Escape all reserved MarkdownV2 characters in *text*.
@@ -38,11 +53,44 @@ def escape_markdown_v2(text: str) -> str:
     Static formatting (emoji, *bold*, etc.) is NOT escaped — the caller
     builds those strings and only passes the *dynamic* user-data portion
     through this helper.
+
+    **<code>…</code> tags are respected:** reserved characters inside
+    <code> tags are NOT escaped (per Telegram's MarkdownV2 spec for code
+    blocks), matching the native code-block behaviour.  This prevents
+    <code> tags from being double-escaped by the dispatcher.
     """
-    result = list(text)
-    for i, ch in enumerate(result):
-        if ch in _MARKDOWNV2_RESERVED:
-            result[i] = "\\" + ch
+    result: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        # Check for <code> tag opening.
+        if text[i:i + 6] == "<code>":
+            result.append("<code>")
+            i += 6
+            # Now consume until </code>.
+            close_tag = "</code>"
+            close_idx = text.find(close_tag, i)
+            if close_idx >= 0:
+                # Everything between <code> and </code> — only escape
+                # backtick and backslash (Telegram MarkdownV2 code-block rules).
+                code_content = text[i:close_idx]
+                code_content = code_content.replace("\\", "\\\\").replace("`", "\\`")
+                result.append(code_content)
+                result.append(close_tag)
+                i = close_idx + len(close_tag)
+            else:
+                # Malformed: unclosed <code> — escape the rest normally.
+                result.append(_escape_chunk(text[i:]))
+                i = n
+        else:
+            # Outside a <code> tag — full MarkdownV2 escape.
+            end = n
+            # Find the next <code> tag or end of string.
+            tag_idx = text.find("<code>", i)
+            if tag_idx >= 0:
+                end = tag_idx
+            result.append(_escape_chunk(text[i:end]))
+            i = end
     return "".join(result)
 
 
