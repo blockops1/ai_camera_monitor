@@ -889,20 +889,83 @@ def _is_night_at_edt(ts: datetime) -> bool:
         return False
 
 
+# Reverse map: class_name → bucket name. Used to expand bucket names in
+# FARMSURV_NIGHT_SUPPRESS_CLASSES so the operator can write "vehicle" and
+# have it match any COCO class that belongs to the vehicle bucket.
+_CLASS_TO_BUCKET: frozenset[str] = frozenset(
+    list(PERSON_CLASSES)
+    + list(VEHICLE_CLASSES)
+    + list(ANIMAL_CLASSES)
+)
+
+# Bucket-name → set of COCO class names. If the operator writes "vehicle"
+# in FARMSURV_NIGHT_SUPPRESS_CLASSES this map expands it to the concrete
+# COCO names so the literal comparison works.
+_BUCKET_EXPANSION: dict[str, frozenset[str]] = {
+    "vehicle": VEHICLE_CLASSES,
+    "person": PERSON_CLASSES,
+    "animal": ANIMAL_CLASSES,
+}
+
+
+def _expand_suppress_classes(raw: list[str]) -> frozenset[str]:
+    """Expand bucket names in *raw* to concrete COCO class names.
+
+    If *raw* contains a bucket name (e.g. ``"vehicle"``), it is replaced by
+    the set of COCO class names that belong to that bucket.  Literal class
+    names that are already in a bucket are kept as-is.  Unknown tokens are
+    preserved literally (they simply won't match any detection).
+
+    Returns a frozenset of concrete class names ready for ``in`` checks.
+    """
+    expanded: set[str] = set()
+    for token in raw:
+        if token in _BUCKET_EXPANSION:
+            expanded.update(_BUCKET_EXPANSION[token])
+        else:
+            expanded.add(token)
+    return frozenset(expanded)
+
+
+# Cached effective suppress classes; rebuild on env reload.
+_EFFECTIVE_SUPPRESS_CLASSES: frozenset[str] | None = None
+
+
+def _get_effective_classes() -> frozenset[str] | None:
+    """Return the cached expanded class set, rebuilding from env if stale."""
+    global _EFFECTIVE_SUPPRESS_CLASSES
+    if _EFFECTIVE_SUPPRESS_CLASSES is None:
+        raw = list(_NIGHT_SUPPRESS_CLASSES)
+        _EFFECTIVE_SUPPRESS_CLASSES = _expand_suppress_classes(raw)
+    return _EFFECTIVE_SUPPRESS_CLASSES
+
+
 def night_suppress_match(camera_id: str, class_name: str) -> bool:
     """Return True if this camera+class pair is suppressed at night.
 
     Returns True when BOTH conditions hold:
       1. *camera_id* is in FARMSURV_NIGHT_SUPPRESS_CAMERAS
       2. FARMSURV_NIGHT_SUPPRESS_CLASSES is empty (match all) OR
-         *class_name* is in FARMSURV_NIGHT_SUPPRESS_CLASSES
+         *class_name* matches an entry in FARMSURV_NIGHT_SUPPRESS_CLASSES
+
+    Bucket-name expansion: if an entry in
+    FARMSURV_NIGHT_SUPPRESS_CLASSES is a bucket name (``"vehicle"``,
+    ``"person"``, ``"animal"``), it matches any concrete COCO class in
+    that bucket.  For example ``"vehicle"`` matches ``"car"``, ``"truck"``,
+    ``"bicycle"``, etc.
+
+    Literal class names also work (``"car"`` matches only ``"car"``).
 
     This is a pure function -- no side effects, testable without a classifier.
     The caller (classify_frame or gate layer) checks is_night_at_edt separately.
 
     Args:
-        camera_id: camera slug (e.g. "OUTSIDE_BACK_SOLAR").
-        class_name: detection class name (e.g. "vehicle", "car", "person").
+        camera_id: camera slug (e.g. ``"OUTSIDE_BACK_SOLAR"``).
+        class_name: concrete COCO detection name (e.g. ``"car"``,
+            ``"person"``).  Bucket names like ``"vehicle"`` are valid
+            inputs for the env var, but the *class_name* arg is always a
+            concrete COCO name — the expansion happens on the env var
+            value, not on this argument.
 
     Returns:
         True if this camera+class should be suppressed at night.
@@ -913,4 +976,7 @@ def night_suppress_match(camera_id: str, class_name: str) -> bool:
         return False
     if not _NIGHT_SUPPRESS_CLASSES:
         return True
-    return class_name in _NIGHT_SUPPRESS_CLASSES
+    effective = _get_effective_classes()
+    if effective is None:
+        return False
+    return class_name in effective
