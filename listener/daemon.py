@@ -317,7 +317,7 @@ def _run_pipeline(alert: dict) -> dict:
     gate_result = _stage_gate(frames, camera_id, alert_id)
     if gate_result["status"] == "dropped":
         _write_event(
-            alert_id, camera_id, frames, gate_result,
+            alert_id, camera_id, frames, gate_result, None,
             started_at, dropped="gate_dropped",
         )
         return {
@@ -332,7 +332,7 @@ def _run_pipeline(alert: dict) -> dict:
     cooldown_result = stage_cooldown_check(camera_id, classification)
     if cooldown_result["status"] == "dropped":
         _write_event(
-            alert_id, camera_id, frames, gate_result,
+            alert_id, camera_id, frames, gate_result, None,
             started_at, dropped="cooldown_dropped",
         )
         return {
