@@ -323,7 +323,8 @@ class TestBuildMatchMessageIntegration:
         assert "Gap: 5.5" in caption  # gap = 8.5 - 3.0
         assert "TG 3 of 3" in caption
         assert "Alert 3 of 3" in caption
-        assert "Alert ID: evt-001" in caption
+        # Alert ID removed per US-073g
+        assert "Alert ID:" not in caption
 
         # Verify debug lines are gone
         assert "Confidence:" not in caption

@@ -141,7 +141,7 @@ class TestMarkdownFormat:
         assert "08" in lines[0] and "21" in lines[0]  # time portion (EDT = UTC-4)
 
     def test_class_line_with_emoji_and_confidence(self):
-        """Class line: emoji + bold class name + confidence percentage."""
+        """Class line: emoji + bold class name + confidence value."""
         result = build_alert_message(
             verdict=_make_verdict(),
             vm1_result=_make_vm1_result(cls="person", confidence="92"),
@@ -152,7 +152,7 @@ class TestMarkdownFormat:
         # Second line has person emoji and class name
         assert "\U0001f464" in lines[1]  # person emoji
         assert "person" in lines[1]
-        assert "92%" in lines[1]
+        assert "92" in lines[1]
 
     def test_tg_position_marker(self):
         """TG marker line: 'TG X of 3'."""
@@ -165,16 +165,15 @@ class TestMarkdownFormat:
             )
             assert f"TG {pos} of 3" in result["caption"]
 
-    def test_short_alert_id(self):
-        """Short ID: first 8 chars of alert_id."""
+    def test_no_short_alert_id(self):
+        """Short ID removed per US-073g — alert IDs don't belong in TG captions."""
         result = build_alert_message(
             verdict=_make_verdict(),
             vm1_result=_make_vm1_result(),
             artifacts=_make_artifacts(),
             alert=_make_alert(alert_id="72c70d5f-xxxx-xxxx-xxxx-xxxxxxxxxxxx"),
         )
-        # One line should be just the 8-char short ID
-        assert "72c70d5f" in result["caption"]
+        assert "72c70d5f" not in result["caption"]
         # Full UUID should NOT be in the caption
         assert "xxxx-xxxx-xxxx-xxxxxxxxxxxx" not in result["caption"]
 

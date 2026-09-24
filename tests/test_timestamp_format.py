@@ -122,7 +122,8 @@ def test_build_match_message_caption_has_local_timestamp():
     )
     caption = result["caption"]
     assert "Alert 3 of 3" in caption
-    assert "Alert ID: evt-001" in caption
-    assert "Timestamp: 2026-09-14 06:00:00 EDT" in caption
+    # Alert ID removed per US-073g
+    assert "Alert ID:" not in caption
+    assert "Timestamp: <code>2026-09-14 06:00:00 EDT</code>" in caption
     # Verify the raw UTC string is NOT present
     assert "2026-09-14T10:00:00Z" not in caption
