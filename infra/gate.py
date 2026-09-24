@@ -652,9 +652,17 @@ def _classify_crop(
     Phase 6B.116 (timestamp-fix): `timestamp` is forwarded to classify_frame()
     so the night-suppression heuristic can check `is_night_at_edt(timestamp)`.
     Previously the heuristic was dormant because crop=PIL.Image meant no file
-    mtime fallback, and the timestamp was never threaded through. Now the
-    webhook's ISO timestamp flows listener -> dispatch -> run_gate ->
-    _classify_crop -> classify_frame.
+    mtime fallback, and the timestamp was never threaded through.
+
+    US-073f (listener-side, 2026-09-24): `_run_pipeline` now parses the
+    webhook's ISO 8601 timestamp from `alert["timestamp"]` and passes it
+    to `_stage_gate`, which forwards it to `run_gate(timestamp=ts)`. Before
+    this fix the listener never threaded timestamp — `classify_frame` always
+    saw `timestamp=None` on real alerts, so the `if timestamp is not None`
+    guard short-circuited the entire night-suppress branch. The operator's
+    `.env` knob for `FARMSURV_NIGHT_SUPPRESS_CAMERAS` was functional from
+    the start; the guard clause was the sole reason real alerts at night
+    bypassed suppression.
 
     V2-069 (camera_id-fix): `camera_id` is forwarded to classify_frame() so the
     per-camera + per-class night suppress heuristic can gate on the camera slug.
