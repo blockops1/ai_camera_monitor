@@ -4,8 +4,10 @@ Covers US-067a acceptance criteria for the new Markdown format:
   (a) header line with camera + time
   (b) class line with emoji + class + confidence
   (c) TG position marker
-  (d) short alert ID (first 8 chars)
+  (d) timestamp wrapped in <code> tags (no MarkdownV2 escape artifacts)
   (e) MarkdownV2-escaped caption, truncated to 1024 chars
+
+US-073g: alert-ID lines removed from all TG captions.
 """
 
 from __future__ import annotations
@@ -135,8 +137,8 @@ class TestCaptionWithBbox:
         assert "Classification:" not in caption
         assert "Camera:" not in caption
 
-    def test_caption_includes_short_alert_id(self):
-        """Caption includes first 8 chars of alert_id."""
+    def test_caption_no_short_alert_id(self):
+        """Caption does NOT include alert ID fragment (US-073g)."""
         result = build_alert_message(
             verdict=_make_verdict_with_bbox(),
             vm1_result=_make_vm1_result(),
@@ -145,10 +147,10 @@ class TestCaptionWithBbox:
             position=1,
             alert=_make_alert(alert_id="evt-abc-123-xxxx"),
         )
-        assert "evt-abc-" in result["caption"]
+        assert "evt-abc-" not in result["caption"]
 
     def test_caption_includes_timestamp(self):
-        """Caption includes timestamp when provided in alert dict."""
+        """Caption includes timestamp wrapped in <code> tags (US-073g)."""
         result = build_alert_message(
             verdict=_make_verdict_with_bbox(),
             vm1_result=_make_vm1_result(),
@@ -157,7 +159,8 @@ class TestCaptionWithBbox:
             position=1,
             alert=_make_alert(timestamp="2026-09-07T12:30:00Z"),
         )
-        # Timestamp is escaped; check for hour portion.
+        # Timestamp is wrapped in <code> tags so Telegram renders dashes/colons literally.
+        assert "<code>" in result["caption"] and "</code>" in result["caption"]
         assert "08" in result["caption"] and "30" in result["caption"]
 
     def test_caption_no_alert_dict_still_works(self):
@@ -172,12 +175,14 @@ class TestCaptionWithBbox:
         )
         caption = result["caption"]
         lines = [l for l in caption.split("\n") if l]
-        # 3 lines: header, class, TG marker (no short ID, no timestamp)
+        # 3 lines: header, class, TG marker (no alert ID, no timestamp)
         assert len(lines) == 3
         # No old labels
         assert "YOLO:" not in caption
         assert "Vision:" not in caption
         assert "frames[t" not in caption
+        # No alert ID fragment
+        assert "evt-" not in caption
 
 
 class TestCaptionNoBbox:
@@ -195,9 +200,9 @@ class TestCaptionNoBbox:
             alert=_make_alert(),
         )
         assert "frames[t-3]: " not in result["caption"]
-        # Still has header, class, TG marker, short ID
+        # Still has header, class, TG marker (no short ID after US-073g)
         lines = [l for l in result["caption"].split("\n") if l]
-        assert len(lines) >= 4
+        assert len(lines) >= 3
 
 
 class TestCaptionTruncation:
@@ -259,7 +264,7 @@ class TestTg2CaptionAlertMetadata:
     """US-033a: TG#2 caption includes/excludes alert metadata."""
 
     def test_tg2_caption_includes_alert_metadata_when_alert_provided(self):
-        """TG#2 caption includes Alert 2 of 3 / Alert ID / Timestamp."""
+        """TG#2 caption includes TG marker + Timestamp (Alert ID removed per US-073g)."""
         from telegram_formatter.detail import build_detail_message
 
         alert = _make_alert(alert_id="evt-xyz-789", timestamp="2026-09-12T08:00:00Z")
@@ -285,16 +290,13 @@ class TestTg2CaptionAlertMetadata:
         )
         caption = result["caption"]
         assert "TG 2 of 3" in caption
-        assert "Alert ID: evt-xyz-789" in caption
-        assert "Timestamp: 2026-09-12 04:00:00 EDT" in caption
-        # Verify order: Camera -> Mode -> Class -> TG marker lines
-        parts = caption.split("\n")
-        idx_tg2 = parts.index("TG 2 of 3")
-        idx_alert_id = parts.index("Alert ID: evt-xyz-789")
-        idx_ts = parts.index("Timestamp: 2026-09-12 04:00:00 EDT")
-        assert idx_tg2 < idx_alert_id < idx_ts
+        # Alert ID removed per US-073g
+        assert "Alert ID: evt-xyz-789" not in caption
+        # Timestamp wrapped in <code> tags (US-073g)
+        assert "<code>" in caption and "</code>" in caption
+        assert "2026-09-12 04:00:00 EDT" in caption
         # Camera line comes first
-        assert parts[0] == "Camera: Front Gate"
+        assert caption.split("\n")[0] == "Camera: Front Gate"
         # Curated vehicle fields rendered as bullet list (US-067b)
         assert "\u2022 Make: Ford" in caption
         assert "\u2022 Wheel style: alloy" in caption
@@ -345,7 +347,7 @@ class TestTg3CaptionAlertMetadata:
     """US-033b: TG#3 caption includes/excludes alert metadata."""
 
     def test_tg3_caption_includes_alert_metadata_when_alert_provided(self):
-        """TG#3 caption includes Alert 3 of 3 / Alert ID / Timestamp."""
+        """TG#3 caption includes Alert 3 of 3 + Timestamp (Alert ID removed per US-073g)."""
         from telegram_formatter.match_alert import build_match_message
 
         alert = _make_alert(alert_id="evt-ghi-456", timestamp="2026-09-12T09:00:00Z")
@@ -370,16 +372,17 @@ class TestTg3CaptionAlertMetadata:
         )
         caption = result["caption"]
         assert "Alert 3 of 3" in caption
-        assert "Alert ID: evt-ghi-456" in caption
-        assert "Timestamp: 2026-09-12 05:00:00 EDT" in caption
+        # Alert ID removed per US-073g
+        assert "Alert ID: evt-ghi-456" not in caption
+        # Timestamp wrapped in <code> tags (US-073g)
+        assert "<code>" in caption and "</code>" in caption
+        assert "2026-09-12 05:00:00 EDT" in caption
         # Verify order: Camera -> Match block -> Alert lines
         parts = caption.split("\n")
         idx_camera = parts.index("Camera: Front Gate")
         idx_match = next(i for i, p in enumerate(parts) if "Match" in p and "✅" in p)
         idx_alert3 = parts.index("Alert 3 of 3")
-        idx_alert_id = parts.index("Alert ID: evt-ghi-456")
-        idx_ts = parts.index("Timestamp: 2026-09-12 05:00:00 EDT")
-        assert idx_camera < idx_match < idx_alert3 < idx_alert_id < idx_ts
+        assert idx_camera < idx_match < idx_alert3
 
     def test_tg3_caption_camera_line_is_first(self):
         """Camera: is the FIRST line of the caption (before Status)."""
