@@ -194,7 +194,8 @@ class TestMatchMessageAnimalMatched:
         )
         caption = result["caption"]
         assert "Alert 3 of 3" in caption
-        assert "Alert ID: evt-animal-001" in caption
+        # Alert ID removed per US-073g
+        assert "Alert ID:" not in caption
         assert "Recognized: Clover" in caption
 
 
