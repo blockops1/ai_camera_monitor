@@ -68,6 +68,7 @@ from infra import (
 )
 from infra.event_record import write_event_record
 from infra.quiet_hours import in_quiet_hours
+from listener.health import _record_alert_run  # type: ignore[attr-defined]
 from listener.pipeline import (
     stage_apply_baseline_override,
     stage_build_tg1,
@@ -332,6 +333,7 @@ def _run_pipeline(alert: dict) -> dict:
             alert_id, camera_id, frames, gate_result, None,
             started_at, dropped="gate_dropped",
         )
+        _record_alert_run()
         return {
             "id": alert_id,
             "status": "dropped",
@@ -347,6 +349,7 @@ def _run_pipeline(alert: dict) -> dict:
             alert_id, camera_id, frames, gate_result, None,
             started_at, dropped="cooldown_dropped",
         )
+        _record_alert_run()
         return {
             "id": alert_id,
             "status": "dropped",
@@ -397,6 +400,7 @@ def _run_pipeline(alert: dict) -> dict:
             alert_id, camera_id, frames, gate_result, vm1_result,
             started_at, dropped="vm1_unsure",
         )
+        _record_alert_run()
         return {
             "id": alert_id,
             "status": "dropped",
@@ -441,6 +445,9 @@ def _run_pipeline(alert: dict) -> dict:
         vm2_result=vm2_result, match_result=match_result,
         artifact_dir=art["composite_path"],
     )
+
+    # Record pipeline run timestamp for health heartbeat alerts_last_10m.
+    _record_alert_run()
 
     return {
         "id": alert_id,
@@ -1060,7 +1067,7 @@ def main():
     """
     # US-017b: load ~/.env so TELEGRAM_BOT_TOKEN + TELEGRAM_HOME_CHAT_ID
     # come from the operator's home directory rather than the launchd plist.
-    _load_home_env()
+    _env_total_loaded = _load_home_env()
 
     host = os.environ.get("LISTEN_HOST", "0.0.0.0")
     port = int(os.environ.get("LISTEN_PORT", "8090"))
@@ -1109,10 +1116,18 @@ def main():
     # US-072c: spawn the API server on a daemon thread when enabled.
     _start_api_server()
 
+    # US-073h: start the periodic health heartbeat thread.
+    # Read env_total from _load_home_env() which already ran at top of main().
+    from listener.health import HealthReporter
+
+    mcp_enabled = os.environ.get("FARMSURV_MCP_ENABLED", "0") == "1"
+    hr = HealthReporter(port=port, env_total=_env_total_loaded, plist_keepalive=True)
+    hr.start(mcp_enabled=mcp_enabled)
+
     app.run(host=host, port=port)
 
 
-def _load_home_env() -> None:
+def _load_home_env() -> int:
     """Load .env files into os.environ. Existing keys win over file values.
 
     Resolution order (first file found wins for any given key, but already-set
@@ -1168,6 +1183,7 @@ def _load_home_env() -> None:
         total_loaded,
         len(os.environ.get("TELEGRAM_BOT_TOKEN", "")),
     )
+    return total_loaded
 
 
 # ---------------------------------------------------------------------------
