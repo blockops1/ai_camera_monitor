@@ -2,8 +2,8 @@
 
 E2E strategy:
     - Create a real data/events/ tree with event.json files in a temp directory.
-    - Set FARMSURV_DATA_DIR so infra.paths and infra.event_record read from the temp
-      tree. Import the API module after env is set so EVENTS_DIR resolves correctly.
+    - Set FARMSURV_DATA_DIR via os.environ so infra.paths and infra.event_record
+      read from the temp tree. Clear cached modules so DATA_DIR is re-read.
     - Exercise list_events() and get_event() against real file I/O.
     - Verify newest-first sort order, camera filtering, and missing alert handling.
 
@@ -17,6 +17,7 @@ Bug classes covered:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -77,7 +78,7 @@ _EVENT_C = {
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
-def _events_e2e_env(tmp_path: Path, monkeypatch):
+def _events_e2e_env(tmp_path: Path):
     """Create real event.json files and set FARMSURV_DATA_DIR.
 
     Uses an out-of-tree temp dir so the real data/events/ is never touched.
@@ -92,8 +93,9 @@ def _events_e2e_env(tmp_path: Path, monkeypatch):
         evt_dir.mkdir(parents=True, exist_ok=True)
         (evt_dir / "event.json").write_text(json.dumps(evt, indent=2))
 
-    # Monkeypatch ENV vars at os.environ level (paths.py reads these at import)
-    monkeypatch.setenv("FARMSURV_DATA_DIR", str(data_dir))
+    # Set env var at os.environ level (paths.py reads this at import)
+    old_data_dir = os.environ.get("FARMSURV_DATA_DIR")
+    os.environ["FARMSURV_DATA_DIR"] = str(data_dir)
 
     # Clear cached modules so they re-read DATA_DIR
     for mod_name in list(sys.modules.keys()):
@@ -103,6 +105,10 @@ def _events_e2e_env(tmp_path: Path, monkeypatch):
     yield tmp_path
 
     # Restore
+    if old_data_dir is not None:
+        os.environ["FARMSURV_DATA_DIR"] = old_data_dir
+    else:
+        os.environ.pop("FARMSURV_DATA_DIR", None)
     for mod_name in list(sys.modules.keys()):
         if mod_name in ("infra.event_record", "infra.farm_api.events", "infra.paths"):
             del sys.modules[mod_name]
