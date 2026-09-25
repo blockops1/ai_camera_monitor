@@ -53,7 +53,7 @@ from PIL import Image
 # ---------------------------------------------------------------------------
 # Constants — paths under project data/known/animals/
 # ---------------------------------------------------------------------------
-ANIMALS_DIR: Path = Path(__file__).resolve().parents[2] / "data" / "known" / "animals"
+ANIMALS_DIR: Path = Path(__file__).resolve().parents[1] / "data" / "known" / "animals"
 KNOWN_ANIMALS_JSON: Path = ANIMALS_DIR / "known_animals.json"
 EMBEDDINGS_NPZ: Path = ANIMALS_DIR / "embeddings.npz"
 

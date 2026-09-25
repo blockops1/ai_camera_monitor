@@ -1,5 +1,5 @@
 """
-animal_embedder.py — MegaDescriptor-L-384 wrapper for animal individual
+animal_embedder.py — MegaDescriptor-S-224 wrapper for animal individual
 re-identification.
 
 STATUS: stable
@@ -14,10 +14,9 @@ INPUTS:
       where MODELS_DIR lives; model cache target.
 
 OUTPUTS:
-    - load_megadescriptor() -> TimmModel — lazy-loads the MegaDescriptor-L-384
-      model (hf-hub:BVRA/MegaDescriptor-L-384, num_classes=0) and caches it
-      under MODELS_DIR/megadescriptor-l-384. Returns the singleton on
-      subsequent calls.
+    - load_megadescriptor() -> TimmModel — lazy-loads the MegaDescriptor-S-224
+      model (hf-hub:BVRA/MegaDescriptor-S-224, num_classes=0, outputs 768-dim)
+      and caches it. Returns the singleton on subsequent calls.
     - embed_image(pil_or_ndarray) -> np.ndarray shape (768,) float32 — runs
       one image through the model, returns the 768-dim embedding vector.
     - embed_batch(images) -> np.ndarray shape (N, 768) — runs a batch of
@@ -52,7 +51,7 @@ CALLS INTO:
     - infra.paths: MODELS_DIR (via env var FARMSURV_DATA_DIR)
 
 RELATED:
-    - https://huggingface.co/BVRA/MegaDescriptor-L-384
+    - https://huggingface.co/BVRA/MegaDescriptor-S-224
     - infra.animal_prompt.py: VM2 structured output (Tier-1 advisory).
     - scripts/release/config.yaml: strip_paths already exclude *.pt.
 """
@@ -75,7 +74,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _model: nn.Module | None = None
 _transform = None
-_live_mode = False  # True only when ANIMAL_EMBEDDER_LIVE=1
+_live_mode = os.environ.get("ANIMAL_EMBEDDER_LIVE", "0") == "1"
 
 
 def _get_data_dir() -> str:
@@ -93,10 +92,11 @@ def _model_dir() -> str:
 
 
 def load_megadescriptor() -> nn.Module:
-    """Lazy-load the MegaDescriptor-L-384 model and cache it.
+    """Lazy-load the MegaDescriptor-S-224 model and cache it.
 
     Uses timm to create the model from HuggingFace hub. The model is
     cached at module level so subsequent calls return the same instance.
+    S-224 outputs 768-dim vectors (matches the synthetic embedding shape).
 
     Returns:
         The loaded PyTorch model (num_classes=0, no classifier head).
@@ -121,11 +121,11 @@ def load_megadescriptor() -> nn.Module:
     import timm
     from timm.data import create_transform, resolve_model_data_config
 
-    logger.info("Loading MegaDescriptor-L-384 from hf-hub:BVRA/MegaDescriptor-L-384 ...")
+    logger.info("Loading MegaDescriptor-S-224 from hf-hub:BVRA/MegaDescriptor-S-224 ...")
     t0 = time.time()
 
     loaded_model: nn.Module = timm.create_model(
-        "hf-hub:BVRA/MegaDescriptor-L-384",
+        "hf-hub:BVRA/MegaDescriptor-S-224",
         pretrained=True,
         num_classes=0,
     )
@@ -251,9 +251,11 @@ def _synthetic_embedding(pil_or_ndarray=None) -> np.ndarray:
 # Internal helpers.
 # ---------------------------------------------------------------------------
 def _to_pil(img) -> Image.Image:
-    """Convert PIL.Image or numpy (H,W,3) to RGB PIL.Image."""
+    """Convert PIL.Image, numpy array, or file path string to RGB PIL.Image."""
     if isinstance(img, Image.Image):
         return img.convert("RGB")
+    if isinstance(img, str):
+        return Image.open(img).convert("RGB")
     # numpy array — expect (H, W, 3) uint8.
     import numpy as np
     arr = np.asarray(img)
