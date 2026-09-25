@@ -1190,7 +1190,13 @@ def main():
     from listener.health import HealthReporter
 
     mcp_enabled = os.environ.get("FARMSURV_MCP_ENABLED", "0") == "1"
-    hr = HealthReporter(port=port, env_total=_ENV_TOTAL_LOADED, plist_keepalive=True)
+    api_enabled = os.environ.get("FARMSURV_API_ENABLED", "0") == "1"
+    hr = HealthReporter(
+        port=port,
+        env_total=_ENV_TOTAL_LOADED,
+        plist_keepalive=True,
+        api_enabled=api_enabled,
+    )
     hr.start(mcp_enabled=mcp_enabled)
 
     app.run(host=host, port=port)

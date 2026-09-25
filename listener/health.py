@@ -15,14 +15,20 @@ OUTPUTS:
         camera_health: id=<camera_id> healthy=<bool> secs_since_last_frame=<float|None>
                        frames=<int> reconnects=<int> teardowns=<int>
                        last_teardown_age=<float|None>  (one per camera)
+        api_health: port=8092 bound=<bool> uptime_seconds=<n>
+                    token_len=<n> last_healthz=<ISO-timestamp>
+        mcp_health: port=8091 bound=<bool> uptime_seconds=<n>
+                    token_len=<n> tools_count=<n>
 
 PUBLIC API:
-    HealthReporter — context manager (start/stop) wrapping a daemon thread.
+    HealthReporter — start/stop wrapping a daemon thread.
     format_listener_health(uptime_s, port, env_total, mcp_enabled) -> str
     format_camera_health(camera_id, stats_dict) -> str
     format_vision_health(up, model, base_url, response_ms, last_call_age_s) -> str
     format_cleanup_health(alive, last_tick_age_s, free_gb, cap_gb, reclaimed) -> str
     format_telegram_health(configured, bot_username, last_send_age_s, errors_last_hour) -> str
+    format_api_health(bound, uptime_s, token_len, last_healthz) -> str
+    format_mcp_health(bound, uptime_s, token_len, tools_count) -> str
 
 DOES NOT DO:
     - Introduce new processes, endpoints, plists, or dependencies.
@@ -42,10 +48,12 @@ CALLER:
 
 from __future__ import annotations
 
+import datetime
 import logging
 import os
 import re
 import shutil
+import subprocess
 import threading
 import time
 from collections import deque
@@ -110,10 +118,13 @@ class HealthReporter:
         port: int = 8090,
         env_total: int = 0,
         plist_keepalive: bool = True,
+        api_enabled: bool = False,
     ) -> None:
         self._port = port
         self._env_total = env_total
         self._plist_keepalive = plist_keepalive
+        self._api_enabled = api_enabled
+        self._api_healthz_last: float | None = None
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -186,6 +197,16 @@ class HealthReporter:
 
         # Telegram-bot health line (US-073i).
         lines.append(self._telegram_health_line())
+
+        # API server health line (US-079).
+        api_line = self._api_health_line()
+        if api_line is not None:
+            lines.append(api_line)
+
+        # MCP server health line (US-079).
+        mcp_line = self._mcp_health_line()
+        if mcp_line is not None:
+            lines.append(mcp_line)
 
         # Join and emit as one block so the log file doesn't interleave.
         block = "\n".join(lines)
@@ -292,8 +313,151 @@ class HealthReporter:
         )
 
     # ------------------------------------------------------------------
+    # API health formatting (US-079)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def format_api_health(
+        bound: bool,
+        uptime_s: float,
+        token_len: int,
+        last_healthz: str,
+    ) -> str:
+        """Return the api_health line."""
+        return (
+            f"api_health: port=8092 bound={bound} "
+            f"uptime_seconds={round(uptime_s)} "
+            f"token_len={token_len} "
+            f"last_healthz={last_healthz}"
+        )
+
+    # ------------------------------------------------------------------
+    # MCP health formatting (US-079)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def format_mcp_health(
+        bound: bool,
+        uptime_s: float,
+        token_len: int,
+        tools_count: int,
+    ) -> str:
+        """Return the mcp_health line."""
+        return (
+            f"mcp_health: port=8091 bound={bound} "
+            f"uptime_seconds={round(uptime_s)} "
+            f"token_len={token_len} "
+            f"tools_count={tools_count}"
+        )
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_port_bound(port: int) -> bool:
+        """Check whether a TCP port is in LISTEN state via lsof."""
+        try:
+            result = subprocess.run(
+                ["lsof", "-i", f":{port}", "-sTCP:LISTEN", "-n", "-P"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            # lsof returns 1 line of header + N data lines; header alone = 1
+            lines = [l for l in result.stdout.strip().split("\n") if l.strip()]
+            return len(lines) > 1  # header + at least one data line
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+
+    def _api_health_line(self) -> str | None:
+        """Build and return the api-health line.
+
+        Returns None when the API server is disabled.
+        """
+        if not self._api_enabled:
+            return None
+
+        import httpx
+
+        token_len = len(os.environ.get("FARMSURV_API_TOKEN", ""))
+        bound = self._is_port_bound(8092)
+
+        # Uptime from infra.api_server._SERVER_START.
+        try:
+            from infra import api_server
+
+            start = api_server._SERVER_START
+            uptime_s = (
+                datetime.datetime.now(datetime.UTC) - start
+            ).total_seconds()
+        except (ImportError, AttributeError):
+            uptime_s = 0
+
+        # Probe /healthz and record last successful timestamp.
+        last_healthz_str: str = "never"
+        try:
+            with httpx.Client(timeout=3.0) as client:
+                resp = client.get("http://127.0.0.1:8092/healthz")
+            if resp.status_code == 200:
+                self._api_healthz_last = time.monotonic()
+                last_healthz_str = datetime.datetime.now(datetime.UTC).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
+        except httpx.HTTPError:
+            # If the server is disabled or crashed, record the last known time.
+            if self._api_healthz_last is not None:
+                last_healthz_str = datetime.datetime.fromtimestamp(
+                    self._api_healthz_last, tz=datetime.UTC
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            else:
+                last_healthz_str = "never"
+
+        return self.format_api_health(
+            bound=bound,
+            uptime_s=uptime_s,
+            token_len=token_len,
+            last_healthz=last_healthz_str,
+        )
+
+    def _mcp_health_line(self) -> str | None:
+        """Build and return the mcp-health line.
+
+        Returns None when the MCP server is disabled.
+        """
+        if not self._mcp_enabled:
+            return None
+
+        token_len = len(os.environ.get("FARMSURV_MCP_TOKEN", ""))
+        bound = self._is_port_bound(8091)
+
+        # Uptime from infra.mcp_server._SERVER_START.
+        try:
+            from infra import mcp_server
+
+            start = mcp_server._SERVER_START
+            uptime_s = (
+                datetime.datetime.now(datetime.UTC) - start
+            ).total_seconds()
+        except (ImportError, AttributeError):
+            uptime_s = 0
+
+        # tools_count from _GLOBAL_REGISTRY.
+        try:
+            from infra import mcp_server
+
+            registry = mcp_server._GLOBAL_REGISTRY[0]
+            tools_count = len(registry._tools) if registry is not None else 0
+        except (ImportError, AttributeError):
+            tools_count = 0
+
+        return self.format_mcp_health(
+            bound=bound,
+            uptime_s=uptime_s,
+            token_len=token_len,
+            tools_count=tools_count,
+        )
 
     def _camera_health_lines(self) -> list[str]:
         """Return one health line per registered camera."""
