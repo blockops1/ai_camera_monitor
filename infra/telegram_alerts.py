@@ -67,6 +67,8 @@ def send(message: str) -> bool:
         _send_errors.append(now)
         return False
 
+    # US-074: plain-text delivery — no HTML or MarkdownV2 parse_mode.
+    # (parse_mode=HTML is used in telegram_formatter/dispatcher.py.)
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     try:
         with httpx.Client(timeout=10.0) as client:

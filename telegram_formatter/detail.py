@@ -183,8 +183,8 @@ def build_detail_message(
         lines.append(f"TG {position} of 3")
         timestamp = alert.get("timestamp")
         if timestamp:
-            # Wrap in <code> tags so Telegram renders dashes/colons literally
-            # without MarkdownV2 escape artifacts.
+            # Wrap in <code> tags — rendered natively in HTML parse_mode
+            # (switched from MarkdownV2, US-074).
             lines.append(f"Timestamp: <code>{format_local_timestamp(timestamp)}</code>")
 
     # Curated attribute bullet list (flat, no nesting).

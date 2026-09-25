@@ -11,10 +11,14 @@ DeliveryError. No retries, no silent drops.
 Photo delivery uses sendMediaGroup with input_media_photo (pre-converted
 JPEGs, q=88, max-dim 1920px cached on disk). type=photo renders inline in
 the Telegram client (not as downloadable files).
+
+parse_mode: HTML (switched from MarkdownV2 on 2026-09-25, US-074).
+HTML has only 3 reserved characters: & < >.
 """
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 from pathlib import Path
@@ -24,73 +28,73 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# All reserved MarkdownV2 characters (Telegram Bot API docs).
-# Each must be prefixed with a single backslash to be sent literally.
-_MARKDOWNV2_RESERVED = r"_*[]()~`>#+-=|{}.!"
+# HTML entity set — only & < > need escaping in Telegram HTML parse_mode.
+_HTML_RESERVED = {"&", "<", ">"}
 
-# HTML <code> tags are special-cased: Telegram MarkdownV2 does not require
-# escaping of reserved characters inside <code> blocks (only backtick and
-# backslash are reserved inside code spans).  This lets us wrap dynamic
-# timestamps in <code> so dashes/colons render cleanly on the operator's
-# phone without the MarkdownV2 escape pass mangling them.
+# Allowed HTML tags that pass through unescaped (Telegram supports these).
+_ALLOWED_TAGS = {"code", "b", "strong", "em", "i", "u", "s", "strike", "ins", "del", "a"}
 
 
 def _escape_chunk(text: str) -> str:
-    """Escape every MarkdownV2 reserved character in *text*."""
-    result = list(text)
-    for i, ch in enumerate(result):
-        if ch in _MARKDOWNV2_RESERVED:
-            result[i] = "\\" + ch
-    return "".join(result)
+    """Escape & < > in *text* for use in Telegram HTML."""
+    return html.escape(text, quote=False)
 
 
-def escape_markdown_v2(text: str) -> str:
-    """Escape all reserved MarkdownV2 characters in *text*.
+def escape_html(text: str) -> str:
+    """Escape HTML entities in *text* for safe use in Telegram HTML parse_mode.
 
-    Every character in ``_MARKDOWNV2_RESERVED`` is prefixed with a single
-    backslash so Telegram renders it as literal text instead of Markdown.
+    Only & < > are reserved in HTML mode.  Static HTML formatting tags
+    (<code>, <b>, <strong>, etc.) are NOT escaped — Telegram renders them
+    natively.
 
-    Static formatting (emoji, *bold*, etc.) is NOT escaped — the caller
-    builds those strings and only passes the *dynamic* user-data portion
-    through this helper.
+    The caller builds static formatting (e.g. timestamps wrapped in <code>)
+    and only passes dynamic user-data through this helper.
 
-    **<code>…</code> tags are respected:** reserved characters inside
-    <code> tags are NOT escaped (per Telegram's MarkdownV2 spec for code
-    blocks), matching the native code-block behaviour.  This prevents
-    <code> tags from being double-escaped by the dispatcher.
+    Algorithm: walk the string, detect <tag...> / </tag> boundaries, and only
+    escape characters outside those regions.
     """
     result: list[str] = []
     i = 0
     n = len(text)
     while i < n:
-        # Check for <code> tag opening.
-        if text[i:i + 6] == "<code>":
-            result.append("<code>")
-            i += 6
-            # Now consume until </code>.
-            close_tag = "</code>"
-            close_idx = text.find(close_tag, i)
-            if close_idx >= 0:
-                # Everything between <code> and </code> — only escape
-                # backtick and backslash (Telegram MarkdownV2 code-block rules).
-                code_content = text[i:close_idx]
-                code_content = code_content.replace("\\", "\\\\").replace("`", "\\`")
-                result.append(code_content)
-                result.append(close_tag)
-                i = close_idx + len(close_tag)
-            else:
-                # Malformed: unclosed <code> — escape the rest normally.
-                result.append(_escape_chunk(text[i:]))
-                i = n
+        # Check for an opening < tag.
+        if text[i] == "<":
+            # Find the closing >.
+            end = text.find(">", i)
+            if end != -1:
+                tag_text = text[i:end + 1]  # e.g. "<code>" or "</code>"
+                # Extract tag name from inside the angle brackets.
+                inner_raw = tag_text[1:-1]  # strip '<' and '>'
+                # Skip comments/processing directives.
+                if not inner_raw.startswith("!") and not inner_raw.startswith("/"):
+                    tag_name = inner_raw.lower().split()[0]
+                    if tag_name in _ALLOWED_TAGS:
+                        # Allowed tag — pass through unescaped.
+                        result.append(tag_text)
+                        i = end + 1
+                        continue
+                elif inner_raw.startswith("/"):
+                    # Closing tag — check the name after '/'.
+                    tag_name = inner_raw[1:].lower().split()[0]
+                    if tag_name in _ALLOWED_TAGS:
+                        result.append(tag_text)
+                        i = end + 1
+                        continue
+            # Either not a valid tag or not allowed — escape this char.
+            result.append(html.escape(text[i], quote=False))
+            i += 1
+        elif text[i] == "&":
+            result.append("&amp;")
+            i += 1
+        elif text[i] == ">":
+            result.append("&gt;")
+            i += 1
+        elif text[i] == "<":
+            result.append("&lt;")
+            i += 1
         else:
-            # Outside a <code> tag — full MarkdownV2 escape.
-            end = n
-            # Find the next <code> tag or end of string.
-            tag_idx = text.find("<code>", i)
-            if tag_idx >= 0:
-                end = tag_idx
-            result.append(_escape_chunk(text[i:end]))
-            i = end
+            result.append(text[i])
+            i += 1
     return "".join(result)
 
 
@@ -148,8 +152,8 @@ def _send_message(
         url,
         json={
             "chat_id": chat_id,
-            "text": escape_markdown_v2(caption),
-            "parse_mode": "MarkdownV2",
+            "text": escape_html(caption),
+            "parse_mode": "HTML",
         },
     )
 
@@ -172,8 +176,8 @@ def _send_photo(
         url,
         data={
             "chat_id": chat_id,
-            "caption": escape_markdown_v2(caption),
-            "parse_mode": "MarkdownV2",
+            "caption": escape_html(caption),
+            "parse_mode": "HTML",
         },
         files=files,
     )
@@ -205,7 +209,7 @@ def _send_media_group(
         )
         if i == 0:
             # Telegram requires the first media entry to also carry caption.
-            media[-1]["caption"] = escape_markdown_v2(caption)
+            media[-1]["caption"] = escape_html(caption)
     files: list[tuple[str, tuple[str, bytes, str]]] = []
     for i, path in enumerate(photo_paths):
         with open(path, "rb") as f:
@@ -217,7 +221,7 @@ def _send_media_group(
         data={
             "chat_id": chat_id,
             "media": json.dumps(media),
-            "parse_mode": "MarkdownV2",
+            "parse_mode": "HTML",
         },
         files=files,
     )
