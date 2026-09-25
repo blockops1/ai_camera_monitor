@@ -90,20 +90,20 @@ def _build_attribute_lines(
         for label, key in _PERSON_CURATED:
             value = attrs.get(key)
             if value is not None and value != "" and str(value).strip().lower() != "null":
-                lines.append(f"\u2022 {label}: {value}")
+                lines.append(f"\u2022 <b>{label}</b>: {value}")
 
     elif mode == "vehicle":
         for label, key in _VEHICLE_CURATED:
             value = vm2_result.get(key)
             if value is not None and value != "" and str(value).strip().lower() != "null":
-                lines.append(f"\u2022 {label}: {value}")
+                lines.append(f"\u2022 <b>{label}</b>: {value}")
         # Distinguishing features from vehicle_features sub-dict
         vf = vm2_result.get("vehicle_features")
         if isinstance(vf, dict):
             for vm2_key, label in _DISTINGUISHING_KEYS:
                 value = vf.get(vm2_key)
                 if value is not None and value != "" and str(value).strip().lower() != "null":
-                    lines.append(f"\u2022 {label}: {value}")
+                    lines.append(f"\u2022 <b>{label}</b>: {value}")
 
     elif mode == "animal":
         # No curated list for animal -- emit all top-level scalars.
@@ -115,7 +115,7 @@ def _build_attribute_lines(
                 continue
             if value is not None and value != "" and str(value).strip().lower() != "null":
                 label = key.replace("_", " ").title()
-                _animal_lines.append(f"\u2022 {label}: {value}")
+                _animal_lines.append(f"\u2022 <b>{label}</b>: {value}")
         lines.extend(_animal_lines)
 
     elif mode == "unsure":
@@ -123,7 +123,7 @@ def _build_attribute_lines(
             if isinstance(value, (dict, list)):
                 continue
             if value is not None and value != "" and str(value).strip().lower() != "null":
-                lines.append(f"\u2022 {key}: {value}")
+                lines.append(f"\u2022 <b>{key}</b>: {value}")
 
     return lines
 
@@ -157,23 +157,23 @@ def build_detail_message(
     # Dispatch on mode for mode-specific VM2 outputs.
     if mode == "unsure":
         cls = "unsure"
-        cls_line = "Class: unsure"
+        cls_line = "Class: <b>unsure</b>"
     elif mode == "vehicle":
         cls = vm2_result.get("make") or vm2_result.get("color") or "vehicle"
-        cls_line = f"Class confirmed: {cls}"
+        cls_line = f"Class confirmed: <b>{cls}</b>"
     elif mode == "person":
         attrs = vm2_result.get("attributes") or {}
         cls = attrs.get("clothing_upper") or "person"
-        cls_line = f"Class confirmed: {cls}"
+        cls_line = f"Class confirmed: <b>{cls}</b>"
     elif mode == "animal":
         cls = vm2_result.get("species") or "animal"
-        cls_line = f"Class confirmed: {cls}"
+        cls_line = f"Class confirmed: <b>{cls}</b>"
     else:
         raise ValueError(f"mode must be one of {_MODES + ('unsure',)}, got {mode!r}")
 
     lines: list[str] = [
-        f"Camera: {camera_label}",
-        f"Mode: {mode}",
+        f"Camera: <b>{camera_label}</b>",
+        f"Mode: <b>{mode}</b>",
         cls_line,
     ]
 
@@ -185,13 +185,13 @@ def build_detail_message(
         if timestamp:
             # Wrap in <code> tags — rendered natively in HTML parse_mode
             # (switched from MarkdownV2, US-074).
-            lines.append(f"Timestamp: <code>{format_local_timestamp(timestamp)}</code>")
+            lines.append(f"<b>Timestamp</b>: <code>{format_local_timestamp(timestamp)}</code>")
 
     # Curated attribute bullet list (flat, no nesting).
     attr_lines = _build_attribute_lines(mode, vm2_result)
     if attr_lines:
         lines.append("")
-        lines.append("Attributes:")
+        lines.append("<b>Attributes:</b>")
         lines.extend(attr_lines)
 
     # TG position marker.

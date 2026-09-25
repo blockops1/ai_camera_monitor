@@ -156,23 +156,23 @@ def build_match_alert_body(
     lines: list[str] = [f"✅ Match — <b>{label}</b>"]
 
     parts: list[str] = [
-        f"  ID: {kv.get('id', '?')}",
-        f"  Label: {kv.get('label', '?')}",
+        f"  ID: <b>{kv.get('id', '?')}</b>",
+        f"  Label: <b>{kv.get('label', '?')}</b>",
     ]
     if kv.get("owner"):
-        parts.append(f"  Owner: {kv['owner']}")
+        parts.append(f"  Owner: <b>{kv['owner']}</b>")
     if kv.get("color"):
-        parts.append(f"  Color: {kv['color']}")
+        parts.append(f"  Color: <b>{kv['color']}</b>")
     if kv.get("make"):
-        parts.append(f"  Make: {kv['make']}")
+        parts.append(f"  Make: <b>{kv['make']}</b>")
     if kv.get("model"):
-        parts.append(f"  Model: {kv['model']}")
+        parts.append(f"  Model: <b>{kv['model']}</b>")
 
     lines.extend(parts)
 
     # Gap line (US-067c: keep gap if non-zero, drop Confidence line)
     if gap and gap > 0:
-        lines.append(f"  Gap: {_format_runner_score(gap)}")
+        lines.append(f"  Gap: <b>{_format_runner_score(gap)}</b>")
 
     return "\n".join(lines)
 
@@ -206,14 +206,14 @@ def build_animal_alert_body(
     breed = cand.get("breed", "unknown")
 
     lines: list[str] = [
-        f"Recognized: {label} (species: {species}, breed: {breed})",
+        f"Recognized: <b>{label}</b> (species: {species}, breed: {breed})",
     ]
     lines.append("")
-    lines.append(f"  Cosine: {cosine_score:.4f}   (tier1: {tier1_score:.4f})")
+    lines.append(f"  Cosine: <b>{cosine_score:.4f}</b>   (tier1: {tier1_score:.4f})")
 
     if runner_ups:
         lines.append("")
-        lines.append("  Runner-ups:")
+        lines.append("  <b>Runner-ups:</b>")
         for i, ru in enumerate(runner_ups[:2], 1):
             cs = ru.get("cosine_score", 0.0)
             t1 = ru.get("tier1_score", 0.0)
