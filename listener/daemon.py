@@ -61,11 +61,70 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request
 
+# ---------------------------------------------------------------------------
+# Env loading (must happen BEFORE any infra imports, because infra modules
+# capture env vars at import time.  US-069-regression root cause:
+# quick_classifier.py read os.environ before _load_home_env ran,
+# freezing values to [].  Solution: load .env FIRST, then infra imports.
+# ---------------------------------------------------------------------------
+_REPO_ENV_PATH: str = str(Path(__file__).resolve().parent.parent / ".env")
+
+
+def _load_home_env() -> int:
+    """Load .env files into os.environ. Existing keys win over file values.
+
+    Resolution order (first file found wins for any given key, but already-set
+    env vars always win over file values):
+
+      1. <repo>/.env          — operator-owned, in-repo, mode 600 (canonical)
+      2. ~/.env               — operator-global fallback (legacy)
+
+    US-017b: secrets (telegram token, etc.) live in a gitignored .env file
+    rather than the launchd plist so they can be rotated without plist edits
+    and so the plist does not contain plaintext credentials.
+
+    PRD-V2-022 (2026-09-09): operator directive — env file belongs INSIDE the
+    app directory so the app is self-contained. ~/.env is retained only as a
+    fallback for operators who keep their secrets at $HOME.
+
+    NOTE: This function is called at module-import time, BEFORE any
+    `from infra import ...` line below.  This ensures every infra module
+    sees the correct env values when it reads os.environ at import time.
+    """
+    from dotenv import dotenv_values  # python-dotenv
+
+    candidate_paths = [
+        _REPO_ENV_PATH,
+        os.path.expanduser("~/.env"),
+    ]
+
+    total_loaded = 0
+    for env_path in candidate_paths:
+        if not os.path.exists(env_path):
+            continue
+        values = dotenv_values(env_path) or {}
+        loaded_here = 0
+        for k, v in values.items():
+            if v is None:
+                continue
+            if k not in os.environ:
+                os.environ[k] = v
+                loaded_here += 1
+        total_loaded += loaded_here
+
+    return total_loaded
+
+
+# Load .env BEFORE any infra imports.  The return value is stored in
+# _ENV_TOTAL_LOADED for logging in main().
+_ENV_TOTAL_LOADED = _load_home_env()
+
 from infra import (
     paths as infra_paths,
     pipeline_cooldown as infra_pipeline_cooldown,
     tg_upload_cleanup,
 )
+from infra.env_required import _require_env
 from infra.event_record import write_event_record
 from infra.quiet_hours import in_quiet_hours
 from listener.health import _record_alert_run  # type: ignore[attr-defined]
@@ -109,11 +168,6 @@ logging.basicConfig(
 
 app = Flask(__name__)
 log = logging.getLogger("daemon")
-
-# Module-level cache of the repo-rooted .env path. Computed at module load
-# using __file__ -> repo root; tests can monkeypatch this name to redirect
-# lookups. Module-load computation avoids per-call Path traversal cost.
-_REPO_ENV_PATH: str = str(Path(__file__).resolve().parent.parent / ".env")
 
 
 # _format_local_timestamp is defined at the end of this module (after the
@@ -1065,17 +1119,17 @@ def main():
     daemon can pick up secrets like TELEGRAM_BOT_TOKEN without them living
     in the launchd plist. Existing env vars (set by launchd) take precedence.
     """
-    # US-017b: load ~/.env so TELEGRAM_BOT_TOKEN + TELEGRAM_HOME_CHAT_ID
-    # come from the operator's home directory rather than the launchd plist.
-    _env_total_loaded = _load_home_env()
+    # Env was already loaded at module-import time (before infra imports).
+    # AC6: fail-loud for operator-significant Telegram credentials.
+    # The listener cannot function without them; better to crash at startup
+    # than fail silently on first alert send.
+    _require_env("TELEGRAM_BOT_TOKEN")
+    _require_env("TELEGRAM_HOME_CHAT_ID")
 
     # US-069-regression: log the night-suppress config now that env is loaded.
     # This proves the values were actually read (not frozen as [] at import).
     try:
-        from infra.quick_classifier import (
-            _get_suppress_cameras,
-            _get_suppress_classes,
-        )
+        from infra.quick_classifier import _get_suppress_cameras, _get_suppress_classes
 
         log.info(
             "night_suppress: cameras=%s classes=%s",
@@ -1133,73 +1187,13 @@ def main():
     _start_api_server()
 
     # US-073h: start the periodic health heartbeat thread.
-    # Read env_total from _load_home_env() which already ran at top of main().
     from listener.health import HealthReporter
 
     mcp_enabled = os.environ.get("FARMSURV_MCP_ENABLED", "0") == "1"
-    hr = HealthReporter(port=port, env_total=_env_total_loaded, plist_keepalive=True)
+    hr = HealthReporter(port=port, env_total=_ENV_TOTAL_LOADED, plist_keepalive=True)
     hr.start(mcp_enabled=mcp_enabled)
 
     app.run(host=host, port=port)
-
-
-def _load_home_env() -> int:
-    """Load .env files into os.environ. Existing keys win over file values.
-
-    Resolution order (first file found wins for any given key, but already-set
-    env vars always win over file values):
-
-      1. <repo>/.env          — operator-owned, in-repo, mode 600 (canonical)
-      2. ~/.env               — operator-global fallback (legacy)
-
-    US-017b: secrets (telegram token, etc.) live in a gitignored .env file
-    rather than the launchd plist so they can be rotated without plist edits
-    and so the plist does not contain plaintext credentials.
-
-    PRD-V2-022 (2026-09-09): operator directive — env file belongs INSIDE the
-    app directory so the app is self-contained. ~/.env is retained only as a
-    fallback for operators who keep their secrets at $HOME.
-    """
-    from dotenv import dotenv_values  # python-dotenv
-
-    # 1. Repo-rooted .env (canonical — operator directive 2026-09-09).
-    #    __file__ -> .../listener/daemon.py -> repo root is parent.parent.
-    #    Exposed at module level so tests can monkeypatch this constant
-    #    without having to mock Path traversal.
-    candidate_paths = [
-        _REPO_ENV_PATH,
-        # 2. Legacy ~/.env fallback for operators who keep secrets at $HOME.
-        os.path.expanduser("~/.env"),
-    ]
-
-    total_loaded = 0
-    for env_path in candidate_paths:
-        if not os.path.exists(env_path):
-            log.info("env: %s not present; skipping.", env_path)
-            continue
-        values = dotenv_values(env_path) or {}
-        loaded_here = 0
-        for k, v in values.items():
-            if v is None:
-                continue
-            # Launchd-injected values win so operators can override without
-            # touching the .env file.
-            if k not in os.environ:
-                os.environ[k] = v
-                loaded_here += 1
-        total_loaded += loaded_here
-        log.info(
-            "env: loaded %d var(s) from %s",
-            loaded_here,
-            env_path,
-        )
-
-    log.info(
-        "env load complete: total=%d (telegram_token_len=%d)",
-        total_loaded,
-        len(os.environ.get("TELEGRAM_BOT_TOKEN", "")),
-    )
-    return total_loaded
 
 
 # ---------------------------------------------------------------------------

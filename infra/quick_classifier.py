@@ -56,30 +56,30 @@ RELATED:
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Literal
 
 UTC = timezone.utc  # compat shim for Python 3.9 (UTC was added in 3.11)
-from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort
 from PIL import Image
 
-from infra.env_utils import parse_csv_env
+from infra.env_required import _require_csv_env, _require_env_lower_bool
 from scripts.export_yolo_dynamic import pad_to_multiple_of_32
 
 log = logging.getLogger("quick_classifier")
 
 # Phase 6B.116 §11.47 — night suppression env vars.
-# Default: feature off (no behavior change). Set MOTION_GATE_NIGHT_SUPPRESS_ENABLED=1
-# after validation. All three are env-tunable so we can sweep values without
-# code changes.
-NIGHT_SUPPRESS_ENABLED = os.environ.get("MOTION_GATE_NIGHT_SUPPRESS_ENABLED", "0") == "1"
+# MOTION_GATE_NIGHT_SUPPRESS_ENABLED: operator-significant -- must be set
+# explicitly (no default). Set to 1 after validation.
+NIGHT_SUPPRESS_ENABLED = _require_env_lower_bool("MOTION_GATE_NIGHT_SUPPRESS_ENABLED")
+# Tuning knobs with sensible defaults (override via env if needed).
 NIGHT_CONF_FLOOR = float(os.environ.get("MOTION_GATE_NIGHT_CONF_FLOOR", "0.40"))
 NIGHT_BRIGHTNESS_RATIO = float(
     os.environ.get("MOTION_GATE_NIGHT_BRIGHTNESS_RATIO", "1.5")
@@ -116,35 +116,38 @@ if NIGHT_SUPPRESS_ENABLED:
     )
 
 # V2-069: per-camera + per-class night suppress (motion-gate layer).
-# These are lazy-read functions (not module-level constants) because the
-# listener imports infra.quick_classifier BEFORE _load_home_env() runs;
-# if we read os.environ at import time, both resolve to [] and stay frozen
-# for the process lifetime. Reading on each call ensures we always pick up
-# the values that _load_home_env() injected into os.environ.
+# These are lazy-read functions using _require_csv_env. They are NOT
+# module-level constants because _load_home_env() must run first
+# (see daemon.py main() -- env loaded before any infra imports).
 #
-# Comma-separated camera slugs; empty default = current behavior (no
-# per-camera suppress). Optional comma-separated class names; empty =
+# Comma-separated camera slugs; empty result is allowed (operator
+# chose disable). Optional comma-separated class names; empty =
 # suppress all classes on listed cameras.
 def _get_suppress_cameras() -> list[str]:
     """Return the parsed FARMSURV_NIGHT_SUPPRESS_CAMERAS value from os.environ."""
-    return parse_csv_env("FARMSURV_NIGHT_SUPPRESS_CAMERAS")
+    return _require_csv_env("FARMSURV_NIGHT_SUPPRESS_CAMERAS")
 
 
 def _get_suppress_classes() -> list[str]:
     """Return the parsed FARMSURV_NIGHT_SUPPRESS_CLASSES value from os.environ."""
-    return parse_csv_env("FARMSURV_NIGHT_SUPPRESS_CLASSES")
+    return _require_csv_env("FARMSURV_NIGHT_SUPPRESS_CLASSES")
 
 
 # Warn at import time if classes are listed but cameras is empty.
-# This fires BEFORE _load_home_env() so it may produce a false warning
-# when the operator has configured values in .env — that's acceptable;
-# the warning is a safety net for the common mistake of setting classes
-# without cameras. The real check at runtime reads env fresh each call.
-if not _get_suppress_cameras() and _get_suppress_classes():
-    log.warning(
-        f"quick_classifier: night_suppress_class_without_camera "
-        f"classes={_get_suppress_classes()} cameras=[] -- no-op until cameras listed"
-    )
+# Wrapped in try/except because _require_csv_env raises RuntimeError
+# when the var is unset; if env is not loaded yet (e.g., test import
+# before _load_home_env), skip the warning. The real check at runtime
+# reads env fresh each call.
+try:
+    if not _get_suppress_cameras() and _get_suppress_classes():
+        log.warning(
+            f"quick_classifier: night_suppress_class_without_camera "
+            f"classes={_get_suppress_classes()} cameras=[] -- no-op until cameras listed"
+        )
+except RuntimeError:
+    # Env not loaded yet (e.g., test import or standalone script).
+    # The real check at runtime will work correctly.
+    pass
 
 # COCO 80 classes (YOLOv8n output order — class index 0..79)
 # Full list at https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/datasets/coco.yaml
