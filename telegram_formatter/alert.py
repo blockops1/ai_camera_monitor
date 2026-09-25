@@ -19,7 +19,7 @@ OUTPUTS:
 PUBLIC API:
     build_alert_message(verdict, vm1_result, artifacts, camera_label,
                         position, alert=None) -> dict
-        Build a Telegram-ready MarkdownV2 message dict for TG#1
+        Build a Telegram-ready HTML message dict for TG#1
 
 DOES NOT DO:
     - Send the Telegram message (pipeline.py handles transport)
@@ -44,7 +44,7 @@ from infra.format_ts import format_local_timestamp
 
 _CAPTION_MAX_LENGTH = 1024  # Telegram caption limit
 
-# Emoji icons per class type (Telegram MarkdownV2 supports emoji inline)
+# Emoji icons per class type (Telegram renders emoji natively in HTML)
 _CLASS_EMOJI: dict[str, str] = {
     "person": "\U0001f464",  # \xf0\x9f\x91\xa4
     "vehicle": "\U0001f697",  # \xf0\x9f\x9a\x97
@@ -76,10 +76,10 @@ def build_alert_message(
 ):
     """Build a TG#1 Telegram message dict (HTML parse_mode).
 
-    Returns a 4-6 line Markdown body:
+    Returns a 4-6 line HTML body:
 
-        Camera -- HH:MM AM/PM
-        Class *bold* \u2022 confidence N%
+        Camera — HH:MM AM/PM
+        Class • confidence N%
         TG X of 3
         short_id
 
@@ -96,20 +96,18 @@ def build_alert_message(
 
     timestamp = alert.get("timestamp") if alert else None
 
-    # Build the MarkdownV2 body lines.
+    # Build the HTML body lines.
     lines: list[str] = []
 
     # Line 1: camera header with emoji and time.
-    # Wrap timestamp in <code> tags so Telegram renders dashes/colons literally
-    # without MarkdownV2 escape artifacts in the MediaGroup caption path.
+    # Wrap timestamp in <code> tags — rendered natively in HTML parse_mode.
     if timestamp:
         time_str = f"<code>{format_local_timestamp(timestamp)}</code>"
     else:
         time_str = ""
-    # NOTE: bold markers (*...*) intentionally absent — the dispatcher escapes
-    # every reserved char including '*', so '*{camera_label}*' would render as
-    # literal '*camera_label*' (no bold, just visible asterisks). Plain text
-    # is cleaner and matches how detail.py / match_alert.py render.
+    # NOTE: bold markers intentionally absent — plain text is cleaner
+    # and matches how detail.py / match_alert.py render. Use <b> tags
+    # in match_alert.py for bold runner-up names.
     if time_str:
         header = f"{_CAMERA_EMOJI} {camera_label} \u2014 {time_str}"
     else:
