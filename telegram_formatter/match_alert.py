@@ -153,7 +153,7 @@ def build_match_alert_body(
         kv = match_result if isinstance(match_result, dict) else {}
 
     label = kv.get("label", "?")
-    lines: list[str] = [f"✅ Match \u2014 *{label}*"]
+    lines: list[str] = [f"✅ Match — <b>{label}</b>"]
 
     parts: list[str] = [
         f"  ID: {kv.get('id', '?')}",
@@ -295,7 +295,7 @@ def build_match_message(
         # Top runner-up if available.
         if top_candidates:
             top_id, top_score = top_candidates[0]
-            lines.append(f"  Runner-up: *{top_id}* ({_format_runner_score(top_score)})")
+            lines.append(f"  Runner-up: <b>{top_id}</b> ({_format_runner_score(top_score)})")
 
     # Alert metadata (mirrors TG#1 / TG#2 caption layout).
     # Alert ID lines removed per US-073g — operator doesn't need these in TG captions.
@@ -303,8 +303,8 @@ def build_match_message(
         lines.append("Alert 3 of 3")
         timestamp = alert.get("timestamp")
         if timestamp:
-            # Wrap in <code> tags so Telegram renders dashes/colons literally
-            # without MarkdownV2 escape artifacts.
+            # Wrap in <code> tags — rendered natively in HTML parse_mode
+            # (switched from MarkdownV2, US-074).
             lines.append(f"Timestamp: <code>{format_local_timestamp(timestamp)}</code>")
 
     # TG marker (US-067c: consistent with 067a/067b).

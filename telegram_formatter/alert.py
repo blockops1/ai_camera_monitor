@@ -62,12 +62,8 @@ def _truncate_caption(caption: str) -> str:
     return caption[: _CAPTION_MAX_LENGTH - 3] + "..."
 
 
-# No local MarkdownV2 escape — the dispatcher (telegram_formatter.dispatcher)
-# runs the single canonical escape pass on the assembled caption. Local
-# escaping here would double-escape dynamic content like the timestamp
-# dashes, producing literal "\\-" artifacts in the rendered message
-# (operator-visible 2026-09-22 — "pipes" in the TG#1 header were actually
-# double-escaped backslash+dash pairs).
+# No local HTML escape — the dispatcher (telegram_formatter.dispatcher)
+# runs the single canonical escape pass on the assembled caption.
 
 
 def _emoji_for_class(cls: str) -> str:
@@ -78,7 +74,7 @@ def _emoji_for_class(cls: str) -> str:
 def build_alert_message(
     verdict, vm1_result, artifacts, camera_label="Camera", position=1, alert=None
 ):
-    """Build a TG#1 Telegram message dict (MarkdownV2).
+    """Build a TG#1 Telegram message dict (HTML parse_mode).
 
     Returns a 4-6 line Markdown body:
 
