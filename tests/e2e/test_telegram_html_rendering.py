@@ -164,18 +164,25 @@ class TestDispatchPayloadShape:
         jpeg_path = tmp_path / "test.jpg"
         jpeg_path.write_bytes(b"\xff\xd8\xff\xe0JPEG")
 
-        from telegram_formatter import dispatcher
-        dispatcher.dispatch(
-            [{"caption": "🚗 vehicle", "photos": [str(jpeg_path)]}],
+        from telegram_formatter.dispatcher import send_photo
+        send_photo(
             bot_token="test_token",
             chat_id="12345",
+            photo_path=str(jpeg_path),
+            caption="test",
         )
 
         call_kwargs = mock_llama_server.post.call_args.kwargs
         assert call_kwargs["data"]["parse_mode"] == "HTML"
 
     def test_media_group_uses_html_parse_mode(self, mock_llama_server, tmp_path):
-        """AC: parse_mode='HTML' in sendMediaGroup call."""
+        """AC: parse_mode='HTML' on each InputMedia (not top-level).
+
+        Telegram's sendMediaGroup ignores top-level parse_mode.
+        It MUST live on each InputMedia entry in the media array.
+        """
+        import json
+
         mock_response = type('Response', (), {
             'status_code': 200,
             'json': lambda: {"ok": True}
@@ -193,7 +200,12 @@ class TestDispatchPayloadShape:
         )
 
         call_kwargs = mock_llama_server.post.call_args.kwargs
-        assert call_kwargs["data"]["parse_mode"] == "HTML"
+        # Top-level data should NOT have parse_mode.
+        assert "parse_mode" not in call_kwargs["data"]
+        # Each InputMedia in the media array MUST have parse_mode='HTML'.
+        media = json.loads(call_kwargs["data"]["media"])
+        for entry in media:
+            assert entry.get("parse_mode") == "HTML"
 
     def test_period_in_caption_not_over_escaped(self, mock_llama_server):
         """AC: period in caption text is NOT over-escaped.
