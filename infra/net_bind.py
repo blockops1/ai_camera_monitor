@@ -61,7 +61,7 @@ def _resolve_tailnet_ip() -> str:
                         ip = parts[i + 1]
                         if ip.startswith("100."):
                             return ip
-    except Exception:
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
         pass
     return "100.64.0.1"
 
