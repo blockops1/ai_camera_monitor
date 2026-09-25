@@ -137,7 +137,7 @@ def load_megadescriptor() -> nn.Module:
     _transform = create_transform(**data_cfg)
 
     elapsed = time.time() - t0
-    logger.info("MegaDescriptor-L-384 loaded in %.1fs (%s)", elapsed, _model_dir())
+    logger.info("MegaDescriptor-S-224 loaded in %.1fs (%s)", elapsed, _model_dir())
 
     _model = loaded_model
     _live_mode = True
