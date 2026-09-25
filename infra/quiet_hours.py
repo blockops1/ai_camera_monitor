@@ -29,6 +29,7 @@ import logging
 import os
 from datetime import datetime
 
+from infra.env_required import _require_env_lower_bool
 from infra.quick_classifier import night_suppress_match
 from infra.time_of_day import is_night_at_edt
 
@@ -37,10 +38,6 @@ log = logging.getLogger("quiet_hours")
 # ---------------------------------------------------------------------------
 # Env-var defaults
 # ---------------------------------------------------------------------------
-
-# Kill switch: when 0 or unset, the gate is disabled entirely.
-# Default is 1 (enabled) so the safety net is on by default.
-_QUIET_HOURS_ENABLED_DEFAULT = "1"
 
 # Comma-separated list of camera names the gate applies to.
 # If empty, the gate matches no camera (effectively disabled).
@@ -110,11 +107,9 @@ def in_quiet_hours(dt: datetime, camera_name: str, class_name: str | None = None
         os.environ.get("FARMSURV_FARM_LON", _DEFAULT_LON),
     )
 
-    # AC3: kill switch off -- short-circuit before anything else.
-    enabled = os.environ.get(
-        "FARMSURV_QUIET_HOURS_ENABLED", _QUIET_HOURS_ENABLED_DEFAULT
-    )
-    if enabled.lower() not in ("1", "true", "yes", "on"):
+    # AC3: kill switch -- fail-loud if operator hasn't set it.
+    # _require_env_lower_bool raises RuntimeError if the var is unset.
+    if not _require_env_lower_bool("FARMSURV_QUIET_HOURS_ENABLED"):
         return False
 
     # Camera scoping: only cameras in the env list are gated.

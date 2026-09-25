@@ -23,8 +23,9 @@ USAGE:
 from __future__ import annotations
 
 import logging
-import os
 from functools import lru_cache
+
+from infra.env_required import _require_env
 
 log = logging.getLogger(__name__)
 
@@ -36,17 +37,14 @@ log = logging.getLogger(__name__)
 def validate_token() -> tuple[bool, str]:
     """Validate the FARMSURV_MCP_TOKEN env var at server startup.
 
+    Uses _require_env for fail-loud behavior: if the token is missing,
+    raises RuntimeError immediately rather than falling back to empty.
+
     Returns:
         (True, token) if the token is present and >= 32 chars.
-        (False, error_msg) if missing or too short.
+        (False, error_msg) if too short.
     """
-    token = os.environ.get("FARMSURV_MCP_TOKEN", "")
-    if not token:
-        return False, (
-            "FARMSURV_MCP_TOKEN is required but not set. "
-            "Generate one with: python -c "
-            "'import secrets; print(secrets.token_urlsafe(32))'"
-        )
+    token = _require_env("FARMSURV_MCP_TOKEN")
     if len(token) < 32:
         return False, (
             f"FARMSURV_MCP_TOKEN is too short ({len(token)} chars, "
@@ -63,8 +61,8 @@ def validate_token() -> tuple[bool, str]:
 
 @lru_cache(maxsize=1)
 def _cached_token() -> str:
-    """Return the configured token, cached after first read."""
-    return os.environ["FARMSURV_MCP_TOKEN"]
+    """Return the configured token, cached after first read via _require_env."""
+    return _require_env("FARMSURV_MCP_TOKEN")
 
 
 def authenticate(auth_header: str | None) -> bool:

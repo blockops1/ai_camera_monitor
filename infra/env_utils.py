@@ -1,7 +1,7 @@
 """
 env_utils.py -- shared env-var parsing helpers for farm-surveillance-v2.
 
-STATUS: new (US-069a)
+STATUS: stable (US-069a)
 THREAD SAFETY: single-threaded, no shared mutable state
 IMPORT ORDER: stdlib -> third-party -> local (infra.)
 
@@ -14,6 +14,15 @@ OUTPUTS:
 DOES NOT DO:
     - IO, network, file reads beyond os.environ
     - Hardcoded values (all defaults from os.environ.get)
+
+RULE (US-069-fail-loud-env):
+    Operator-significant env vars (gates, suppress, auth tokens) MUST use
+    _require_env / _require_env_lower_bool / _require_csv_env from
+    infra.env_required — these raise RuntimeError when the var is unset,
+    forcing the operator to configure them explicitly. Only connection
+    knobs (LISTEN_HOST, LISTEN_PORT) and tuning thresholds
+    (NIGHT_CONF_FLOOR, NIGHT_BRIGHTNESS_RATIO) use os.environ.get with
+    defaults.
 
 CALLED BY:
     - infra.quick_classifier (_parse_csv_env for night suppress lists)

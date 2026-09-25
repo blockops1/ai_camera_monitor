@@ -42,6 +42,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import infra.net_bind
+from infra.env_required import _require_env
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +53,6 @@ log = logging.getLogger(__name__)
 _API_ENABLED = os.environ.get("FARMSURV_API_ENABLED", "0") == "1"
 _API_BIND_MODE = os.environ.get("FARMSURV_API_BIND", "tailnet-only")
 _API_PORT = int(os.environ.get("FARMSURV_API_PORT", "8092"))
-_API_TOKEN = os.environ.get("FARMSURV_API_TOKEN", "")
 _BOX_ID = os.environ.get("FARMSURV_BOX_ID", os.environ.get("FARM_BOX_ID", ""))
 
 # Server uptime at boot
@@ -66,17 +66,15 @@ _SERVER_START = datetime.datetime.now(datetime.UTC)
 def _validate_token() -> tuple[bool, str]:
     """Validate the FARMSURV_API_TOKEN env var at server startup.
 
+    Uses _require_env for fail-loud behavior: if the token is missing,
+    raise RuntimeError immediately rather than falling back to an empty
+    string.
+
     Returns:
         (True, token) if the token is present and >= 32 chars.
-        (False, error_msg) if missing or too short.
+        (False, error_msg) if too short.
     """
-    token = os.environ.get("FARMSURV_API_TOKEN", "")
-    if not token:
-        return False, (
-            "FARMSURV_API_TOKEN is required but not set. "
-            "Generate one with: python -c "
-            "'import secrets; print(secrets.token_urlsafe(32))'"
-        )
+    token = _require_env("FARMSURV_API_TOKEN")
     if len(token) < 32:
         return False, (
             f"FARMSURV_API_TOKEN is too short ({len(token)} chars, "
@@ -104,7 +102,7 @@ def _authenticate(auth_header: str | None) -> bool:
     provided_token = auth_header[7:]
 
     # Constant-time comparison to prevent timing attacks
-    current_token = os.environ.get("FARMSURV_API_TOKEN", "")
+    current_token = _require_env("FARMSURV_API_TOKEN")
     return _constant_time_compare(provided_token, current_token)
 
 
@@ -146,7 +144,6 @@ def _route_camera_health(camera_id: str, **kwargs: Any) -> tuple[int, Any]:
 
 def _route_camera_snapshot(camera_id: str, **kwargs: Any) -> tuple[int, Any]:
     from infra.farm_api.cameras import get_camera_snapshot
-    from pathlib import Path
     path = get_camera_snapshot(camera_id)
     if path is None:
         return 404, {"error": "Snapshot not found", "camera_id": camera_id}

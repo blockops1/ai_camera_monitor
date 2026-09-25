@@ -36,15 +36,14 @@ from __future__ import annotations
 
 import os
 
+from infra.env_required import _require_env_lower_bool
 from infra.quick_classifier import VEHICLE_CLASSES
 
 # ---------------------------------------------------------------------------
 # Env-var defaults
 # ---------------------------------------------------------------------------
 
-# Kill switch: when 0 or unset, the override is disabled entirely.
-# Default is 1 (enabled) so the safety net is on by default.
-_BASELINE_OVERRIDE_ENABLED_DEFAULT = "1"
+# Kill switch: no default -- operator must set explicitly.
 
 # Comma-separated list of camera names the override applies to.
 # If empty, the override matches no camera (effectively disabled).
@@ -100,11 +99,8 @@ def _apply_distant_vehicle_baseline_override(
     Returns:
         The *alert* dict (possibly modified with threat_level demoted).
     """
-    # AC7: kill switch off -- short-circuit before anything else.
-    enabled = os.environ.get(
-        "FARMSURV_BASELINE_OVERRIDE_ENABLED", _BASELINE_OVERRIDE_ENABLED_DEFAULT
-    )
-    if enabled.lower() not in ("1", "true", "yes", "on"):
+    # AC4: kill switch -- fail-loud if operator hasn't set it.
+    if not _require_env_lower_bool("FARMSURV_BASELINE_OVERRIDE_ENABLED"):
         return alert
 
     # Camera scoping: only cameras in the env list are gated.
