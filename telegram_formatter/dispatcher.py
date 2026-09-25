@@ -205,6 +205,7 @@ def _send_media_group(
             {
                 "type": "photo",
                 "media": attach_ref,
+                "parse_mode": "HTML",
             }
         )
         if i == 0:
@@ -221,7 +222,6 @@ def _send_media_group(
         data={
             "chat_id": chat_id,
             "media": json.dumps(media),
-            "parse_mode": "HTML",
         },
         files=files,
     )
