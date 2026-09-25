@@ -109,9 +109,9 @@ def build_alert_message(
     # and matches how detail.py / match_alert.py render. Use <b> tags
     # in match_alert.py for bold runner-up names.
     if time_str:
-        header = f"{_CAMERA_EMOJI} {camera_label} \u2014 {time_str}"
+        header = f"{_CAMERA_EMOJI} <b>{camera_label}</b> \u2014 {time_str}"
     else:
-        header = f"{_CAMERA_EMOJI} {camera_label}"
+        header = f"{_CAMERA_EMOJI} <b>{camera_label}</b>"
     lines.append(header)
 
     # Line 2: class with emoji and confidence.
