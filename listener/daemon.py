@@ -1069,6 +1069,22 @@ def main():
     # come from the operator's home directory rather than the launchd plist.
     _env_total_loaded = _load_home_env()
 
+    # US-069-regression: log the night-suppress config now that env is loaded.
+    # This proves the values were actually read (not frozen as [] at import).
+    try:
+        from infra.quick_classifier import (
+            _get_suppress_cameras,
+            _get_suppress_classes,
+        )
+
+        log.info(
+            "night_suppress: cameras=%s classes=%s",
+            _get_suppress_cameras(),
+            _get_suppress_classes(),
+        )
+    except Exception:  # noqa: BLE001 — non-fatal; gate still works without it
+        log.warning("night_suppress: startup log failed (non-fatal)")
+
     host = os.environ.get("LISTEN_HOST", "0.0.0.0")
     port = int(os.environ.get("LISTEN_PORT", "8090"))
 

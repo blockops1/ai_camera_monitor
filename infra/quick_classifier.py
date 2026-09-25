@@ -116,18 +116,34 @@ if NIGHT_SUPPRESS_ENABLED:
     )
 
 # V2-069: per-camera + per-class night suppress (motion-gate layer).
-# Comma-separated camera slugs; empty default = current behavior (no per-camera suppress).
-_NIGHT_SUPPRESS_CAMERAS = parse_csv_env("FARMSURV_NIGHT_SUPPRESS_CAMERAS")
-# Optional comma-separated class names; empty = suppress all classes on listed cameras.
-_NIGHT_SUPPRESS_CLASSES = parse_csv_env("FARMSURV_NIGHT_SUPPRESS_CLASSES")
+# These are lazy-read functions (not module-level constants) because the
+# listener imports infra.quick_classifier BEFORE _load_home_env() runs;
+# if we read os.environ at import time, both resolve to [] and stay frozen
+# for the process lifetime. Reading on each call ensures we always pick up
+# the values that _load_home_env() injected into os.environ.
+#
+# Comma-separated camera slugs; empty default = current behavior (no
+# per-camera suppress). Optional comma-separated class names; empty =
+# suppress all classes on listed cameras.
+def _get_suppress_cameras() -> list[str]:
+    """Return the parsed FARMSURV_NIGHT_SUPPRESS_CAMERAS value from os.environ."""
+    return parse_csv_env("FARMSURV_NIGHT_SUPPRESS_CAMERAS")
 
-# Warn if classes are listed but cameras is empty -- this is almost certainly
-# a config mistake and we don't want to silently drop every vehicle at night
-# on every camera.
-if not _NIGHT_SUPPRESS_CAMERAS and _NIGHT_SUPPRESS_CLASSES:
+
+def _get_suppress_classes() -> list[str]:
+    """Return the parsed FARMSURV_NIGHT_SUPPRESS_CLASSES value from os.environ."""
+    return parse_csv_env("FARMSURV_NIGHT_SUPPRESS_CLASSES")
+
+
+# Warn at import time if classes are listed but cameras is empty.
+# This fires BEFORE _load_home_env() so it may produce a false warning
+# when the operator has configured values in .env — that's acceptable;
+# the warning is a safety net for the common mistake of setting classes
+# without cameras. The real check at runtime reads env fresh each call.
+if not _get_suppress_cameras() and _get_suppress_classes():
     log.warning(
         f"quick_classifier: night_suppress_class_without_camera "
-        f"classes={_NIGHT_SUPPRESS_CLASSES} cameras=[] -- no-op until cameras listed"
+        f"classes={_get_suppress_classes()} cameras=[] -- no-op until cameras listed"
     )
 
 # COCO 80 classes (YOLOv8n output order — class index 0..79)
@@ -935,7 +951,7 @@ def _get_effective_classes() -> frozenset[str] | None:
     """Return the cached expanded class set, rebuilding from env if stale."""
     global _EFFECTIVE_SUPPRESS_CLASSES
     if _EFFECTIVE_SUPPRESS_CLASSES is None:
-        raw = list(_NIGHT_SUPPRESS_CLASSES)
+        raw = list(_get_suppress_classes())
         _EFFECTIVE_SUPPRESS_CLASSES = _expand_suppress_classes(raw)
     return _EFFECTIVE_SUPPRESS_CLASSES
 
@@ -970,11 +986,13 @@ def night_suppress_match(camera_id: str, class_name: str) -> bool:
     Returns:
         True if this camera+class should be suppressed at night.
     """
-    if not _NIGHT_SUPPRESS_CAMERAS:
+    cameras = _get_suppress_cameras()
+    if not cameras:
         return False
-    if camera_id not in _NIGHT_SUPPRESS_CAMERAS:
+    if camera_id not in cameras:
         return False
-    if not _NIGHT_SUPPRESS_CLASSES:
+    classes = _get_suppress_classes()
+    if not classes:
         return True
     effective = _get_effective_classes()
     if effective is None:
