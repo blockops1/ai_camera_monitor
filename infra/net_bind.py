@@ -36,13 +36,40 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import os
+import subprocess
 
 log = logging.getLogger(__name__)
 
 # Tailscale CGNAT range: 100.64.0.0/10
+# Resolve from TAILNET_BIND_ADDR env var if set, else auto-detect the
+# first 100.x IP on the machine. Falls back to 100.64.0.1.
+def _resolve_tailnet_ip() -> str:
+    """Return the first 100.x.x.x IP found on the machine."""
+    override = os.environ.get("TAILNET_BIND_ADDR")
+    if override:
+        return override
+    try:
+        out = subprocess.check_output(
+            ["ifconfig"], text=True, timeout=5
+        )
+        for line in out.split("\n"):
+            if "100." in line and "inet" in line:
+                parts = line.split()
+                for i, p in enumerate(parts):
+                    if p == "inet" and i + 1 < len(parts):
+                        ip = parts[i + 1]
+                        if ip.startswith("100."):
+                            return ip
+    except Exception:
+        pass
+    return "100.64.0.1"
+
+
+TAILNET_BIND = _resolve_tailnet_ip()
+
+# Tailscale CGNAT range: 100.64.0.0/10
 _TAILNET_NET = ipaddress.ip_network("100.64.0.0/10")
-# Default Tailscale bind address when spec is 'tailnet-only'
-TAILNET_BIND = "100.64.0.1"
 
 
 def is_tailnet_ip(addr: str) -> bool:
