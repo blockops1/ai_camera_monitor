@@ -219,5 +219,12 @@
     "US-059d",
     "US-059e",
     "US-059f"
-  ]
+  ],
+  "external_dependencies": {
+    "US-059e": {
+      "depends_on": ["US-044c", "US-044d"],
+      "status": "not_on_main",
+      "note": "US-044c (telegram_formatter/match_alert.py: port v1 match-alert layout) at b469925 and US-044d (telegram_formatter/match_alert.py: image attachment) at 4c42f5f are on feature branches code/v2-044c and code/v2-044d but NOT merged to main. US-059e MUST wait for both US-044c and US-044d to land on main before dispatch. The dispatcher should treat US-059e as blocked until these commits are on main."
+    }
+  }
 }
