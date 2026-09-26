@@ -45,9 +45,12 @@ CALLS INTO:
     - os.path.exists, open — file I/O
 """
 
+import logging
 import os
 
 from infra.paths import CAMERA_CREDS_FILE
+
+log = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
 # Camera name mapping: env prefix -> human-readable name
@@ -66,12 +69,13 @@ def _extract_ip_from_rtsp(url: str) -> str | None:
     """Extract the IP host from an RTSP URL.
 
     Handles passwords with @ (URL-encoded %40 or literal).
-    Raises if the URL is empty.
+    Returns "" for empty input (no crash).
     Returns None for malformed-but-non-empty URLs (so caller can skip
     IP auto-derive without crashing the listener).
     """
     if not url:
-        raise IndexError("empty RTSP URL")
+        log.warning("empty RTSP URL, returning empty string")
+        return ""
     # Some env-var writers URL-encode the scheme as rtsp%3A%2F%2F.
     # Decode once so the rest of the parser sees rtsp://...
     from urllib.parse import unquote
