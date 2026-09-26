@@ -66,3 +66,11 @@ def format_local_timestamp(
         return local_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
     except (ValueError, TypeError, KeyError):
         return utc_iso
+
+
+# Regression guard: verify output never contains double-spaces.
+# Run: python3 -c "from infra.format_ts import format_local_timestamp as f; assert '  ' not in f('2026-09-25T13:16:00Z')"
+if __name__ == "__main__":
+    ts = format_local_timestamp("2026-09-25T13:16:00Z")
+    assert "  " not in ts, f"Double-space detected: {ts!r}"
+    print(f"OK: {ts!r}")
