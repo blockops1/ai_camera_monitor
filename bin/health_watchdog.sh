@@ -14,6 +14,13 @@
 #   WATCHDOG_LOG_INTERVAL_MIN -- max age of last log line before alert (default 15)
 #   WATCHDOG_DISK_GB_WARN -- disk usage warning threshold in GB (default 150)
 #   WATCHDOG_REMOTE_URL   -- Forgejo mirror URL for drift check (default empty = skip)
+#   WATCHDOG_SILENT       -- if set to 1, exit 0 immediately. Off-switch for the
+#                            whole watchdog without ripping the script. Preferred
+#                            over deleting cron entries or moving the file.
+
+if [ "${WATCHDOG_SILENT:-0}" = "1" ]; then
+  exit 0
+fi
 
 set -euo pipefail
 
