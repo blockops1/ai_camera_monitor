@@ -2,7 +2,7 @@
   "prd_id": "PHASE-V2-045-PRD-animal-body-recognition",
   "title": "Animal matching: VM2 structured output as primary discriminator + MegaDescriptor (BVRA) as tiebreaker",
   "author": "jill (operator-directed 2026-09-14, post dog-enrollment + body-scan discussion)",
-  "status": "active",
+  "status": "done",
   "phase": "v2",
   "plan_section": "v2 animal pipeline completion: enroll operator animals + third-stage embedding model (MegaDescriptor-L-384) for individual animal re-identification, paralleling how face_recognition runs on people after VM1+VM2",
   "trigger": "Operator 2026-09-14 (verbatim, directive 1): 'So here is what I am thinking, we already have a well-established pipeline and I do not want to mess with this. I mean, I do not want to mess with changing YOLO vision model 1 or vision model 2, but just like with people, we are going to do basically a third run through of a model and that will be the facial recognition, then with dogs, we can do a third or I guess a fourth run through of the model on this Bohemian animal thing. So it would basically be another add on to the pipeline on the animal branch. So yeah, create some PRD stories for after we get the detailed description of the animal from the VM2 that we then run it into the Bohemian to see if we can recognize enrolled animals.' Operator 2026-09-14 (verbatim, directive 2): 'well that is why I wanted you to look at what the output of VM two said about this dog since it is the only dog that is being enrolled then you can give the option for basically everything with the VM two output has given for the color and type of dog and that will be the match and then we will go to the Bohemian thing to get even better matching.' Operator 2026-09-14 (verbatim, directive 3): 'yes, he is a goldendoodle.' Operator 2026-09-14 (verbatim, directive 4): 'I always want the tier 2 matcher to be run for animals not just on ambiguity' - clarifies that MegaDescriptor (BVRA) cosine runs on EVERY animal alert, not gated by Tier-1 ambiguity. Tier 1 (VM2 feature scoring) is an advisory ranking among Tier-2-acceptable candidates. Three concrete gaps in v2: (1) Pipeline Stage 12 only matches vehicles + persons - animal mode falls through with no match and no TG3. (2) No animal matching infra exists. (3) Animal alerts today carry no per-animal metadata beyond YOLO class + animal/dog/0.X.",
@@ -213,5 +213,7 @@
       "status": "done",
       "completed_at": "2026-09-15"
     }
-  ]
+  ],
+  "completed_at": "2026-09-26T06:35:00-04:00",
+  "completion_note": "All 6 stories (US-045a-f) shipped 2026-09-15. Finnegan enrolled 2026-09-25T19:24 EDT via US-081. Animal embedder live mode enabled (ANIMAL_EMBEDDER_LIVE=1)."
 }
