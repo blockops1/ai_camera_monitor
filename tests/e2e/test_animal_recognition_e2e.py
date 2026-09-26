@@ -198,6 +198,7 @@ def _clear_store() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.e2e
 class TestSelfMatch:
     """AC1: Self-match — alert embedding matches enrolled animal."""
 
@@ -219,6 +220,7 @@ class TestSelfMatch:
         assert result["threshold"] == TIER2_THRESHOLD
 
 
+@pytest.mark.e2e
 class TestNoMatch:
     """AC2: No-match — random embedding does not exceed cosine threshold."""
 
@@ -234,6 +236,7 @@ class TestNoMatch:
         assert "threshold" in result
 
 
+@pytest.mark.e2e
 class TestEmptyRegistry:
     """AC3: Empty registry -> matched=False immediately."""
 
@@ -248,6 +251,7 @@ class TestEmptyRegistry:
         assert result["top_candidates"] == []
 
 
+@pytest.mark.e2e
 class TestTier1Ranking:
     """AC4: Tier-1 ranking — enroll 3 dogs with distinct color_patterns,
     feed alert matching dog's color+size -> winner is the matching one."""
@@ -274,6 +278,7 @@ class TestTier1Ranking:
             assert first_cosine >= second_cosine
 
 
+@pytest.mark.e2e
 class TestTg3Path:
     """AC5: TG#3 path — end-to-end via build_match_message -> string contains
     'Recognized: test_dog_001'. Real formatter, no substitute objects."""
