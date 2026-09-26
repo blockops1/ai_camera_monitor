@@ -334,7 +334,7 @@ text = body.decode('utf-8', errors='replace')
 payload = {
     'chat_id': '${TELEGRAM_HOME_CHAT_ID}',
     'text': text,
-    'parse_mode': 'HTML',
+    'parse_mode': 'MarkdownV2',
 }
 # Escape backslashes and quotes for bash JSON string
 print(json.dumps(payload, ensure_ascii=False).encode('unicode_escape').decode('ascii'))
