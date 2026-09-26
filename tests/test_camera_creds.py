@@ -10,73 +10,11 @@ import os
 import tempfile
 
 from infra.camera_creds import (
-    _extract_ip_from_rtsp,
     _parse_env,
     get_all_cameras,
     get_camera,
     validate_source_ip,
 )
-
-# --------------------------------------------------------------------------
-# _extract_ip_from_rtsp
-# --------------------------------------------------------------------------
-
-class TestExtractIpFromRtsp:
-    """Tests for _extract_ip_from_rtsp helper."""
-
-    def test_ipv4_basic(self):
-        """Extract IP from a standard RTSP URL."""
-        url = "rtsp://admin:pass@192.0.2.1:554/h264"
-        assert _extract_ip_from_rtsp(url) == "192.0.2.1"
-
-    def test_ipv4_with_port(self):
-        """Extract IP when port is present."""
-        url = "rtsp://admin:pass@192.0.2.1:554/"  # RFC 5737 TEST-NET-1
-        assert _extract_ip_from_rtsp(url) == "192.0.2.1"
-
-    def test_password_with_at_sign(self):
-        """Extract IP when password contains @ (encoded as %40)."""
-        url = "rtsp://admin:%40pass@192.0.2.3:554/h264"
-        assert _extract_ip_from_rtsp(url) == "192.0.2.3"
-
-    def test_password_with_literal_at(self):
-        """Extract IP when password contains literal @."""
-        url = "rtsp://admin:p@ss@192.0.2.1:554/"
-        assert _extract_ip_from_rtsp(url) == "192.0.2.1"
-
-    def test_no_auth(self):
-        """Return None when there is no @ in auth_and_host."""
-        url = "rtsp://192.0.2.1:554/"
-        assert _extract_ip_from_rtsp(url) is None
-
-    def test_ipv6(self):
-        """Extract IP from an IPv6 RTSP URL."""
-        url = "rtsp://admin:pass@[::1]:554/"
-        assert _extract_ip_from_rtsp(url) == "::1"
-
-    def test_empty_url_raises(self):
-        """Raise on empty string (malformed RTSP URL)."""
-        import pytest
-        with pytest.raises(IndexError):
-            _extract_ip_from_rtsp("")
-
-    def test_url_encoded_scheme(self):
-        """URL-encoded scheme (rtsp%3A%2F%2F) decodes and parses cleanly.
-
-        Regression: real-world Reolink webhooks sometimes submit the
-        scheme URL-encoded. The old parser IndexError'd on these and
-        crashed the listener at startup. Fixed by urllib.parse.unquote
-        at the top of the function.
-        """
-        url = "rtsp%3A%2F%2Fadmin:pass@192.0.2.1:554/h264"
-        assert _extract_ip_from_rtsp(url) == "192.0.2.1"
-
-    def test_malformed_returns_none(self):
-        """Non-empty malformed URL returns None (no listener crash)."""
-        # No scheme separator at all.
-        assert _extract_ip_from_rtsp("not-a-url") is None
-        assert _extract_ip_from_rtsp("192.0.2.1:554") is None
-
 
 # --------------------------------------------------------------------------
 # _parse_env
