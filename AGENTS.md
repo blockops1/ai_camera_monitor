@@ -232,27 +232,30 @@ print(f'quiet hours [{(ss + timedelta(minutes=30)).time()}, {(sr - timedelta(min
 python3 -c "from infra._telegram_origin import origin_prefix; print(origin_prefix('HOME'))"
 ```
 
-## Runtime (snapshot 2026-09-24, refreshed 21:05 EDT)
+## Runtime (snapshot 2026-09-26, refreshed 06:35 EDT)
 
 - venv: `~/farm-surveillance-v2/.venv/` (Python 3.11)
-- Listener: **RUNNING** as of 2026-09-24 20:55 EDT (PID **30681**, `com.farm.surveillance.v2`). Loaded via Python `subprocess.run` from inside Hermes. Port 8090 listening on 0.0.0.0, V2-071 algorithm active, US-073h `HealthReporter` (10-min cadence) emitting `listener_health` + `camera_health` to daemon.log; US-073g dispatcher escape fix (`<code>` tags respected) live; US-069d camera_id wiring threaded through gate.
-- Active board: `coder-farm-surveillance` (kanban). V2-068 cleanup in flight: t_d6a1f47b (b7 orphan merge) running, t_82b23478 + t_52c8af04 ready.
-- **Local Qwen context (V2-bump 2026-09-24 ~18:25 EDT):** llama-server `-c 196608` (was 131072), `-np 2` retained for agent-driven compression; `model.context_length: 196608` in `~/.hermes/config.yaml`. Memory math: 18 GB KV pool (+6 GB delta), RSS 25.7 GB, fits cleanly in 64 GB. Listener was restarted post-bump to capture all listener-source bytecode changes.
-- **Per-camera night suppress (V2-069, 2026-09-23):** `FARMSURV_NIGHT_SUPPRESS_CAMERAS=OUTSIDE_BACK_SOLAR` and `FARMSURV_NIGHT_SUPPRESS_CLASSES=vehicle` active. Suppresses motion-gate alerts at night on Outside Back Solar for vehicle class only. Knobs declared in `.env.example` (US-069c, commit `39f1efa`). Implementation lives in `infra/quick_classifier.py:_night_suppress_match` (US-069a, commit `c32f238`) + `infra/quiet_hours.py:in_quiet_hours(class_name=...)` defense-in-depth (US-069b, commit `cadba81`). Per-camera wiring closed (US-069d, commit `b672331`).
-- **Telegram caption format (US-067e, 2026-09-23):** `infra/farm_api/telegram.py` / `alert.py` emit Unicode em-dash (`—`) between attributes, confidence as a categorical word (`high`/`medium`/`low`), and `detail.py` "Attributes" header is plain text. Commit `c42fd60`.
-- **Forgejo recovery mirror (US-068e, 2026-09-24):** `.git/hooks/post-merge` wires `scripts/push_to_forgejo.sh` to fire on every merge-to-main. Drift resolved at 21:01 EDT (local `8caee64` = forgejo `8caee64`). Commit `e67ad47`.
-- Disk: ~31 GiB free / 460 GiB.
+- Listener: **RUNNING** as of 2026-09-26 06:35 EDT (PID **60267**, `com.farm.surveillance.v2`). All three processes (listener :8090, MCP :8091, API :8092) live in one PID. Listener bytecode includes: US-069 (`09d93e8`+`0835952`), US-074 HTML parse_mode (`ba2ff5f`+`1d7ac37`), US-074b per-InputMedia parse_mode (`c843a8b`), US-075 bold labels (`637f7fc`), US-076 API/MCP enablement (`722ee2b`+`0f09fc6`), US-079 heartbeat API/MCP lines (`b332500`). US-073h `HealthReporter` (10-min cadence) emitting `listener_health` + `camera_health` + `api_health` + `mcp_health` to daemon.log.
+- Active board: `coder-farm-surveillance` (kanban). Empty. All 10 cards filed today completed and closed (US-076, US-077, US-078, US-079, US-080a/b/c/e/f, US-081, US-082, US-084).
+- **Three-process deployment (NEW 2026-09-25, US-076):** listener :8090 + MCP :8091 + API :8092 all spawned by `listener/daemon.py` daemon-thread hooks (`_start_mcp_server` line 1014, `_start_api_server` line 1073, called before `app.run()` at line 1196). Gated by `FARMSURV_MCP_ENABLED=1` + `FARMSURV_API_ENABLED=1` in `~/.env`. Tokens ≥32 chars, bind to Tailscale (100.64.0.10).
+- **Local Qwen context (V2-bump 2026-09-24 ~18:25 EDT):** llama-server `-c 196608`, `-np 2`, `--kv-unified`. `model.context_length: 196608` in `~/.hermes/config.yaml`. RSS ~25.7 GB. PID 28533 on :8093.
+- **Per-camera night suppress (V2-069):** `FARMSURV_NIGHT_SUPPRESS_CAMERAS=OUTSIDE_BACK_SOLAR` + `FARMSURV_NIGHT_SUPPRESS_CLASSES=car,truck,bicycle,motorcycle,bus` active. Confirmed live in boot log.
+- **Telegram caption format (US-074+074b+075, 2026-09-25):** HTML parse_mode (`<b>`+`<code>` allowed via `escape_html` allowlist). `sendMessage`/`sendPhoto` honor top-level `parse_mode`; `sendMediaGroup` requires parse_mode per InputMedia (US-074b fix, was top-level-silently-ignored bug). Bold-label rule: word-before-colon bold, word-after plain. Bold `<b>...</b>` for section labels, `<code>...</code>` for timestamps/IDs. Em-dash between attributes removed in US-075.
+- **Animal recognition (V2-045, COMPLETE 2026-09-25):** US-045a/b/c/d/e/f all done. MegaDescriptor-L-384 wrapper at `infra/animal_embedder.py`. Animal branch wired into pipeline Stage 12+13. `scripts/enroll_animal.py` CLI. Tier-2 cosine + Tier-1 Jaccard matching at `animal_matcher/match.py`. **Finnegan enrolled** 2026-09-25 19:24 EDT — labeled "Finnegan" (species dog, breed goldendoodle, distinctive: black collar, curly coat, white patch). 2 individual crop embeddings + 1 averaged stored in `data/known/animals/embeddings.npz` under keys `finnegan__crop_a.png`, `finnegan__crop_b.png`, `finnegan__avg`.
+- **Animal embedder live mode (US-081):** `ANIMAL_EMBEDDER_LIVE=1` set in `~/.env` (variable added to `.env.example` with comment). MegaDescriptor-L-384 weights cached at `~/Library/Caches/huggingface/hub/`. Live embeddings used for Finnegan enrollment.
+- **Forgejo recovery mirror (US-068e):** `.git/hooks/post-merge` wired. Local `1b709b5` = forgejo `1b709b5` (in sync, refreshed 2026-09-26 06:35 EDT).
+- Disk: ~228 GiB free / 460 GiB (48% used).
 - Last commits on main:
-  - `8caee64` kanban: t_e637e067 US-073h: listener periodic health heartbeat
-  - `d465dde` Re-add tests/test_health_reporter.py deleted by US-080b
-  - `c80d506` US-073g: fix dispatcher escape_markdown_v2 to respect `<code>` tags
-  - `6adb7a6` US-080c: Remove mocking from E2E tests + delete 10 remaining unit tests
-  - `f3dfe92` US-080c: Replace daemon spawn unit tests with E2E versions
-  - `68b328a` US-080f: E2E tests for alert route + 10 farm_api endpoints (71 tests)
-  - `6509346` US-080b: delete unit tests per docs/V2-080-unit-test-audit.md
-  - `5e84968` US-080a: audit all 102 test files
-  - `d6a773f` US-073i: vision + cleanup + telegram health lines in heartbeat
-  - `9476a49` AGENTS.md: TDD antipatterns
+  - `1b709b5` US-084: fix double-space in timestamp caption
+  - `080e74d` US-082: add @pytest.mark.e2e to all 5 test classes
+  - `d7ffdd2` US-082: E2E test for animal recognition pipeline
+  - `b332500` US-079: Report API + MCP server health in heartbeat
+  - `ad4eb5b` US-080e: Add E2E tests for API server and MCP server wire shape (32 tests)
+  - `0ea6a50` US-077: Add bin/api_live_smoke.sh -- live smoke test for API :8092
+  - `7e334c1` US-081: Fix stale L-384 log message in load_megadescriptor()
+  - `15a916c` US-081: animal embedder live + Finnegan enrolled
+  - `0f09fc6` US-076: Fix ruff BLE001 in net_bind.py -- catch specific exceptions
+  - `722ee2b` US-076: Enable API + MCP servers + fix Tailscale bind address auto-detection
 
 ## Phase status (per PRD arcs)
 
@@ -261,19 +264,20 @@ python3 -c "from infra._telegram_origin import origin_prefix; print(origin_prefi
 | V2-046 | YOLO night false-alarm suppression | SUPERSEDED by V2-062 |
 | V2-059 | Person + body recognition (OSNet body+face) | PRD drafted (`docs/PHASE-V2-059-PRD-person-body-recognition.json`), unfiled, no cards dispatched |
 | V2-060 | VM1 redesign (class + subclass + face_visible + count) | PARTIAL — US-060c/d/e done; US-060a/b blocked |
-| **V2-061** | **Frame retention policy (20 GB cap, hourly cleanup)** | **DONE** — US-061a/b/c/e done; US-061d shipped then reverted per anti-pattern (no backup cleanup plist) |
-| **V2-062** | **Night-time headlight FP suppression (suntime + quiet hours + baseline override)** | **DONE** — US-062a/b/c/d/e/f/g all done; baseline override wired; suntime + 30-min twilight buffer live |
-| **V2-068** | **MCP server + farm_api resource layer (10 resources) + per-alert event.json** | **DONE modulo US-068b7-merge** — US-068a/b1-b6/b8/b9/c/d/e done; US-068b7 orphan merge to main in flight (t_d6a1f47b); US-068c-fix1 + fix2 dispatched to clean up `_json_response` dead ref and `__init__.py` telegram mismatch |
-| **V2-069** | **Per-camera + per-class night suppress (motion gate + quiet hours defense-in-depth)** | **DONE** — US-069a + US-069b + US-069c + US-069d done. Per-camera wiring gap closed (`camera_id` threaded through gate→classifier). |
+| V2-061 | Frame retention policy (20 GB cap, hourly cleanup) | DONE — US-061a/b/c/e done; US-061d shipped then reverted per anti-pattern (no backup cleanup plist) |
+| V2-062 | Night-time headlight FP suppression (suntime + quiet hours + baseline override) | DONE — US-062a/b/c/d/e/f/g all done |
+| V2-068 | MCP server + farm_api resource layer (10 resources) + per-alert event.json | DONE — US-068a/b1-b9/c/d/e all done; orphan-merge + fix1/fix2 landed via US-068b7 + US-068c-fix1/2 |
+| V2-069 | Per-camera + per-class night suppress | DONE — US-069a/b/c/d done; import-order bug fixed at `09d93e8`; fail-loud at `0835952` |
+| V2-080 | Unit-test audit + E2E-first convention | DONE — US-080a audit + US-080b delete classified DELETE + US-080c REPLACE-WITH-E2E + US-080e/f E2E tests for farm_api + alert_route (71 tests) |
+| **V2-045** | **Animal body recognition (MegaDescriptor-L-384)** | **DONE** — US-045a-f all done; Finnegan enrolled; live embeddings active |
 
 ## Open work
 
-- **V2-068b7-merge (in flight, t_d6a1f47b):** cherry-pick `fb9da4f` (farm_api telegram dispatch status resource) onto main. Orphan branch `farm-surveillance/t_2f199824-us-068b7` has 1 commit ahead of common ancestor; main is 67 ahead. Required because `infra/farm_api/__init__.py` line 106 imports from `infra.farm_api.telegram` but the module doesn't exist on main.
-- **V2-068c-fix1 (t_82b23478, ready):** investigate and remove dead `_json_response` reference at `infra/mcp_server.py:360` flagged in US-068c remediation defect log. May be a no-op (initial grep empty).
-- **V2-068c-fix2 (t_52c8af04, ready):** reconcile `infra/farm_api/__init__.py` docstring/import references to telegram module. Blocked by t_d6a1f47b (the module must exist on main first) or remove refs until it ships.
-- **V2-059 cards — not yet filed.** PRD placeholder exists at `docs/PHASE-V2-059-PRD-person-body-recognition.json` (empty file). Needs actual PRD draft before cards can be filed.
+- **Lint rot (73 errors, pre-existing):** `uv run ruff check .` fails. 42 fixable with `--fix`. None in production code paths (listener/, infra/api_server.py, infra/mcp_server.py, infra/animal_embedder.py). All in archive/, scripts/, tests/. Pre-existed before today's work (verified at HEAD `1b709b5`). File as US-085 if operator wants clean lint.
+- **V2-059 cards — not yet filed.** PRD placeholder exists; empty file on disk. OSNet body+face recognition workstream. Needs PRD draft before cards can be filed.
 - **V2-060 US-060a/b — blocked** (carry from earlier sessions; no recent movement).
 - **`_extract_ip_from_rtsp` IndexError fix** — flagged 2026-09-20; listener is currently running without this fix; no observed crash in current event stream. Lower priority.
+- **Solar cameras night-offline** (OUTSIDE_BACK_SOLAR + OUTSIDE_FRONT_SOLAR show `healthy=False, frames=0` in heartbeat at 06:30 EDT before sunrise 06:56 EDT). Expected; will recover at sunrise.
 
 ---
 
