@@ -229,7 +229,7 @@ def _write_pairwise_diff_image(
     try:
         arr_a = np.asarray(frame_a.convert("RGB"), dtype=np.int16)
         arr_b = np.asarray(frame_b.convert("RGB"), dtype=np.int16)
-    except Exception as err:
+    except (ValueError, TypeError, OSError) as err:
         log.warning(
             f"[{alert_id}] pairwise_diff: failed to convert frames to arrays: {err}"
         )
@@ -262,7 +262,7 @@ def _write_pairwise_diff_image(
         out_dir.mkdir(parents=True, exist_ok=True)
         diff_img.save(out_path, format="PNG")
         return str(out_path)
-    except Exception as err:
+    except OSError as err:
         log.warning(f"[{alert_id}] pairwise_diff: failed to write {out_path}: {err}")
         return None
 
@@ -524,7 +524,7 @@ def _load_thresholds_config() -> dict:
             data = json.load(f)
         # Strip the "_comment" / "_default_thresholds_reference" keys
         return {k: v for k, v in data.items() if not k.startswith("_")}
-    except Exception as e:
+    except (json.JSONDecodeError, OSError) as e:
         log.warning(f"motion_gate: failed to load thresholds config: {e!r}")
         return {}
 
@@ -1098,7 +1098,7 @@ def run(
     try:
         for p in frame_paths:
             pil_frames.append(_load_frame_as_pil(p))
-    except Exception as e:
+    except (OSError, FileNotFoundError) as e:
         log.error(f"[{alert_id}] motion_gate: failed to load frames: {e}")
         return GateVerdict(
             classification="none",

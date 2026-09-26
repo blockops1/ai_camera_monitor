@@ -10,10 +10,11 @@ The model is dynamic (accepts any (h, w) where h%32==0 and w%32==0); the
 caller is responsible for padding to multiples of 32 before inference.
 """
 
+from pathlib import Path
+
 import numpy as np
 import onnxruntime as ort
 import pytest
-from pathlib import Path
 
 MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "yolov8n.onnx"
 

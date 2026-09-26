@@ -10,7 +10,6 @@ output genuinely contains zero '/Users/' literals.
 
 import os
 import sys
-import importlib
 
 
 def test_rendered_plist_has_no_literal_home_path(monkeypatch):
@@ -42,7 +41,7 @@ def test_rendered_plist_has_no_literal_home_path(monkeypatch):
     rendered = generate_plist()
     hits = [line for line in rendered.split('\n') if '/Users/' in line]
     assert hits == [], (
-        f"Rendered plist contains literal '/Users/' paths:\n"
+        "Rendered plist contains literal '/Users/' paths:\n"
         + "\n".join(f"  {h}" for h in hits)
     )
 

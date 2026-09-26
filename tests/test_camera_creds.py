@@ -193,6 +193,7 @@ class TestValidateSourceIp:
             _os.environ["FARM_CAMERA_CREDS_FILE"] = env_path
             # Force re-parse by reloading the module
             import importlib
+
             import infra.camera_creds as _cc
             importlib.reload(_cc)
             try:
@@ -234,6 +235,7 @@ class TestValidateSourceIp:
             old = _os.environ.get("FARM_CAMERA_CREDS_FILE")
             _os.environ["FARM_CAMERA_CREDS_FILE"] = env_path
             import importlib
+
             import infra.camera_creds as _cc
             importlib.reload(_cc)
             try:

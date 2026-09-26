@@ -49,6 +49,7 @@ print("PASS")
         [sys.executable, "-c", code],
         capture_output=True,
         text=True,
+        check=False,
         env={k: v for k, v in os.environ.items()
              if k not in ("FARMSURV_NIGHT_SUPPRESS_CAMERAS",
                           "FARMSURV_NIGHT_SUPPRESS_CLASSES")},

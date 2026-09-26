@@ -19,13 +19,7 @@ CALLED BY:
 
 from __future__ import annotations
 
-import base64
 import os
-import sys
-from unittest.mock import MagicMock, patch
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # PyAV stub — the project venv may lack av; tests mock av.open() anyway.
@@ -33,6 +27,10 @@ import pytest
 # can `import av` successfully.
 # ---------------------------------------------------------------------------
 import sys as _sys
+from unittest.mock import MagicMock, patch
+
+import pytest
+
 _av_stub = MagicMock()
 _av_stub.__version__ = "15.1.0"
 _av_stub.container = MagicMock()
@@ -98,7 +96,7 @@ def mock_llama_server(monkeypatch):
 @pytest.fixture()
 def make_gate_verdict():
     """Build a mock GateVerdict with classification='vehicle'."""
-    from unittest.mock import MagicMock, PropertyMock
+    from unittest.mock import MagicMock
 
     from infra.gate import GateVerdict
 

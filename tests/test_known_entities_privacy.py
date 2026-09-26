@@ -15,7 +15,6 @@ Two checks:
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 from infra.paths import PERSON_KNOWN_FILE

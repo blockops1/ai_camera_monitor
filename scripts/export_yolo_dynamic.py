@@ -31,7 +31,6 @@ CONSTRAINT (YOLOv8 export limitation, discovered 2026-09-09):
 
 from __future__ import annotations
 
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -201,7 +200,7 @@ def verify_dynamic_model() -> None:
         try:
             result = sess.run(None, {input_name: dummy})
             print(f"  WARNING: {h}x{w} unexpectedly succeeded", file=sys.stderr)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — we intentionally expect ONNX runtime to fail here
             err_msg = str(e).split('\n')[0][:80]
             print(f"  {h}x{w} -> FAILS as expected ({err_msg})")
 

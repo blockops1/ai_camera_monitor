@@ -16,9 +16,8 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from unittest.mock import patch
 
-from listener.daemon import _REPO_ENV_PATH, _load_home_env
+from listener.daemon import _load_home_env
 
 
 def _redirect_repo_env(monkeypatch, target: Path) -> None:
