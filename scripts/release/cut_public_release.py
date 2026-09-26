@@ -72,12 +72,10 @@ import argparse
 import json
 import logging
 import os
-import re
 import shlex
 import signal
 import subprocess
 import sys
-import tempfile
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
@@ -88,8 +86,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-import yaml  # noqa: E402  (after sys.path fix)
-
+import yaml
 
 # --- Constants (script-authoring rule 1: known good places) ---
 
@@ -188,7 +185,7 @@ def _run(cmd: list[str], logger: logging.Logger, check: bool = True,
 def _git_branch_exists(name: str) -> bool:
     rc = subprocess.run(
         ["git", "show-ref", "--verify", f"refs/heads/{name}"],
-        cwd=PROJECT_ROOT, capture_output=True, text=True,
+        cwd=PROJECT_ROOT, capture_output=True, text=True, check=False,
     )
     return rc.returncode == 0
 
@@ -196,7 +193,7 @@ def _git_branch_exists(name: str) -> bool:
 def _git_tag_exists(name: str) -> bool:
     rc = subprocess.run(
         ["git", "show-ref", "--verify", f"refs/tags/{name}"],
-        cwd=PROJECT_ROOT, capture_output=True, text=True,
+        cwd=PROJECT_ROOT, capture_output=True, text=True, check=False,
     )
     return rc.returncode == 0
 
@@ -231,7 +228,7 @@ def stage_preflight(cfg: dict[str, Any], logger: logging.Logger) -> str:
     for key in ("user.email", "user.name"):
         rc = subprocess.run(
             ["git", "config", key],
-            cwd=PROJECT_ROOT, capture_output=True, text=True,
+            cwd=PROJECT_ROOT, capture_output=True, text=True, check=False,
         )
         if not rc.stdout.strip():
             logger.error(f"git {key} not configured")
@@ -452,8 +449,7 @@ def stage_push_preview(branch: str, version: str, cfg: dict[str, Any],
                        logger: logging.Logger) -> str:
     """Print the push command(s). Never push without --push-mode."""
     logger.info("stage: push preview (dry-run)")
-    remote = cfg.get("push_remotes", [{}])[0].get("name", "github")
-    lines = [f"Push commands (dry-run — not executed):"]
+    lines = ["Push commands (dry-run — not executed):"]
     for mode in cfg.get("push_remotes", [{}])[0].get("push_modes", []):
         cmd = mode["command"].format(branch=branch, version=version)
         lines.append(f"  {mode['description']}")

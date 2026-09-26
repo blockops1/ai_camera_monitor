@@ -4,6 +4,9 @@ infra -- farm-surveillance-v2 shared infrastructure modules.
 
 from __future__ import annotations
 
+# api_server exports
+from infra import api_server  # noqa: F401
+
 # alert_overrides_baseline exports
 from infra.alert_overrides_baseline import _apply_distant_vehicle_baseline_override
 
@@ -37,9 +40,6 @@ from infra.reolink import (
     verify_recipe,
 )
 from infra.time_of_day import get_night_window, is_night_at_edt
-
-# api_server exports
-from infra import api_server  # noqa: F401
 
 __all__ = [
     "AudioConfig",

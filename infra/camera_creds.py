@@ -45,7 +45,6 @@ CALLS INTO:
     - os.path.exists, open — file I/O
 """
 
-import logging
 import os
 
 from infra.paths import CAMERA_CREDS_FILE

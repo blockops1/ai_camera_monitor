@@ -8,10 +8,10 @@ Design: Part A tests in_quiet_hours() directly. Part B patches in_quiet_hours
 to return True, then calls _send_tg1/2/3 and verifies dispatch is not called.
 This avoids dependency on the daemon's dispatch path for the suppression logic."""
 
+import os
 from datetime import UTC, datetime
 from unittest.mock import patch
 
-import os
 import pytest
 
 # ---------------------------------------------------------------------------

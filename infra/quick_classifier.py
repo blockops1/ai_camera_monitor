@@ -60,18 +60,19 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-UTC = timezone.utc  # compat shim for Python 3.9 (UTC was added in 3.11)
+# UTC alias kept for compat shim — PLW0127 suppressed (explicit design, not accident)
+# ruff: noqa: PLW0127
+UTC = UTC  # compat shim for Python 3.9 (UTC was added in 3.11)
 
 import numpy as np
 import onnxruntime as ort
 from PIL import Image
 
 from infra.env_required import _require_csv_env, _require_env_lower_bool
-from scripts.export_yolo_dynamic import pad_to_multiple_of_32
 
 log = logging.getLogger("quick_classifier")
 
@@ -360,7 +361,7 @@ class QuickClassifier:
             frame_path = Path(frame)
             try:
                 img = Image.open(frame).convert("RGB")
-            except Exception as err:
+            except (OSError, Image.UnidentifiedImageError) as err:
                 log.warning(f"quick_classifier: failed to load {frame}: {err}")
                 return QuickVerdict(
                     top_class="error", top_confidence=0.0, decision="pass",
@@ -703,8 +704,8 @@ def _letterbox_640(img: Image.Image) -> np.ndarray:
 
     # Compute scale to fit the longer side to 640, preserving aspect ratio.
     scale = LETTERBOX_SIZE / max(h, w)
-    new_h = int(round(h * scale))
-    new_w = int(round(w * scale))
+    new_h = round(h * scale)
+    new_w = round(w * scale)
     # Round to nearest multiple of 32 (YOLO stride) so the model gets a clean
     # spatial shape.
     new_h = max(32, (new_h + 16) // 32 * 32)
@@ -747,7 +748,7 @@ def _log_coreml_failure(
                 )
                 + "\n"
             )
-    except Exception as log_err:  # don't let logging crash the caller
+    except OSError as log_err:  # don't let logging crash the caller
         log.warning(f"quick_classifier: failed to write CoreML failure log: {log_err}")
 
 
@@ -880,11 +881,11 @@ def _should_apply_night_suppression(
 
         if not is_night_at_edt(ts):
             return False
-    except Exception:
+    except Exception:  # noqa: BLE001 — import/type failures should safe-return False
         return False
     try:
         ratio = _brightness_ratio(img)
-    except Exception:
+    except Exception:  # noqa: BLE001 — any unexpected failure should safe-return False
         return False
     return ratio > NIGHT_BRIGHTNESS_RATIO
 
@@ -904,7 +905,7 @@ def _is_night_at_edt(ts: datetime) -> bool:
         from infra.time_of_day import is_night_at_edt
 
         return is_night_at_edt(ts)
-    except Exception:
+    except Exception:  # noqa: BLE001 — import/type failures should safe-return False
         return False
 
 

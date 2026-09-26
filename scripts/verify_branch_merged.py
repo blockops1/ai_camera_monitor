@@ -19,7 +19,7 @@ import sys
 def run(cmd, **kw):
     """Run a shell command, return (exit_code, stdout_str)."""
     result = subprocess.run(
-        cmd, shell=True, capture_output=True, text=True, **kw
+        cmd, shell=True, capture_output=True, text=True, check=False, **kw
     )
     return result.returncode, result.stdout.strip()
 
@@ -68,15 +68,14 @@ def get_repo_path(task):
         if "farm-surveillance-v2" in line:
             parts = line.split()
             for p in parts:
-                if p.startswith("/Users/"):
-                    if "farm-surveillance-v2" in p:
-                        return os.path.dirname(p)
+                if p.startswith("/Users/") and "farm-surveillance-v2" in p:
+                    return os.path.dirname(p)
     return os.path.expanduser("~/farm-surveillance-v2")
 
 
 def check_merged(repo, sha):
     """Check if <sha> is an ancestor of main in the given repo."""
-    rc, out = run(
+    rc, _out = run(
         f"cd '{repo}' && git merge-base --is-ancestor '{sha}' main 2>&1"
     )
     return rc == 0
@@ -105,7 +104,7 @@ def get_all_worktree_branches(repo):
 def match_task_to_branch(branch_name, tasks):
     """Try to find which task this branch belongs to by checking titles."""
     branch_prefix = branch_name.split("/")[-1].lower()
-    for tid, task in tasks.items():
+    for task in tasks.values():
         title = (task.get("title") or "").lower()
         body = task.get("body") or ""
         if isinstance(body, bytes):

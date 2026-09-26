@@ -7,9 +7,6 @@ at least once on a mocked clock.
 import logging
 import threading
 import time
-from unittest import mock
-
-import pytest
 
 import infra.cleanup
 
@@ -129,6 +126,7 @@ class TestCleanupThreadStarts:
         The main() function checks interval_min > 0 before spawning.
         """
         import inspect
+
         import listener.daemon as daemon_mod
 
         source = inspect.getsource(daemon_mod.main)
@@ -146,6 +144,7 @@ class TestCleanupThreadWiring:
     def test_cleanup_import_present(self):
         """infra.cleanup is referenced in daemon.py."""
         import inspect
+
         import listener.daemon as daemon_mod
 
         source = inspect.getsource(daemon_mod)
@@ -160,6 +159,7 @@ class TestCleanupThreadWiring:
     def test_threading_import_present(self):
         """threading is imported in daemon.py."""
         import inspect
+
         import listener.daemon as daemon_mod
 
         source = inspect.getsource(daemon_mod)

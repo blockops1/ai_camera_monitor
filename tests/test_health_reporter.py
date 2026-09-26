@@ -4,15 +4,11 @@ test_health_reporter.py — Tests for listener/health.py (HealthReporter).
 
 from __future__ import annotations
 
-import logging
 import os
-import time
-import time as _time
 
 import pytest
 
 from listener.health import HealthReporter, _clear_alert_timestamps
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -161,7 +157,7 @@ class TestNoCamerasRegistered:
         # Verify that format_camera_health with a known stats dict produces
         # exactly one line. When stats_all() returns {}, _camera_health_lines()
         # returns [].
-        hr = HealthReporter(port=8090, env_total=0, plist_keepalive=False)
+        HealthReporter(port=8090, env_total=0, plist_keepalive=False)
 
         # Manually verify: format_camera_health returns a single line
         assert stats_all_before.count("\n") == 0  # no internal newlines
@@ -217,11 +213,11 @@ class TestLogWhenNoAlerts:
     def test_alert_counter_prunes_old_entries(self):
         """Alerts older than 10 minutes are pruned from the counter."""
         from listener.health import (
+            _alert_lock,
             _alert_timestamps,
             _clear_alert_timestamps,
             _count_alerts_last_10m,
             _record_alert_run,
-            _alert_lock,
         )
 
         # Record one alert.
@@ -241,7 +237,6 @@ class TestLogWhenNoAlerts:
     def test_heartbeat_format_complete_block(self):
         """The complete heartbeat block (listener + 0 cameras) is
         a valid multi-line string with the listener_health line present."""
-        hr = HealthReporter(port=8090, env_total=15, plist_keepalive=False)
         line = HealthReporter.format_listener_health(
             uptime_s=120.5,
             port=8090,
