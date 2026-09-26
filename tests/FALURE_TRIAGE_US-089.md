@@ -149,21 +149,24 @@ Scanner scripts find actual violations that should have been cleaned up:
 
 ## Grand totals
 
-**Full suite (60 failures across 14 files):**
+**Full suite: 60 failures across 14 files** (definitive count from
+`pytest tests/ -q`)
 
-| Severity | Count | Files |
+The per-file breakdown above (section starting at "Full-suite failure breakdown")
+is authoritative. The categories below group them by root cause for quick reference:
+
+| Category | Count | Files |
 |---|---|---|
-| High - E2E bbox assertion mismatch | 22 | 1 |
-| High - Recipe fixture files missing | 11 | 1 |
-| High - Scanner finds real violations | 9 | 4 |
-| Medium - Time-of-day / quiet-hours runtime errors | 5 | 2 |
-| Medium - E2E fixture design bug (mock yields None) | 6 | 1 |
-| Medium - Test assertion mismatches (redaction/IP) | 3 | 2 |
-| Medium - Infra import crash (individual-file collection) | 54 | 7 files |
-| Low - Miscellaneous (env override, error count, token log) | 2 | 2 |
+| B - Bbox assertion mismatch | 22 | test_cross_diff_bbox_e2e.py |
+| B - Recipe fixture files missing | 11 | test_recipe.py |
+| C - Scanner finds real violations | 9 | 4 scanner files |
+| D - E2E fixture design bug | 6 | test_telegram_html_rendering.py |
+| B - Time-of-day runtime errors | 4 | test_time_of_day.py |
+| B - Assertion mismatches (redaction/IP) | 4 | test_register_cameras(2), test_farm_api_telegram(1), test_verify_recipe_live(1) |
+| B - Infra import crash (quiet_hours + paths) | 3 | test_quiet_hours(1), test_paths(2) |
+| D - Miscellaneous (token log) | 1 | test_home_env.py |
 
-**Sum check:** 45 (Category B) + 9 (Category C) + 6 (Category D -- telegram) +
-1 (Category D -- home_env) = 60.
+**Sum check:** 22 + 11 + 9 + 6 + 4 + 4 + 3 + 1 = 60.
 
 **Note on counting:** The 60 full-suite failures are the definitive count.
 The ~54 individual-file collection crashes are separate -- they only occur when
