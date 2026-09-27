@@ -396,21 +396,6 @@ def _run_pipeline(alert: dict) -> dict:
             "gate": gate_result["gsum"],
         }
 
-    # Stage 7a: cooldown check.
-    cooldown_result = stage_cooldown_check(camera_id, classification)
-    if cooldown_result["status"] == "dropped":
-        _write_event(
-            alert_id, camera_id, frames, gate_result, None,
-            started_at, dropped="cooldown_dropped",
-        )
-        _record_alert_run()
-        return {
-            "id": alert_id,
-            "status": "dropped",
-            "reason": cooldown_result["reason"],
-            "classification": classification,
-        }
-
     # Stage 7b: log proceeded past gate.
     gsum = gate_result["gsum"]
     log.info(
@@ -459,6 +444,36 @@ def _run_pipeline(alert: dict) -> dict:
             "id": alert_id,
             "status": "dropped",
             "reason": "vm1_unsure",
+            "classification": classification,
+            "gate": gate_result["gsum"],
+            "vm1_result": vm1_result,
+        }
+
+    # Stage 9c: VM1 override — VM1 owns the routing decision (US-091, 2026-09-27).
+    # If VM1 produced a valid class that differs from what the gate set,
+    # override the classification. This fixes the case where YOLO misrouted
+    # (e.g., "cat 0.81" on a person → VM1 says "person" → pipeline uses "person").
+    vm1_class = vm1_result.get("class")
+    if vm1_class in ("vehicle", "person", "animal") and vm1_class != classification:
+        log.info(
+            f"vm1_override_gate alert_id={alert_id} camera={camera_id} "
+            f"gate={classification} vm1={vm1_class}"
+        )
+        classification = vm1_class
+
+    # Stage 7a: cooldown check — NOW uses VM1-derived classification (moved
+    # from before VM1 so cooldown keys on the final routing class, not gate's).
+    cooldown_result = stage_cooldown_check(camera_id, classification)
+    if cooldown_result["status"] == "dropped":
+        _write_event(
+            alert_id, camera_id, frames, gate_result, vm1_result,
+            started_at, dropped="cooldown_dropped",
+        )
+        _record_alert_run()
+        return {
+            "id": alert_id,
+            "status": "dropped",
+            "reason": cooldown_result["reason"],
             "classification": classification,
             "gate": gate_result["gsum"],
             "vm1_result": vm1_result,
@@ -666,8 +681,20 @@ def alert():
     # but does NOT continue to subsequent stages. Earlier-sent TGs
     # are NOT rolled back. No defensive fallbacks.
     #
-    # record_hit fires ONLY after TG#3 dispatch succeeds (spec item 12).
-    # Per-operator directive: "I never ever ever want a defensive fallback."
+    # record_hit fires BEFORE TG#1 dispatch (US-091, 2026-09-27).
+    # Cooldown now suppresses the NEXT alert before the current alert's TG
+    # messages finish sending. This is the ONLY call site for record_hit
+    # in the production tree.
+
+    # ---- record_hit (cooldown window starts) BEFORE TG#1 dispatch ----
+    try:
+        infra_pipeline_cooldown.record_hit(
+            alert_dict["camera_id"],
+            result.get("classification", "unknown"),
+            time.monotonic(),
+        )
+    except Exception:
+        log.exception("record_hit failed for alert_id=%s", alert_id)
 
     # ---- TG#1 dispatch (after stage 10: build_tg1) ----
     try:
@@ -692,18 +719,6 @@ def alert():
     except Exception:
         log.exception("TG#3 dispatch failed for alert_id=%s", alert_id)
         return jsonify(result), 200
-
-    # TG#3 dispatched successfully → record_hit (cooldown window starts).
-    # This is the ONLY call site for record_hit in the production tree.
-    # Per spec item 12: cooldown starts only after TG#3 successfully dispatches.
-    try:
-        infra_pipeline_cooldown.record_hit(
-            alert_dict["camera_id"],
-            result.get("classification", "unknown"),
-            time.monotonic(),
-        )
-    except Exception:
-        log.exception("record_hit failed for alert_id=%s", alert_id)
 
     # Sweep old cache dirs (24h retention) — after all per-stage dispatches.
     try:

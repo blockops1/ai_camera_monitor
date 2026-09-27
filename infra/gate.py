@@ -93,8 +93,8 @@ the crops have no vehicle in them").
 Routing decision tree (LOCKED §11.37 + V2 §11.39 + §11.59 catchall fix):
   1. ANY crop high-conf vehicle-class → vehicle pipeline ("high_conf_vehicle")
   2. BOTH crops high-conf person → person pipeline ("high_conf_person")
-  3. ANY crop high-conf animal → animal classification ("animal_classified")
-     (animal pipeline not yet built — classified for future routing)
+  3. REMOVED (US-091, 2026-09-27): animal routing moved to VM1 (Stage 9c).
+     Gate no longer routes animals — they fall through to subjects check.
   4. All low conf → none ("no_object_detected")
   5. Mixed (vehicle somewhere in the high-conf mix) → vehicle pipeline
      ("mixed_vehicle_wins")
@@ -776,14 +776,12 @@ def _route_decision(
         elif len(high_conf) == 2 and high_conf[1].top_class == "person":
             return ("person", "person", top.top_confidence, "high_conf_person")
 
-    # Rule 3: ANY crop high-conf animal → animal classification (animal pipeline not yet built)
-    if top.top_class in ANIMAL_CLASSES:
-        return (
-            "animal",
-            top.top_class,
-            top.top_confidence,
-            "animal_classified",
-        )
+    # Rule 3: REMOVED (2026-09-27, US-091). Animal routing is now owned by
+    # VM1 (Stage 9c in listener/daemon.py). The gate no longer makes routing
+    # decisions for animals — it only does drop-or-keep + night-suppress.
+    # If an animal is the top detection but not in the subjects allowlist,
+    # it falls through to the subjects check below (perimeter cameras → none;
+    # subject-allowed cameras → animal via subject_allowed).
 
     # Rule 5: Mixed (person + other-not-vehicle, or other-not-vehicle alone)
     # Vehicle wins on ambiguity.
