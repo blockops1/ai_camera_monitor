@@ -1,20 +1,20 @@
 # Test Failure Triage - US-089
 
 **Run date:** 2026-09-26 (fresh verified run, run 963)
-**Baseline:** 432 tests, 372 passed, 60 failed, 2 skipped, 7 warnings
+**Baseline:** 432 tests, 376 passed, 56 failed, 2 skipped, 7 warnings
 **Confirmed pre-existing:** same failure class at HEAD 1b709b5 (pre-today).
 
 ---
 
-## Full-suite failure breakdown (60 total)
+## Full-suite failure breakdown (56 total)
 
 When running `pytest tests/ -q` (full suite, conftest + module-level setup),
-60 tests fail across 14 files:
+56 tests fail across 14 files:
 
 | # | File | Failures | Category |
 |---|---|---|---|
 | 1 | `tests/test_cross_diff_bbox_e2e.py` | 22 | E2E bbox assertion mismatch |
-| 2 | `tests/test_recipe.py` | 11 | FileNotFoundError (fixture files missing) |
+| 2 | `tests/test_recipe.py` | 7 | FileNotFoundError (fixture files missing) |
 | 3 | `tests/e2e/test_telegram_html_rendering.py` | 6 | Fixture design bug (conftest mock yields None) |
 | 4 | `tests/test_time_of_day.py` | 4 | Runtime errors (infra import -- env var not set individually) |
 | 5 | `tests/test_check_no_private_data.py` | 3 | Scanner finds real violations |
@@ -86,11 +86,11 @@ at module level (line 82 of `quick_classifier.py`). Any test importing from
 **conftest.py does NOT set this env var.** The previous triage claimed conftest
 sets it -- that was incorrect.
 
-**In full suite:** 45 tests still fail at runtime (Category B below) because the
+**In full suite:** 41 tests still fail at runtime (Category B below) because the
 infra import succeeds (env var is set by animal_recognition_e2e.py during collection)
 but the tests have other failures:
 - test_cross_diff_bbox_e2e.py: 22 assertion failures on actual event data
-- test_recipe.py: 11 FileNotFoundError (fixture files missing)
+- test_recipe.py: 7 FileNotFoundError (fixture files missing)
 - test_time_of_day.py: 4 RuntimeError (infra import chain, see below)
 - test_verify_recipe_live.py: 1 assertion error
 - test_farm_api_telegram_e2e.py: 1 assertion error (`assert 0 == 2`)
@@ -103,7 +103,7 @@ but the tests have other failures:
 
 ---
 
-## Category B: Runtime failures (infra import succeeds, tests fail at execution) -- 45 failures
+## Category B: Runtime failures (infra import succeeds, tests fail at execution) -- 41 failures
 
 These pass collection (env var is set by `tests/e2e/test_animal_recognition_e2e.py`
 at module level) but fail during execution:
@@ -111,7 +111,7 @@ at module level) but fail during execution:
 | File | Count | Root cause |
 |---|---|---|
 | `test_cross_diff_bbox_e2e.py` | 22 | Bbox IOU/center_x/no_fallback assertions fail on actual event data |
-| `test_recipe.py` | 11 | `FileNotFoundError` -- recipe fixture files missing on disk |
+| `test_recipe.py` | 7 | `FileNotFoundError` -- recipe fixture files missing on disk |
 | `test_time_of_day.py` | 4 | RuntimeError at import time (infra import chain) -- still fails because |
 | | | | individual test imports don't go through animal_recognition_e2e.py |
 | `test_verify_recipe_live.py` | 1 | Infra import path leads to assertion error |
@@ -121,7 +121,7 @@ at module level) but fail during execution:
 | `test_paths.py` | 2 | Env override tests fail due to infra import |
 | `test_home_env.py` | 1 | Token value in log message |
 
-**Subtotal: 45 full-suite runtime failures.**
+**Subtotal: 41 full-suite runtime failures.**
 
 ---
 
@@ -149,7 +149,7 @@ Scanner scripts find actual violations that should have been cleaned up:
 
 ## Grand totals
 
-**Full suite: 60 failures across 14 files** (definitive count from
+**Full suite: 56 failures across 14 files** (definitive count from
 `pytest tests/ -q`)
 
 The per-file breakdown above (section starting at "Full-suite failure breakdown")
@@ -158,7 +158,7 @@ is authoritative. The categories below group them by root cause for quick refere
 | Category | Count | Files |
 |---|---|---|
 | B - Bbox assertion mismatch | 22 | test_cross_diff_bbox_e2e.py |
-| B - Recipe fixture files missing | 11 | test_recipe.py |
+| B - Recipe fixture files missing | 7 | test_recipe.py |
 | C - Scanner finds real violations | 9 | 4 scanner files |
 | D - E2E fixture design bug | 6 | test_telegram_html_rendering.py |
 | B - Time-of-day runtime errors | 4 | test_time_of_day.py |
@@ -166,16 +166,16 @@ is authoritative. The categories below group them by root cause for quick refere
 | B - Infra import crash (quiet_hours + paths) | 3 | test_quiet_hours(1), test_paths(2) |
 | D - Miscellaneous (token log) | 1 | test_home_env.py |
 
-**Sum check:** 22 + 11 + 9 + 6 + 4 + 4 + 3 + 1 = 60.
+**Sum check:** 22 + 7 + 9 + 6 + 4 + 4 + 3 + 1 = 56.
 
-**Note on counting:** The 60 full-suite failures are the definitive count.
+**Note on counting:** The 56 full-suite failures are the definitive count.
 The ~54 individual-file collection crashes are separate -- they only occur when
 running a single test file without the animal_recognition_e2e.py env setup.
 Some individual-file crash files also have full-suite runtime failures
 (test_quiet_hours.py: 27 individual + 1 full-suite = 28 total issues).
 
-**Note on test_recipe.py:** 11 tests fail in full suite (5 TestApplyRecipe + 5
-TestVerifyRecipe with FileNotFoundError, 3 TestParseRecipeToml pass).
+**Note on test_recipe.py:** 7 tests fail in full suite (2 TestApplyRecipe + 5
+TestVerifyRecipe with FileNotFoundError, 3 TestParseRecipeToml + 3 TestApplyRecipe pass).
 
 ---
 
@@ -201,8 +201,8 @@ TestVerifyRecipe with FileNotFoundError, 3 TestParseRecipeToml pass).
    center_x, no_fallback_warning) fail on actual event data. Test thresholds or
    test data are stale.
 
-5. **`test_recipe.py` fixture files missing.** 11 tests fail with `FileNotFoundError`
-   (5 TestApplyRecipe + 5 TestVerifyRecipe). 3 TestParseRecipeToml pass.
+5. **`test_recipe.py` fixture files missing.** 7 tests fail with `FileNotFoundError`
+   (2 TestApplyRecipe + 5 TestVerifyRecipe). 3 TestParseRecipeToml + 3 TestApplyRecipe pass.
 
 6. **`test_time_of_day.py` / `test_quiet_hours.py` runtime errors.** Individual file
    runs crash at collection; full suite runs have 4+1 runtime failures for other
