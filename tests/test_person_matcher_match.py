@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 os.environ.setdefault("PERSON_EMBEDDER_LIVE", "0")
 os.environ.setdefault("FARMSURV_DATA_DIR", "data")
@@ -23,7 +23,6 @@ from person_matcher.match import (
     _match_cosine,
     match_person,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -42,8 +41,9 @@ def _make_candidate(person_id: str, label: str, tag: str, markers: list[str] | N
 def _mock_embedding(people_dir):
     """Create a mock person_embedder that returns deterministic embeddings."""
     import numpy as np
+
     from person_matcher.storage import load_person_embeddings
-    embeddings = load_person_embeddings()
+    load_person_embeddings()
     # Return the avg embedding for the first person (or a synthetic one).
     mock_vec = np.zeros(512, dtype=np.float32)
     mock_vec[0] = 1.0  # Signal: this is person_001's direction
@@ -282,7 +282,7 @@ class TestMatchCosine:
 
     def test_no_enrolled_people(self, tmp_path):
         """AC: no enrolled people returns matched=False."""
-        import person_matcher.storage as storage
+        from person_matcher import storage
         storage._people_dir._test_override = tmp_path
         try:
             # Mock the embedder to return a valid vector
@@ -314,11 +314,9 @@ class TestMatchCosine:
         # Embedding: orthogonal to our test vector (cosine ≈ 0)
         embeddings = np.zeros((1, 512), dtype=np.float32)
         embeddings[0, 1] = 1.0  # orthogonal to vec[0]=1.0
-        np.savez(str(people_dir / "embeddings.npz"), **{
-            "p1__avg": embeddings[0],
-        })
+        np.savez(str(people_dir / "embeddings.npz"), p1__avg=embeddings[0])
 
-        import person_matcher.storage as storage
+        from person_matcher import storage
         storage._people_dir._test_override = people_dir
         try:
             mock_vec = np.zeros(512, dtype=np.float32)
