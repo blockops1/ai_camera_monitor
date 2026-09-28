@@ -270,6 +270,18 @@ def stage_build_tg3(
 
     Returns the tg3 dict. The send_match_alert responsibility has been
     moved to daemon.py (per-stage dispatch, US-050b).
+
+    Args:
+        mode: VM1 classification ('vehicle', 'person', 'animal').
+        match_result: Match result dict from stage_perform_match.
+        vm2_result: VM2 detail output.
+        crop_a_path: Path to crop A image.
+        crop_b_path: Path to crop B image.
+        camera_label: Human-readable camera name.
+        alert: Parent alert dict.
+
+    Returns:
+        Telegram-ready message dict with 'caption' and 'photos' keys.
     """
     if mode not in ("vehicle", "person", "animal"):
         return {}
@@ -279,6 +291,7 @@ def stage_build_tg3(
         vm2_result,
         camera_label=camera_label,
         alert=alert,
+        classification=mode,
     )
 
 

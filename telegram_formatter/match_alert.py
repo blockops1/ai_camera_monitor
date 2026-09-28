@@ -114,6 +114,52 @@ def _format_runner_score(score: float) -> str:
     return f"{score:.1f}"
 
 
+def build_person_alert_body(
+    match_result: dict[str, Any],
+    vm2_result: dict[str, Any],
+) -> str:
+    """Build the matched-person body for a TG#3 match alert.
+
+    Slimmed layout for person matches (US-059e):
+        Recognized: <label>
+          Cosine: <cosine_score>   (tier1: <tier1_score>)
+          Runner-ups:
+            #1 <id>: cosine=<cosine>, tier1=<tier1>
+
+    Args:
+        match_result: Match result dict (must have 'matched' and 'candidate').
+        vm2_result: VM2 output dict (present for compatibility).
+
+    Returns:
+        Formatted body string for person matches.
+    """
+    cand = match_result.get("candidate") or {}
+    cosine_score = match_result.get("cosine_score", 0.0)
+    tier1_score = match_result.get("tier1_score", 0.0)
+    runner_ups = match_result.get("runner_ups", [])
+
+    # Support both shapes:
+    #   cosine path: match_result["candidate"]["label"]
+    #   tag/Jaccard path: match_result["label"] (flat dict)
+    label = cand.get("label") or match_result.get("label", "?")
+
+    lines: list[str] = [
+        f"<b>Recognized:</b> {label}",
+    ]
+    lines.append("")
+    lines.append(f"  <b>Cosine:</b> <code>{cosine_score:.4f}</code>   (tier1: <code>{tier1_score:.4f}</code>)")
+
+    if runner_ups:
+        lines.append("")
+        lines.append("  <b>Runner-ups:</b>")
+        for i, ru in enumerate(runner_ups[:2], 1):
+            cs = ru.get("cosine_score", 0.0)
+            t1 = ru.get("tier1_score", 0.0)
+            lines.append(f"    #{i} <b>{ru.get('id', '?')}</b>: cosine=<code>{cs:.4f}</code>, tier1=<code>{t1:.4f}</code>")
+
+    return "\n".join(lines)
+
+
 def build_match_alert_body(
     match_result: dict[str, Any],
     vm2_result: dict[str, Any],
@@ -271,8 +317,11 @@ def build_match_message(
         if cls == "animal":
             # Animal match: render recognized label + scores via build_animal_alert_body.
             lines.append(build_animal_alert_body(match_result, vm2_result))
+        elif cls == "person":
+            # Person match: render recognized label + cosine/tier1 scores.
+            lines.append(build_person_alert_body(match_result, vm2_result))
         else:
-            # Vehicle/person match: use the standard body block.
+            # Vehicle match: use the standard body block.
             score = match_result.get("score", 0.0)
             all_scores = match_result.get("all_scores", [])
 
@@ -289,13 +338,24 @@ def build_match_message(
 
             lines.append(build_match_alert_body(match_result, vm2_result, score, gap, runner_ups))
     else:
-        # No-match: slimmed body (US-067c) — header + runner-up only.
-        lines.append("\u26a0\ufe0f No match (confidence below threshold)")
+        # No-match: person-aware status wording (US-059e).
+        if cls == "person":
+            lines.append("Unrecognized person")
+        elif cls == "animal":
+            # Animal no-match: slimmed body with top_candidates.
+            if top_candidates:
+                top_id, top_score = top_candidates[0]
+                lines.append(f"  Runner-up: <b>{top_id}</b> ({_format_runner_score(top_score)})")
+            else:
+                lines.append("Unrecognized animal")
+        else:
+            # Vehicle no-match: slimmed body (US-067c) — header + runner-up only.
+            lines.append("\u26a0\ufe0f No match (confidence below threshold)")
 
-        # Top runner-up if available.
-        if top_candidates:
-            top_id, top_score = top_candidates[0]
-            lines.append(f"  Runner-up: <b>{top_id}</b> ({_format_runner_score(top_score)})")
+            # Top runner-up if available.
+            if top_candidates:
+                top_id, top_score = top_candidates[0]
+                lines.append(f"  Runner-up: <b>{top_id}</b> ({_format_runner_score(top_score)})")
 
     # Alert metadata (mirrors TG#1 / TG#2 caption layout).
     # Alert ID lines removed per US-073g — operator doesn't need these in TG captions.
