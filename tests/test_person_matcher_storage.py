@@ -14,12 +14,7 @@ os.environ.setdefault("FARMSURV_DATA_DIR", "data")
 import numpy as np
 import pytest
 
-from person_matcher.storage import (
-    cosine_sim,
-    load_known_people,
-    load_person_embeddings,
-)
-
+from person_matcher.storage import cosine_sim, load_known_people, load_person_embeddings
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -42,10 +37,7 @@ def fake_registry(tmp_path):
         [1.0, 0.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0, 0.0],
     ], dtype=np.float32)
-    np.savez(str(people_dir / "embeddings.npz"), **{
-        "person_001__avg": embeddings[0],
-        "person_002__avg": embeddings[1],
-    })
+    np.savez(str(people_dir / "embeddings.npz"), person_001__avg=embeddings[0], person_002__avg=embeddings[1])
 
     return people_dir
 
@@ -53,7 +45,7 @@ def fake_registry(tmp_path):
 @pytest.fixture()
 def set_people_dir_override(fake_registry):
     """Apply the test override to the module."""
-    import person_matcher.storage as storage
+    from person_matcher import storage
     storage._people_dir._test_override = fake_registry
     yield fake_registry
     # Cleanup
@@ -80,7 +72,7 @@ class TestLoadKnownPeople:
 
     def test_returns_empty_when_no_file(self, tmp_path):
         """AC: returns [] when known_people.json is missing."""
-        import person_matcher.storage as storage
+        from person_matcher import storage
         storage._people_dir._test_override = tmp_path
         try:
             result = load_known_people()
@@ -94,7 +86,7 @@ class TestLoadKnownPeople:
         people_dir = tmp_path / "known" / "people"
         people_dir.mkdir(parents=True)
         (people_dir / "known_people.json").write_text("not valid json{{{")
-        import person_matcher.storage as storage
+        from person_matcher import storage
         storage._people_dir._test_override = people_dir
         try:
             result = load_known_people()
@@ -108,7 +100,7 @@ class TestLoadKnownPeople:
         people_dir = tmp_path / "known" / "people"
         people_dir.mkdir(parents=True)
         (people_dir / "known_people.json").write_text('{"key": "value"}')
-        import person_matcher.storage as storage
+        from person_matcher import storage
         storage._people_dir._test_override = people_dir
         try:
             result = load_known_people()
@@ -137,7 +129,7 @@ class TestLoadPersonEmbeddings:
 
     def test_returns_empty_when_no_file(self, tmp_path):
         """AC: returns {} when embeddings.npz is missing."""
-        import person_matcher.storage as storage
+        from person_matcher import storage
         storage._people_dir._test_override = tmp_path
         try:
             result = load_person_embeddings()
@@ -151,7 +143,7 @@ class TestLoadPersonEmbeddings:
         people_dir = tmp_path / "known" / "people"
         people_dir.mkdir(parents=True)
         (people_dir / "embeddings.npz").write_bytes(b"not a npz file")
-        import person_matcher.storage as storage
+        from person_matcher import storage
         storage._people_dir._test_override = people_dir
         try:
             result = load_person_embeddings()
