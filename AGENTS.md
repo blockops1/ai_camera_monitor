@@ -232,52 +232,54 @@ print(f'quiet hours [{(ss + timedelta(minutes=30)).time()}, {(sr - timedelta(min
 python3 -c "from infra._telegram_origin import origin_prefix; print(origin_prefix('HOME'))"
 ```
 
-## Runtime (snapshot 2026-09-26, refreshed 06:35 EDT)
+## Runtime (snapshot 2026-09-29, refreshed 17:05 EDT)
 
 - venv: `~/farm-surveillance-v2/.venv/` (Python 3.11)
-- Listener: **RUNNING** as of 2026-09-26 06:35 EDT (PID **60267**, `com.farm.surveillance.v2`). All three processes (listener :8090, MCP :8091, API :8092) live in one PID. Listener bytecode includes: US-069 (`09d93e8`+`0835952`), US-074 HTML parse_mode (`ba2ff5f`+`1d7ac37`), US-074b per-InputMedia parse_mode (`c843a8b`), US-075 bold labels (`637f7fc`), US-076 API/MCP enablement (`722ee2b`+`0f09fc6`), US-079 heartbeat API/MCP lines (`b332500`). US-073h `HealthReporter` (10-min cadence) emitting `listener_health` + `camera_health` + `api_health` + `mcp_health` to daemon.log.
-- Active board: `coder-farm-surveillance` (kanban). Empty. All 10 cards filed today completed and closed (US-076, US-077, US-078, US-079, US-080a/b/c/e/f, US-081, US-082, US-084).
-- **Three-process deployment (NEW 2026-09-25, US-076):** listener :8090 + MCP :8091 + API :8092 all spawned by `listener/daemon.py` daemon-thread hooks (`_start_mcp_server` line 1014, `_start_api_server` line 1073, called before `app.run()` at line 1196). Gated by `FARMSURV_MCP_ENABLED=1` + `FARMSURV_API_ENABLED=1` in `~/.env`. Tokens ≥32 chars, bind to Tailscale (100.64.0.10).
-- **Local Qwen context (V2-bump 2026-09-24 ~18:25 EDT):** llama-server `-c 196608`, `-np 2`, `--kv-unified`. `model.context_length: 196608` in `~/.hermes/config.yaml`. RSS ~25.7 GB. PID 28533 on :8093.
+- Listener: **RUNNING** as of 2026-09-29 17:05 EDT (PID **77841**, `com.farm.surveillance.v2`, uptime 2d 8h). All three processes (listener :8090, MCP :8091, API :8092) live in one PID. Listener bytecode includes: US-069 (`09d93e8`+`0835952`), US-074 HTML parse_mode (`ba2ff5f`+`1d7ac37`), US-074b per-InputMedia parse_mode (`c843a8b`), US-075 bold labels (`637f7fc`), US-076 API/MCP enablement (`722ee2b`+`0f09fc6`), US-079 heartbeat API/MCP lines (`b332500`), US-080 E2E test coverage, US-081 animal embedder live, US-082 E2E animal test, US-084 timestamp cosmetic, US-091 VM1 routing override (`eefe5f03`), US-059a/b/d/e person recognition wiring. US-073h `HealthReporter` (10-min cadence) emitting `listener_health` + `camera_health` + `api_health` + `mcp_health` to daemon.log.
+- Active board: `coder-farm-surveillance` (kanban). 2 review, 0 blocked, 0 running. `t_f1fb18cf` (US-059b review), `t_ee0d8b7d` (US-059e review, auto-promoted from blocked 2026-09-29). 181 cards done.
+- **Three-process deployment (2026-09-25, US-076):** listener :8090 + MCP :8091 + API :8092 all spawned by `listener/daemon.py` daemon-thread hooks (`_start_mcp_server` line 1014, `_start_api_server` line 1073, called before `app.run()` at line 1196). Gated by `FARMSURV_MCP_ENABLED=1` + `FARMSURV_API_ENABLED=1` in `~/.env`. Tokens >=32 chars, bind to Tailscale (100.64.0.10).
+- **Local Qwen context (2026-09-24 ~18:25 EDT):** llama-server `-c 196608`, `-np 2`, `--kv-unified`. `model.context_length: 196608` in `~/.hermes/config.yaml`. RSS ~25.7 GB. PID 24330 on :8093. Vision endpoint at `:8080` healthy (HTTP 200 on `/v1/chat/completions`, ~1.8s response).
 - **Per-camera night suppress (V2-069):** `FARMSURV_NIGHT_SUPPRESS_CAMERAS=OUTSIDE_BACK_SOLAR` + `FARMSURV_NIGHT_SUPPRESS_CLASSES=car,truck,bicycle,motorcycle,bus` active. Confirmed live in boot log.
-- **Telegram caption format (US-074+074b+075, 2026-09-25):** HTML parse_mode (`<b>`+`<code>` allowed via `escape_html` allowlist). `sendMessage`/`sendPhoto` honor top-level `parse_mode`; `sendMediaGroup` requires parse_mode per InputMedia (US-074b fix, was top-level-silently-ignored bug). Bold-label rule: word-before-colon bold, word-after plain. Bold `<b>...</b>` for section labels, `<code>...</code>` for timestamps/IDs. Em-dash between attributes removed in US-075.
+- **Telegram caption format (US-074+074b+075):** HTML parse_mode (`<b>`+`<code>` allowed via `escape_html` allowlist). `sendMessage`/`sendPhoto` honor top-level `parse_mode`; `sendMediaGroup` requires parse_mode per InputMedia (US-074b fix, was top-level-silently-ignored bug). Bold-label rule: word-before-colon bold, word-after plain. Bold `<b>...</b>` for section labels, `<code>...</code>` for timestamps/IDs. Em-dash between attributes removed in US-075.
 - **Animal recognition (V2-045, COMPLETE 2026-09-25):** US-045a/b/c/d/e/f all done. MegaDescriptor-L-384 wrapper at `infra/animal_embedder.py`. Animal branch wired into pipeline Stage 12+13. `scripts/enroll_animal.py` CLI. Tier-2 cosine + Tier-1 Jaccard matching at `animal_matcher/match.py`. **Finnegan enrolled** 2026-09-25 19:24 EDT — labeled "Finnegan" (species dog, breed goldendoodle, distinctive: black collar, curly coat, white patch). 2 individual crop embeddings + 1 averaged stored in `data/known/animals/embeddings.npz` under keys `finnegan__crop_a.png`, `finnegan__crop_b.png`, `finnegan__avg`.
 - **Animal embedder live mode (US-081):** `ANIMAL_EMBEDDER_LIVE=1` set in `~/.env` (variable added to `.env.example` with comment). MegaDescriptor-L-384 weights cached at `~/Library/Caches/huggingface/hub/`. Live embeddings used for Finnegan enrollment.
-- **Forgejo recovery mirror (US-068e):** `.git/hooks/post-merge` wired. Local `1b709b5` = forgejo `1b709b5` (in sync, refreshed 2026-09-26 06:35 EDT).
-- Disk: ~228 GiB free / 460 GiB (48% used).
+- **Person recognition (V2-059, IN PROGRESS):** US-059a/b/d/e shipped (person_embedder.py via CLIP-ViT-B/32, person_matcher with CLIP cosine + Tier-1 Jaccard, person branch in pipeline Stage 12+13, TG#3 wiring). US-059c (enrollment CLI + initial enrollment) not yet dispatched. Jeremiah enrollment pending operator action.
+- **Forgejo recovery mirror (US-068e):** `.git/hooks/post-merge` wired. Local `c52bd90b` = forgejo `c52bd90b` (in sync, refreshed 2026-09-29 17:05 EDT). Last push-log entry: 2026-09-28 16:34:01 EDT shows `push exit=128` (forgejo port 3000 unreachable) but mirror is in sync -- retry/recovery path succeeded after the failure log entry; investigate log-vs-state divergence if this recurs.
+- **Worktree reap (2026-09-29):** 48 stale worktrees reaped (~9 GB -> 17 MB on `.worktrees/`). All work preserved via `archive/<branch>-<sha>` tags. 6 merged branches with no worktree deleted. 3 exceptions handled: US-067d/US-068b7 original branches tagged-archived (remediation on main); US-060b tagged-archived (officially superseded per US-087 triage).
+- Disk: ~224 GiB free / 460 GiB (5% used).
 - Last commits on main:
-  - `1b709b5` US-084: fix double-space in timestamp caption
-  - `080e74d` US-082: add @pytest.mark.e2e to all 5 test classes
-  - `d7ffdd2` US-082: E2E test for animal recognition pipeline
-  - `b332500` US-079: Report API + MCP server health in heartbeat
-  - `ad4eb5b` US-080e: Add E2E tests for API server and MCP server wire shape (32 tests)
-  - `0ea6a50` US-077: Add bin/api_live_smoke.sh -- live smoke test for API :8092
-  - `7e334c1` US-081: Fix stale L-384 log message in load_megadescriptor()
-  - `15a916c` US-081: animal embedder live + Finnegan enrolled
-  - `0f09fc6` US-076: Fix ruff BLE001 in net_bind.py -- catch specific exceptions
-  - `722ee2b` US-076: Enable API + MCP servers + fix Tailscale bind address auto-detection
+  - `c52bd90b` US-059e: Wire person matches into TG#3 alert pipeline (mirror animal TG#3)
+  - `f51d9699` US-059d: lint fixes on test files (ruff --fix)
+  - `eb383fea` US-059d: Add person_matcher/storage.py + config.py + rewrite match.py with CLIP cosine + Tier-1 Jaccard
+  - `eefe5f03` US-091: VM1 owns routing decision (gate drops, VM1 classifies)
+  - `c715d1f6` docs: ARCHITECTURE-alert-pipeline-2026-09-27.md (10-issue audit before US-091)
+  - `22acec78` US-059b: Add infra/person_embedder.py -- CLIP-ViT-B/32 wrapper (512-dim embedding)
+  - `656d9e74` US-059a: E2E tests for person match branch in pipeline Stage 12 + Stage 13
+  - `8488143c` US-089: correct triage doc counts -- 60->56 failures, test_recipe.py 11->7, Category B 45->41
+  - `c03763fe` US-089: fix grand totals table -- correct categorization and sum check
+  - `9e2e36f1` US-089: corrected triage doc -- fixed counts, conftest claim, and scanner total
 
 ## Phase status (per PRD arcs)
 
 | PRD | Scope | Status |
 |---|---|---|
 | V2-046 | YOLO night false-alarm suppression | SUPERSEDED by V2-062 |
-| V2-059 | Person + body recognition (OSNet body+face) | PRD drafted (`docs/PHASE-V2-059-PRD-person-body-recognition.json`), unfiled, no cards dispatched |
-| V2-060 | VM1 redesign (class + subclass + face_visible + count) | PARTIAL — US-060c/d/e done; US-060a/b blocked |
+| V2-059 | Person + body recognition (CLIP-ViT-B/32 + Tier-1 Jaccard) | PARTIAL — US-059a/b/d/e done; US-059c (enrollment CLI + initial enrollment) not yet dispatched |
+| V2-060 | VM1 redesign (class + subclass + face_visible + count) | DONE -- all 5 cards done; US-060b officially superseded per US-087 triage, schema-shape guard unnecessary under strict JSON response_format |
 | V2-061 | Frame retention policy (20 GB cap, hourly cleanup) | DONE — US-061a/b/c/e done; US-061d shipped then reverted per anti-pattern (no backup cleanup plist) |
 | V2-062 | Night-time headlight FP suppression (suntime + quiet hours + baseline override) | DONE — US-062a/b/c/d/e/f/g all done |
 | V2-068 | MCP server + farm_api resource layer (10 resources) + per-alert event.json | DONE — US-068a/b1-b9/c/d/e all done; orphan-merge + fix1/fix2 landed via US-068b7 + US-068c-fix1/2 |
 | V2-069 | Per-camera + per-class night suppress | DONE — US-069a/b/c/d done; import-order bug fixed at `09d93e8`; fail-loud at `0835952` |
 | V2-080 | Unit-test audit + E2E-first convention | DONE — US-080a audit + US-080b delete classified DELETE + US-080c REPLACE-WITH-E2E + US-080e/f E2E tests for farm_api + alert_route (71 tests) |
+| V2-091 | VM1 owns routing decision (gate drops, VM1 classifies) | DONE -- `eefe5f03` on main; 233 runtime override events since 14:03 EDT 2026-09-29 (gate=md -> vm1=vehicle/person) |
 | **V2-045** | **Animal body recognition (MegaDescriptor-L-384)** | **DONE** — US-045a-f all done; Finnegan enrolled; live embeddings active |
 
 ## Open work
 
-- **Lint rot (73 errors, pre-existing):** `uv run ruff check .` fails. 42 fixable with `--fix`. None in production code paths (listener/, infra/api_server.py, infra/mcp_server.py, infra/animal_embedder.py). All in archive/, scripts/, tests/. Pre-existed before today's work (verified at HEAD `1b709b5`). File as US-085 if operator wants clean lint.
-- **V2-059 cards — not yet filed.** PRD placeholder exists; empty file on disk. OSNet body+face recognition workstream. Needs PRD draft before cards can be filed.
-- **V2-060 US-060a/b — blocked** (carry from earlier sessions; no recent movement).
-- **`_extract_ip_from_rtsp` IndexError fix** — flagged 2026-09-20; listener is currently running without this fix; no observed crash in current event stream. Lower priority.
-- **Solar cameras night-offline** (OUTSIDE_BACK_SOLAR + OUTSIDE_FRONT_SOLAR show `healthy=False, frames=0` in heartbeat at 06:30 EDT before sunrise 06:56 EDT). Expected; will recover at sunrise.
+- **V2-059 US-059c not yet filed** (enrollment CLI for persons + initial Jeremiah enrollment). Mirrors US-045d animal enrollment. Required before person matcher fires live.
+- **`vision_health` heartbeat counter does not reset on success** (operator-visible `up=False last_call_age_s=N` while vision route is healthy since 14:05 EDT 2026-09-29). Misleading; the route is fine. Worth a US-XXX fix to reset counter on successful `/v1/chat/completions` response.
+- **`_extract_ip_from_rtsp` IndexError fix** -- US-088 shipped (`7ab56507`); confirmed live. No longer open.
+- **Lint rot (US-085, 2026-09-29):** clean lint pass landed; status post-refresh TBD. (Was: 73 errors pre-existing; 42 fixable with `--fix`. None in production code paths.)
 
 ---
 
