@@ -1,3 +1,0 @@
-# Forgejo mirror auto-push log
-# Populated by .git/hooks/post-merge
-# Format: [YYYY-MM-DD HH:MM:SS TZ] post-merge: ...

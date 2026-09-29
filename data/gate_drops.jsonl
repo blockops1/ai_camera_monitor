@@ -1,7 +1,0 @@
-{"ts": "2026-09-24T16:55:59.433298+00:00", "camera": "OUTSIDE_FRONT_SOLAR", "top_class": "person", "confidence": 0.8314464688301086, "reason": "top_class_person_not_in_subjects"}
-{"ts": "2026-09-24T16:56:08.704501+00:00", "camera": "OUTSIDE_FRONT_POWER", "top_class": "person", "confidence": 0.6158214211463928, "reason": "top_class_person_not_in_subjects"}
-{"ts": "2026-09-24T16:58:11.913915+00:00", "camera": "OUTSIDE_BACK_SOLAR", "top_class": "person", "confidence": 0.781064510345459, "reason": "top_class_person_not_in_subjects"}
-{"ts": "2026-09-24T17:03:09.514042+00:00", "camera": "OUTSIDE_BACK_SOLAR", "top_class": "kite", "confidence": 0.5510989427566528, "reason": "top_class_kite_not_in_subjects"}
-{"ts": "2026-09-24T17:03:48.397677+00:00", "camera": "OUTSIDE_BACK_SOLAR", "top_class": "person", "confidence": 0.6316060423851013, "reason": "top_class_person_not_in_subjects"}
-{"ts": "2026-09-24T18:22:21.432519+00:00", "camera": "OUTSIDE_FRONT_SOLAR", "top_class": "train", "confidence": 0.6560102701187134, "reason": "top_class_train_not_in_subjects"}
-{"ts": "2026-09-24T18:23:05.775761+00:00", "camera": "OUTSIDE_FRONT_SOLAR", "top_class": "traffic light", "confidence": 0.5768877863883972, "reason": "top_class_traffic light_not_in_subjects"}

@@ -63,3 +63,7 @@ yolo*.pt
 
 # git worktrees (moved to ~/archive/v2-worktrees-YYYY-MM-DD when done)
 .worktrees/
+
+# Runtime telemetry + push log (US-XXX housekeeping)
+data/gate_drops.jsonl
+scripts/push_log.txt
