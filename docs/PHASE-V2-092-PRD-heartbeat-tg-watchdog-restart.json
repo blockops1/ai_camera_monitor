@@ -1,0 +1,100 @@
+{
+  "id": "V2-092",
+  "title": "Heartbeat-to-Telegram failure alerts + restart-then-alert watchdog",
+  "status": "draft",
+  "created": "2026-09-29",
+  "owner": "Mr. V (Rolf Versluis)",
+  "operator_objective": "Make the listener's periodic health heartbeat actively report FAILURES to Telegram, and give the dormant bin/health_watchdog.sh a real restart-ladder so transient listener failures are self-healed before paging the operator.",
+  "current_state": {
+    "heartbeat_path": "listener/health.py US-073h HealthReporter fires every 600s (env LISTENER_HEALTH_INTERVAL_SECONDS). _emit() logs a structured multi-line block (listener_health + camera_health + vision_health + cleanup_health + telegram_health + api_health + mcp_health) via log.info(). NO Telegram send path exists. Source: infra/farm_api/vision.py:18 documents 'vision_analyzer.py exposes no runtime state -- no heartbeat'.",
+    "watchdog_path": "bin/health_watchdog.sh exists at 363 lines. Has 5 checks (listener PID, log freshness, camera health, disk usage, forgejo drift). TG send on FAIL only at lines 311-352 (FAIL > 0 AND token+chat_id set). WATCHDOG_SILENT=1 in ~/.env short-circuits at line 21. Script is NOT in crontab (crontab -l returns 'no crontab for jill') and NOT in any LaunchAgent (verified ~/Library/LaunchAgents/). It is dormant code at runtime.",
+    "restart_safety": "references/listener-lifecycle.md documents: launchctl kickstart -k may not rotate -- verify PID, fallback to bootout/bootstrap. SIGKILL is reserved for SIGTERM-ignored case; first move is always SIGTERM. restart path runs from execute_code via subprocess.run, not the gated terminal tool."
+  },
+  "sub_stories": [
+    {
+      "id": "US-092a",
+      "title": "Heartbeat TG path: send to Telegram on FAILURE only",
+      "scope": [
+        "listener/health.py: add an 'is_any_unhealthy' parser over the structured block (regex: lines containing up=False, healthy=False, or unhealthy cameras). On FAIL, build a compact summary message and call a new infra.telegram_health_alert.send_health_alert(block, summary) function.",
+        "New infra/telegram_health_alert.py: thin wrapper around telegram_alerts.sendMessage. Returns (rc, sent_text) so health.py can log the outcome. Reads TELEGRAM_BOT_TOKEN + TELEGRAM_HOME_CHAT_ID from env (same as alert pipeline).",
+        "Always log block to daemon.log (current behavior unchanged).",
+        "Compact summary format on FAIL: 'Health ALERT (<HH:MM EDT>): <N> issues -- <comma-joined short labels>' where short labels come from parsing each unhealthy line into 'service: status' (e.g. 'vision: up=False'). Full block as <pre>-formatted follow-up if user requests; first message is the compact one.",
+        "New env vars in .env.example: LISTENER_HEALTH_TG_ON_FAIL=1 (1=ON default, 0=OFF).",
+        "Working hours 8am-6pm window: NOT applied here because user wants TG only on FAIL (failures are always actionable). Document this decision in a module docstring."
+      ],
+      "files": [
+        "listener/health.py",
+        "infra/telegram_health_alert.py (new)",
+        ".env.example"
+      ],
+      "merge_blockers": [
+        "US-092c must ship first (otherwise the watchdog never gets the restart ladder either)"
+      ]
+    },
+    {
+      "id": "US-092b",
+      "title": "Watchdog restart ladder: 3 attempts with backoff before TG alert",
+      "scope": [
+        "bin/health_watchdog.sh: refactor to expose a reusable function that classifies each failure as 'restartable' or 'non_restartable'. Restartable today = listener PID down. Non-restartable = disk full, log stale from non-listener source, camera unhealthy, forgejo drift behind.",
+        "New infra/watchdog_restart.py: Python module with restart_listener() that runs subprocess.run(['launchctl','kickstart','-k',f'gui/<uid>/com.farm.surveillance.v2']) and returns (rc, new_pid). Does NOT use the gated terminal tool. Verifies PID change (old != new); falls back to bootout/bootstrap if kickstart did not rotate (per listener-lifecycle.md recipe).",
+        "bin/health_watchdog.sh: orchestrate the ladder. Attempt 1 (immediate): for each restartable failure, call restart_listener(), re-check the condition. Wait WATCHDOG_RESTART_BACKOFF_SECONDS[0] (default 30). Attempt 2: same. Wait WATCHDOG_RESTART_BACKOFF_SECONDS[1] (default 60). Attempt 3: same. Wait WATCHDOG_RESTART_BACKOFF_SECONDS[2] (default 120). After 3 failed attempts: send TG alert with 'restart ladder exhausted' framing.",
+        "Non-restartable failures: skip retry, include in TG alert immediately.",
+        "New env vars in .env.example: WATCHDOG_MAX_RESTART_ATTEMPTS=3 (0 = disable retry, old behavior of alert-on-first-fail). WATCHDOG_RESTART_BACKOFF_SECONDS='30,60,120' (comma-separated seconds per attempt tier).",
+        "All attempts + outcomes logged to logs/health_watchdog.log (new RotatingFileHandler-managed file). TG summary includes attempt count + elapsed time + which services were retried."
+      ],
+      "files": [
+        "bin/health_watchdog.sh",
+        "infra/watchdog_restart.py (new)",
+        ".env.example",
+        "logs/health_watchdog.log (new, runtime output)"
+      ],
+      "merge_blockers": [
+        "US-092c must ship first"
+      ]
+    },
+    {
+      "id": "US-092c",
+      "title": "Schedule watchdog from inside the listener heartbeat (no cron, no LaunchAgent)",
+      "scope": [
+        "listener/health.py: add a second daemon thread _watchdog_loop at cadence LISTENER_HEALTH_WATCHDOG_INTERVAL_SECONDS (default 300 = 5 min). Each fire: subprocess.run(['bash', '<repo>/bin/health_watchdog.sh'], capture_output=True, timeout=270). Log stdout+stderr to daemon.log with 'watchdog:' prefix.",
+        "WATCHDOG_SILENT=1 in env: short-circuits both the script and the dispatcher (preserves the existing off-switch).",
+        "New env var LISTENER_HEALTH_WATCHDOG_ENABLED=1 (default 1 = ON, 0 = OFF) is the dispatcher kill switch. Both this AND WATCHDOG_SILENT=1 must be honored; either OFF = skip the fire.",
+        "After merge: orchestrator (Jill) edits ~/.env to (a) remove WATCHDOG_SILENT=1, (b) add WATCHDOG_MAX_RESTART_ATTEMPTS=3, (c) add WATCHDOG_RESTART_BACKOFF_SECONDS='30,60,120', (d) add LISTENER_HEALTH_TG_ON_FAIL=1, (e) add LISTENER_HEALTH_WATCHDOG_ENABLED=1. Then restart the listener.",
+        "Anti-pattern guard: this is a LaunchAgent-equivalent scheduler. Justify in card body why it does not violate AGENTS.md 'no backup cleanup plist' rule: the watchdog is a single in-process thread, not a second process or a second surface -- it lives inside the supervised listener, so a listener crash takes the watchdog with it (no orphan thread)."
+      ],
+      "files": [
+        "listener/health.py",
+        ".env.example"
+      ],
+      "merge_blockers": [],
+      "card_note_AGENTS_md": "Card body MUST NOT include AGENTS.md update ACs. Orchestrator updates Runtime snapshot when US-092c commit lands."
+    }
+  ],
+  "test_strategy": {
+    "rule": "E2E-first per V2-080. Each sub-story produces a verifiable artifact.",
+    "US-092a": "tests/e2e/test_heartbeat_tg_on_fail.py: stub Telegram bot URL via env var (TELEGRAM_API_BASE override), kill a camera stream to force camera_health.healthy=False, advance interval to 0 (LISTENER_HEALTH_INTERVAL_SECONDS=1), assert log line shows compact TG summary + stub bot received POST. Stub is operator-local only; not in production config.",
+    "US-092b": "tests/e2e/test_watchdog_restart_ladder.py: stub launchctl, simulate listener-down 3x, assert watchdog log shows 3 restart attempts with backoff, assert TG alert only fires after attempt 3 fails. Plus non-restartable test: simulate disk-full, assert TG alert fires immediately without retry.",
+    "US-092c": "tests/e2e/test_heartbeat_fires_watchdog.py: with WATCHDOG stub (echo 'pass' > tmp file), assert file appears within 5 min via timer thread (test uses interval=2)."
+  },
+  "activation_checklist": [
+    "1. All three sub-stories merged to main.",
+    "2. ~/.env updates applied: WATCHDOG_SILENT=1 removed; WATCHDOG_MAX_RESTART_ATTEMPTS=3, WATCHDOG_RESTART_BACKOFF_SECONDS='30,60,120', LISTENER_HEALTH_TG_ON_FAIL=1, LISTENER_HEALTH_WATCHDOG_ENABLED=1 added.",
+    "3. Listener restarted via launchctl kickstart -k (or bootout/bootstrap fallback per listener-lifecycle.md).",
+    "4. Verify heartbeat block shows up in daemon.log with the new 'tg_sent=False' / 'tg_sent=True' fields within 10 min.",
+    "5. Verify watchdog log appears at logs/health_watchdog.log within 5 min.",
+    "6. Force a failure (e.g. kill listener) to confirm restart ladder fires 3x before TG alert. RECOMMENDED: do this once to prove the ladder, then re-enable listener. Document in AGENTS.md Runtime snapshot."
+  ],
+  "out_of_scope": [
+    "Replacing bin/health_watchdog.sh with a Python rewrite (the bash script's 5 checks are stable; refactoring it is independent of this arc).",
+    "Restarting the vision LLM (llama-server-vision) from the watchdog. Vision has its own restart surface (LaunchAgent ai.hermes.llama-server-vision) with its own supervisor; nested restart coordination is a separate PRD.",
+    "Restarting the Reolink gateway from the watchdog. Same reasoning -- separate supervisor.",
+    "Camera RTSP reconnection. Already handled by PersistentRTSPReader's 3600s in-thread cadence (US-049). The watchdog should observe but not retry.",
+    "Adding the watchdog restart ladder to bin/mcp_smoke_listener.sh or any other smoke harness."
+  ],
+  "risks": [
+    "Restart ladder could mask a real listener crash by healing it silently. Mitigation: log every attempt + outcome; first TG alert fires only after the ladder exhausts, but every attempt is visible in logs/health_watchdog.log.",
+    "WATCHDOG_RESTART_BACKOFF_SECONDS='30,60,120' = ~3.5 min total before first TG alert. If operator wants faster notification, set WATCHDOG_MAX_RESTART_ATTEMPTS=1 (alert on first fail).",
+    "Restart ladder sleeps the bash script for backoff seconds. If the listener takes >30s to come up, attempt 2 may overlap with attempt 1's restart still completing. Mitigation: kickstart is idempotent + checks PID change; overlapping calls are safe.",
+    "subprocess.run timeout=270s on the watchdog fire. If the script hangs in the restart ladder (>270s), dispatcher logs 'watchdog: timeout' and continues. Next fire is 5 min later."
+  ]
+}

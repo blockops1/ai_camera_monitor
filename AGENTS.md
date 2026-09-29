@@ -236,7 +236,7 @@ python3 -c "from infra._telegram_origin import origin_prefix; print(origin_prefi
 
 - venv: `~/farm-surveillance-v2/.venv/` (Python 3.11)
 - Listener: **RUNNING** as of 2026-09-29 17:05 EDT (PID **77841**, `com.farm.surveillance.v2`, uptime 2d 8h). All three processes (listener :8090, MCP :8091, API :8092) live in one PID. Listener bytecode includes: US-069 (`09d93e8`+`0835952`), US-074 HTML parse_mode (`ba2ff5f`+`1d7ac37`), US-074b per-InputMedia parse_mode (`c843a8b`), US-075 bold labels (`637f7fc`), US-076 API/MCP enablement (`722ee2b`+`0f09fc6`), US-079 heartbeat API/MCP lines (`b332500`), US-080 E2E test coverage, US-081 animal embedder live, US-082 E2E animal test, US-084 timestamp cosmetic, US-091 VM1 routing override (`eefe5f03`), US-059a/b/d/e person recognition wiring. US-073h `HealthReporter` (10-min cadence) emitting `listener_health` + `camera_health` + `api_health` + `mcp_health` to daemon.log.
-- Active board: `coder-farm-surveillance` (kanban). 2 review, 0 blocked, 0 running. `t_f1fb18cf` (US-059b review), `t_ee0d8b7d` (US-059e review, auto-promoted from blocked 2026-09-29). 181 cards done.
+- Active board: `coder-farm-surveillance` (kanban). 3 ready (US-092a/b/c, all priority 9), 1 review (US-059b t_f1fb18cf), 0 blocked, 0 running. 182 cards done. New V2-092 PRD queued: heartbeat TG-on-fail + watchdog restart ladder + in-listener scheduling.
 - **Three-process deployment (2026-09-25, US-076):** listener :8090 + MCP :8091 + API :8092 all spawned by `listener/daemon.py` daemon-thread hooks (`_start_mcp_server` line 1014, `_start_api_server` line 1073, called before `app.run()` at line 1196). Gated by `FARMSURV_MCP_ENABLED=1` + `FARMSURV_API_ENABLED=1` in `~/.env`. Tokens >=32 chars, bind to Tailscale (100.64.0.10).
 - **Local Qwen context (2026-09-24 ~18:25 EDT):** llama-server `-c 196608`, `-np 2`, `--kv-unified`. `model.context_length: 196608` in `~/.hermes/config.yaml`. RSS ~25.7 GB. PID 24330 on :8093. Vision endpoint at `:8080` healthy (HTTP 200 on `/v1/chat/completions`, ~1.8s response).
 - **Per-camera night suppress (V2-069):** `FARMSURV_NIGHT_SUPPRESS_CAMERAS=OUTSIDE_BACK_SOLAR` + `FARMSURV_NIGHT_SUPPRESS_CLASSES=car,truck,bicycle,motorcycle,bus` active. Confirmed live in boot log.
@@ -271,7 +271,8 @@ python3 -c "from infra._telegram_origin import origin_prefix; print(origin_prefi
 | V2-068 | MCP server + farm_api resource layer (10 resources) + per-alert event.json | DONE — US-068a/b1-b9/c/d/e all done; orphan-merge + fix1/fix2 landed via US-068b7 + US-068c-fix1/2 |
 | V2-069 | Per-camera + per-class night suppress | DONE — US-069a/b/c/d done; import-order bug fixed at `09d93e8`; fail-loud at `0835952` |
 | V2-080 | Unit-test audit + E2E-first convention | DONE — US-080a audit + US-080b delete classified DELETE + US-080c REPLACE-WITH-E2E + US-080e/f E2E tests for farm_api + alert_route (71 tests) |
-| V2-091 | VM1 owns routing decision (gate drops, VM1 classifies) | DONE -- `eefe5f03` on main; 233 runtime override events since 14:03 EDT 2026-09-29 (gate=md -> vm1=vehicle/person) |
+| **V2-091** | VM1 owns routing decision (gate drops, VM1 classifies) | DONE -- `eefe5f03` on main; 233 runtime override events since 14:03 EDT 2026-09-29 (gate=md -> vm1=vehicle/person) |
+| **V2-092** | Heartbeat TG-on-fail + watchdog restart ladder + in-listener scheduling | QUEUED -- PRD at `docs/PHASE-V2-092-PRD-heartbeat-tg-watchdog-restart.json`; US-092a/b/c dispatched priority 9 (low); t_db788b33, t_4acdfbe1, t_af3f5808 |
 | **V2-045** | **Animal body recognition (MegaDescriptor-L-384)** | **DONE** — US-045a-f all done; Finnegan enrolled; live embeddings active |
 
 ## Open work
