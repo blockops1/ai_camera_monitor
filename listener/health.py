@@ -60,6 +60,15 @@ from collections import deque
 
 log = logging.getLogger(__name__)
 
+# US-092a: import for TG-on-fail alert.
+# Direct import from the submodule to avoid triggering infra.__init__.py
+# which pulls in env_required machinery.
+def send_health_alert(block: str, summary: str) -> tuple[int, str]:
+    """Re-export from infra.telegram_health_alert."""
+    from infra.telegram_health_alert import send_health_alert as _sha
+
+    return _sha(block, summary)
+
 # ---------------------------------------------------------------------------
 # IP redaction (shared with infra/farm_api/vision.py).
 # ---------------------------------------------------------------------------
@@ -211,6 +220,30 @@ class HealthReporter:
         # Join and emit as one block so the log file doesn't interleave.
         block = "\n".join(lines)
         log.info("health: heartbeat:\n%s", block)
+
+        # TG-on-fail (US-092a): check for unhealthy markers, alert if found.
+        self._tg_on_fail(block)
+
+    def _tg_on_fail(self, block: str) -> None:
+        """Check health block for unhealthy markers; alert on failure.
+
+        Regex targets: up=False, healthy=False, 'cameras.*unhealthy'.
+        When any match: build a compact summary and call send_health_alert.
+        Only fires when LISTENER_HEALTH_TG_ON_FAIL=1.
+        """
+        if not int(os.environ.get("LISTENER_HEALTH_TG_ON_FAIL", "0")):
+            return
+
+        unhealthy_re = re.compile(r"up=False|healthy=False|cameras.*unhealthy")
+        matches = unhealthy_re.findall(block)
+        if not matches:
+            return
+
+        now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4)))
+        label = ",".join(sorted(set(matches)))
+        summary = f"Health ALERT ({now.strftime('%H:%M')} EDT): {len(matches)} issue{'s' if len(matches) != 1 else ''} -- {label}"
+        rc, _ = send_health_alert(block, summary)
+        log.info("health: tg_alert rc=%d", rc)
 
     # ------------------------------------------------------------------
     # Formatting helpers (unit-testable)
