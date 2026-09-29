@@ -333,3 +333,96 @@ class TestMatchCosine:
         finally:
             if hasattr(storage._people_dir, "_test_override"):
                 delattr(storage._people_dir, "_test_override")
+
+    def test_match_cosine_has_candidate_label_and_id(self, tmp_path):
+        """AC: on a matched cosine path, result['candidate']['label'] and
+        result['candidate']['id'] are present and non-empty — mirrors
+        animal_matcher/match.py shape (animal_e2e:215-216)."""
+        people_dir = tmp_path / "known" / "people"
+        people_dir.mkdir(parents=True)
+
+        registry = [
+            {"id": "p1", "label": "Jeremiah", "tag": "jeremiah",
+             "identity_markers": ["male", "beard"]},
+        ]
+        (people_dir / "known_people.json").write_text(json.dumps(registry))
+
+        # Embedding: identical to our test vector (cosine = 1.0 >= 0.85).
+        embeddings = np.zeros((1, 512), dtype=np.float32)
+        embeddings[0, 0] = 1.0
+        np.savez(str(people_dir / "embeddings.npz"), p1__avg=embeddings[0])
+
+        from person_matcher import storage
+        storage._people_dir._test_override = people_dir
+        try:
+            mock_vec = np.zeros(512, dtype=np.float32)
+            mock_vec[0] = 1.0
+            # Set PERSON_EMBEDDER_LIVE=1 so _match_cosine does not early-exit.
+            old = os.environ.get("PERSON_EMBEDDER_LIVE")
+            os.environ["PERSON_EMBEDDER_LIVE"] = "1"
+            try:
+                with patch("person_matcher.match._embed_crop", return_value=mock_vec):
+                    sig = {"identity_markers": ["male", "beard"]}
+                    candidates = [
+                        _make_candidate("p1", "Jeremiah", "jeremiah",
+                                        ["male", "beard"]),
+                    ]
+                    result = _match_cosine(sig, candidates, "/tmp/fake.png")
+
+                    assert result["matched"] is True
+                    assert "candidate" in result
+                    assert result["candidate"]["id"] == "p1"
+                    assert result["candidate"]["label"] == "Jeremiah"
+                    assert result["candidate"]["id"]  # non-empty
+                    assert result["candidate"]["label"]  # non-empty
+                    assert "cosine_score" in result
+                    assert "tier1_score" in result
+            finally:
+                if old is not None:
+                    os.environ["PERSON_EMBEDDER_LIVE"] = old
+                else:
+                    os.environ.pop("PERSON_EMBEDDER_LIVE", None)
+        finally:
+            if hasattr(storage._people_dir, "_test_override"):
+                delattr(storage._people_dir, "_test_override")
+
+    def test_unmatched_cosine_has_consistent_shape(self, tmp_path):
+        """AC: on an unmatched cosine path, result does NOT contain
+        candidate (or candidate.id/candidate.label are absent/None),
+        matching the animal matcher no-match shape (animal_e2e:235-236)."""
+        people_dir = tmp_path / "known" / "people"
+        people_dir.mkdir(parents=True)
+
+        registry = [
+            {"id": "p1", "label": "Jeremiah", "tag": "jeremiah",
+             "identity_markers": ["male", "beard"]},
+        ]
+        (people_dir / "known_people.json").write_text(json.dumps(registry))
+
+        # Embedding: orthogonal to our test vector (cosine ≈ 0).
+        embeddings = np.zeros((1, 512), dtype=np.float32)
+        embeddings[0, 1] = 1.0  # orthogonal to vec[0]=1.0
+        np.savez(str(people_dir / "embeddings.npz"), p1__avg=embeddings[0])
+
+        from person_matcher import storage
+        storage._people_dir._test_override = people_dir
+        try:
+            mock_vec = np.zeros(512, dtype=np.float32)
+            mock_vec[0] = 1.0
+            with patch("person_matcher.match._embed_crop", return_value=mock_vec):
+                sig = {"identity_markers": ["male", "beard"]}
+                candidates = [
+                    _make_candidate("p1", "Jeremiah", "jeremiah",
+                                    ["male", "beard"]),
+                ]
+                result = _match_cosine(sig, candidates, "/tmp/fake.png")
+
+                assert result["matched"] is False
+                # No 'candidate' key on no-match (consistent with animal analog).
+                assert "candidate" not in result
+                # top_candidates is empty because cosine < threshold.
+                assert result["top_candidates"] == []
+                assert "threshold" in result
+        finally:
+            if hasattr(storage._people_dir, "_test_override"):
+                delattr(storage._people_dir, "_test_override")
