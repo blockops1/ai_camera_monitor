@@ -557,9 +557,10 @@ class HealthReporter:
                 up = False
                 vision_record_failure()
 
-        # last_call_age_s from vision_analyzer module state.
-        last_ts = getattr(vision_analyzer, "_last_call_timestamp", None)
-        last_call_age_s = round(time.monotonic() - last_ts, 1) if last_ts is not None else None
+        # US-093a: last_call_age_s from last_success_timestamp (time since last
+        # successful /v1/chat/completions), not from the heartbeat ticker.
+        last_success_ts = getattr(vision_analyzer, "_last_success_timestamp", None)
+        last_call_age_s = round(time.monotonic() - last_success_ts, 1) if last_success_ts is not None else None
 
         # On failure, log immediately (not waiting for next tick).
         if not up and vision_consecutive_failures() >= 3:

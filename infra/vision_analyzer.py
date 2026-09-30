@@ -61,6 +61,7 @@ _VISION_MODEL = "qwen3-vl-8b"
 # Runtime state — exposed for health-heartbeat consumers (US-073i).
 # ---------------------------------------------------------------------------
 _last_call_timestamp: float | None = None
+_last_success_timestamp: float | None = None
 
 
 def _response_format(schema: dict, name: str) -> dict:
@@ -131,12 +132,14 @@ def _post_vision(payload: dict, timeout: float) -> dict:
         raise VisionAnalyzerError(
             f"llama-server returned {resp.status_code}: {resp.text[:300]}"
         )
+    # US-093a: record success timestamp for health-heartbeat consumers.
+    import time  # local to avoid circular import in hot path
+
+    global _last_call_timestamp, _last_success_timestamp
+    _last_success_timestamp = time.monotonic()
     try:
         raw = resp.json()["choices"][0]["message"]["content"]
-        import time  # local to avoid circular import in hot path
-
         parsed = json.loads(raw)
-        global _last_call_timestamp
         _last_call_timestamp = time.monotonic()
         return parsed
     except (KeyError, json.JSONDecodeError, IndexError) as exc:
