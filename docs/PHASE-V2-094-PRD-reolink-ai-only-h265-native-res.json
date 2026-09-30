@@ -1,0 +1,151 @@
+{
+  "id": "V2-094",
+  "title": "Reolink: AI-only alerting + H.265 main stream + native 4K resolution",
+  "status": "draft",
+  "created": "2026-09-30",
+  "owner": "jill (orchestrator)",
+  "operator_objective": "Reduce false-positive motion alerts (trees-in-wind, shadow movement) by relying on Reolink's on-device AI detection (person/vehicle/animal) rather than raw motion. Increase image quality for downstream gate decisions by switching the main stream to H.265 + native sensor resolution. No custom code in farm-surveillance-v2; all changes flow through the existing open-source Reolink MCP server at /Users/jill/reolink-cli/, called via the harness MCP client.",
+  "current_state": {
+    "cameras": "6 Reolink TCP cameras on 192.168.1/24 (2 distinct models per operator): BACK, FRONT, OUTSIDE_BACK_SOLAR, OUTSIDE_FRONT_GARAGE, OUTSIDE_FRONT_POWER, OUTSIDE_FRONT_SOLAR. Camera aliases (front, back, outside_front_garage, outside_front_power, outside_front_solar, outside_back_solar) match the existing config/camera_recipes.toml sections.",
+    "rtsp_urls": "FRONT and BACK use rtsp://user:pass@<ip>:554/ (no stream path; uses camera default). OUTSIDE_* use rtsp://user:pass@<ip>:554/h264Preview_01_main (explicit H.264 preview path).",
+    "ai_detection_state": "All 6 cams have AI detection (person, vehicle, dog_cat) configured at sensitivity=50 / stay_time=2 (person, vehicle) and sensitivity=30 / stay_time=2 (dog_cat). Configured via config/camera_recipes.toml but NOT yet confirmed-applied via the MCP apply_recipe primitive.",
+    "motion_detection_state": "UNKNOWN. Operator-reported pure-motion false positives indicate motion detection is currently enabled and producing alerts that the AI tier should be the only source of truth for.",
+    "encode_state": "UNKNOWN per cam. Operator reports cameras are not delivering native resolution and may or may not be H.265. Requires camera_encode_get on each of the 6 cams before any set call.",
+    "mcp_server": "/Users/jill/reolink-cli/ (Apache-2.0, on-disk clone). Binary at /Users/jill/.local/bin/reolink-cli v0.19.1. Long-lived gateway at 127.0.0.1:9000 (PID 27941, LaunchAgent com.farm.reolink.gateway). 49 MCP tools exposed (all camera_*). Harness integration: harness/mcp_client.py spawns reolink-cli mcp-server per session over stdio; mutating calls gated by harness/config.py:reolink_default_confirm() (requires operator confirm: true to commit).",
+    "deprecated_skill_warning": "skills/local-ai/reolink-camera-config is deprecated (replaced by infra/reolink.py::apply_recipe) and is browser-automation-heavy (52 browser-automation mentions including playwright:9, cam_browser:12). Per operator 2026-09-30: NEVER use browser automation for camera work; only the open-source Reolink MCP. PRD explicitly excludes any cam_browser / playwright path."
+  },
+  "sub_stories": [
+    {
+      "id": "US-094a",
+      "title": "Read current state of all 6 cams via MCP (no writes)",
+      "scope": [
+        "For each of the 6 aliases (front, back, outside_front_garage, outside_front_power, outside_front_solar, outside_back_solar), invoke the MCP tools camera_detect_motion_get, camera_detect_ai_get (for person, vehicle, dog_cat), camera_encode_get (main stream only), and camera_capabilities (read-only, returns accepted resolution/codec/bitrate matrix).",
+        "Record results to docs/V2-094-CAMERA-STATE-BEFORE.md as a markdown table: alias | model | firmware | motion.enabled | motion.sensitivity | ai.person.sensitivity | ai.vehicle.sensitivity | ai.dog_cat.sensitivity | encode.codec | encode.resolution | encode.bitrate | encode.fps | encode.gop | capabilities.max_resolution | capabilities.codecs.",
+        "This is a pure read pass; no camera state is modified. No listener restart needed (MCP-only operation, listener is unaffected).",
+        "Execution surface: operator (Jill) runs via the harness MCP chat or directly via /Users/jill/.local/bin/reolink-cli calling the stdio mcp-server. Document which path was used in the BEFORE doc.",
+        "Files written: docs/V2-094-CAMERA-STATE-BEFORE.md only. No code changes anywhere."
+      ],
+      "files": [
+        "docs/V2-094-CAMERA-STATE-BEFORE.md (new)"
+      ],
+      "merge_blockers": [
+        "US-094b, US-094c, US-094d depend on this BEFORE snapshot for diff verification"
+      ]
+    },
+    {
+      "id": "US-094b",
+      "title": "Disable pure motion detection on all 6 cams; keep AI (person/vehicle/animal) ON",
+      "scope": [
+        "Per cam (6 calls), invoke MCP tool camera_detect_motion_set with {alias: <name>, enable: false, sensitivity: 0}. This is the operator ask #1: only push a webhook alert when AI detection fires, not on raw motion.",
+        "Do NOT touch AI detection. Existing AI sensitivities (50/50/30 for person/vehicle/dog_cat from the recipe) stay as-is unless US-094a shows different current state, in which case US-094b preserves observed state rather than the recipe value.",
+        "Verification: per cam, re-call camera_detect_motion_get and confirm motion.enabled=false. Update docs/V2-094-CAMERA-STATE-AFTER.md (or extend BEFORE doc) with the after-state row.",
+        "Confirm-gated: this is a mutating call. Operator must type confirm: true in harness chat, or operator runs /Users/jill/.local/bin/reolink-cli mcp-server interactively with explicit operator eyes on each result.",
+        "Expected runtime effect: within ~30 seconds, no pure-motion webhook events should arrive at /alert (listener/daemon.py:594). AI webhooks continue. Verify via tail logs/daemon.log | grep event_type for 10 minutes."
+      ],
+      "files": [
+        "docs/V2-094-CAMERA-STATE-AFTER.md (new or extend BEFORE doc)"
+      ],
+      "merge_blockers": [
+        "US-094a must ship first (no diff to apply without the before-state baseline)"
+      ]
+    },
+    {
+      "id": "US-094c",
+      "title": "Switch main stream to H.265 at native sensor resolution on all 6 cams",
+      "scope": [
+        "For each cam (6 calls), invoke MCP tool camera_encode_set with {alias: <name>, codec: h265, height: <native sensor height per camera_capabilities>, width: <native sensor width>, fps: 25, bitrate: 8192, rateControl: vbr, gop: 50, profile: main}.",
+        "Native resolution per camera model is whatever camera_capabilities reports as the maximum supported resolution for the main stream (likely 3840x2160 for the 4K-capable models). If a camera capabilities show a different max (e.g. 2560x1920 for a 5MP model), use that instead. DO NOT exceed capabilities-reported values.",
+        "Before invoking encode_set, always call camera_encode_capability for that alias to confirm the requested (resolution, codec, bitrate, fps) tuple is accepted. If not accepted, scale down to the nearest accepted tuple and document the choice in the AFTER doc.",
+        "Verification: per cam, re-call camera_encode_get and confirm codec=h265 and resolution matches the requested native value. Record in docs/V2-094-CAMERA-STATE-AFTER.md.",
+        "Listener impact: changing main-stream encode settings on the camera does NOT automatically change what the v2 listener requests. The listener uses the URL paths already in camera-creds.env (h264Preview_01_main or bare /). After encode_set changes the main-stream codec, the listener may still be receiving H.264 sub-stream or H.264 main depending on URL path. US-094d handles URL path if needed.",
+        "Confirm-gated: same as US-094b. Mutating call."
+      ],
+      "files": [
+        "docs/V2-094-CAMERA-STATE-AFTER.md (extend)"
+      ],
+      "merge_blockers": [
+        "US-094a must ship first",
+        "US-094d may follow if URL-path changes are needed to actually receive the H.265 stream"
+      ]
+    },
+    {
+      "id": "US-094d",
+      "title": "Update camera-creds.env RTSP URLs if needed for H.265 main-stream consumption",
+      "scope": [
+        "After US-094c, the cameras offer H.265 main streams, but the v2 listener may need to point at h265Preview_01_main instead of h264Preview_01_main (or bare /) to actually receive H.265 frames over RTSP.",
+        "Operator task: for each of the 6 cams, call camera_config_get (or rely on firmware-inventory knowledge) to determine which RTSP URL paths the firmware exposes for H.265 main. Document findings in docs/V2-094-RTSP-URLS.md.",
+        "If a cam firmware exposes h265Preview_01_main (or equivalent), edit camera-creds.env: for that cam, change the _RTSP_URL env var to point at the H.265 main path. For FRONT and BACK (currently bare /), decide whether to leave them bare (camera default stream selection) or pin to a specific path. Document the decision.",
+        "Listener restart: after editing camera-creds.env, the listener must be restarted to pick up new RTSP URLs. Per AGENTS.md Step 4: launchctl kickstart -k gui/$UID/com.farm.surveillance.v2 (~10s downtime). Schedule restart only when no in-flight kanban cards are running (per AGENTS.md Step 2 standing directive).",
+        "Verification: post-restart, listener/health.py camera_health shows all 6 cams green. tail logs/daemon.log | grep reconnect|camera_health for ~5 minutes; expect zero reconnect storms.",
+        "Files modified: camera-creds.env (H.265 RTSP URLs only; NO secret changes). docs/V2-094-RTSP-URLS.md (new)."
+      ],
+      "files": [
+        "camera-creds.env",
+        "docs/V2-094-RTSP-URLS.md (new)"
+      ],
+      "merge_blockers": [
+        "US-094c must ship first (cam must be in H.265 mode before listener points at H.265 URL)"
+      ]
+    },
+    {
+      "id": "US-094e",
+      "title": "5-day observation arc: no other changes; track alert counts per cam per day",
+      "scope": [
+        "After US-094b/c/d merge AND listener has been observing AI-only traffic for at least 24 hours, open docs/V2-094-OBSERVATION-LOG.md.",
+        "Baseline computation: parse data/events/*.json for the 5 days BEFORE US-094b (the AI-only transition). Count alerts per camera per day, separating by alarm.type (motion vs person vs vehicle vs animal). Save as baseline.<camera>.json block in the observation log.",
+        "Observation: for each of the next 5 days (168 hours from observation-log start timestamp), parse data/events/*.json for that day and append a row: {date, camera, motion_count, person_count, vehicle_count, animal_count}. Save to the log.",
+        "At end of 5 days, run the comparison script (small one-shot, not committed to main) that produces a markdown table: camera | baseline_motion | observed_motion | reduction_pct | baseline_ai | observed_ai | delta. Paste the table into the observation log.",
+        "Operator gate: at end of 5 days, decide (a) ship the YOLO-vs-diff PRD as the next arc (operator stated intent 2026-09-29), (b) tighten gate thresholds further, or (c) revert motion-disabled if AI false-negative rate is unacceptable.",
+        "No new code changes to listener/gate during the 5 days. Only writes are: data/events/* (automatic from listener), docs/V2-094-OBSERVATION-LOG.md (operator or orchestrator on demand)."
+      ],
+      "files": [
+        "docs/V2-094-OBSERVATION-LOG.md (new)"
+      ],
+      "merge_blockers": [
+        "US-094b, US-094c, US-094d must all be shipped + listener restarted + 24h soak completed"
+      ]
+    }
+  ],
+  "test_strategy": "MCP tools are inherently idempotent (camera_detect_motion_set on already-false stays false). All verification is via camera_*_get re-reads. Listener behavior is verified via logs/daemon.log post-restart. End-to-end behavioral verification is the 5-day observation arc (US-094e) -- no automated tests because the system under test is the operator house and weather, not unit-test-able. E2E tests are explicitly excluded from this PRD (per operator: no custom code).",
+  "activation_checklist": [
+    "US-094a: docs/V2-094-CAMERA-STATE-BEFORE.md exists with all 6 cams current state",
+    "US-094b: camera_detect_motion_get returns enabled=false on all 6 cams; logs/daemon.log shows zero pure-motion alerts in 30 minutes",
+    "US-094c: camera_encode_get returns codec=h265 and native resolution on all 6 cams; camera_encode_capability shows values are accepted by the device",
+    "US-094d (conditional): if H.265 RTSP URL paths were changed in camera-creds.env, listener restart succeeds; tail logs/daemon.log shows all 6 cams healthy; no RTSP reconnect storms",
+    "US-094e: 5-day observation log exists with baseline + observation rows; operator decision documented at end",
+    "No custom Python code added to farm-surveillance-v2 (per operator 2026-09-30). All changes are: (a) config/camera_recipes.toml OR (b) camera-creds.env OR (c) docs/*.md OR (d) reolink-cli MCP calls. Listener/gate code untouched."
+  ],
+  "out_of_scope": [
+    "ANY custom code in farm-surveillance-v2 for camera control (operator 2026-09-30 explicit)",
+    "Browser-automation approaches (cam_browser / playwright / Selenium) -- operator explicitly excluded these 2026-09-30",
+    "Reusing the deprecated local-ai/reolink-camera-config skill (deprecated for camera-side work; browser-heavy)",
+    "infra/quick_classifier.py changes (separate arc; only relevant after the 5-day observation)",
+    "infra/gate.py changes (separate arc; tied to YOLO-vs-diff PRD that follows the observation)",
+    "config/motion_gate_thresholds.json changes (separate decision; can be tightened after observation)",
+    "Listener restart during in-flight kanban work (AGENTS.md Step 2 standing directive: defer restart until other cards done)",
+    "The YOLO-vs-diff bbox test fixture PRD (operator 2026-09-29: test first, then we will see). That becomes the NEXT arc after US-094e if observation is positive.",
+    "AGENTS.md updates (orchestrator work; will be patched after US-094b/c/d merge per AGENTS.md Step 1 rule that AGENTS.md updates are NOT coder work)"
+  ],
+  "risks": [
+    {
+      "risk": "Disabling pure motion detection may cause Reolink hub-side events to also drop (if the hub treats motion-disabled cameras as fully inactive).",
+      "mitigation": "After US-094b, call camera_scene_get on each cam to confirm AI detection is still honored in the active arming scene. If hub disables AI events too, the right fix is camera_scene_set to a scene that honors AI tasks only -- but document the scene decision per cam."
+    },
+    {
+      "risk": "H.265 encode_set may not be accepted at native resolution on older firmware. Some Reolink firmwares cap main-stream bitrate below 8192 kbps.",
+      "mitigation": "camera_encode_capability is called per-cam before encode_set. If max bitrate < 8192, set to max. If native resolution not in the codec matrix, fall back to the largest accepted resolution (e.g. 2560x1920) and document in AFTER doc."
+    },
+    {
+      "risk": "FRONT and BACK cameras using bare / URL may pick a different stream after encode_set changes the main stream. Could result in unintended sub-stream consumption.",
+      "mitigation": "After US-094c, the BEFORE/AFTER encode doc records what camera_encode_get reports as the default-stream URL the camera is advertising. If that is not H.265, US-094d pins the URL to a specific H.265 path or reverts encode_set for that cam."
+    },
+    {
+      "risk": "Listener restart during US-094d could disrupt in-flight kanban cards (US-092a/b/c, US-093a, US-059b review).",
+      "mitigation": "Per AGENTS.md Step 2, defer listener restart until all current in-flight cards are done. Specifically, check hermes kanban --board coder-farm-surveillance list --status running,review,ready and confirm no worker tests are mid-flight. If any card is in-flight, queue the restart and apply it on the next idle window."
+    },
+    {
+      "risk": "The 5-day observation arc requires no operator action on the listener side, but the AI-only reduction in false positives may cause the operator to UNDERREPORT real threats if Reolink AI sensitivity is miscalibrated.",
+      "mitigation": "AI sensitivity stays at the existing 50/50/30 settings (not retuned in this PRD). If the 5-day observation shows any obviously missed events (operator-flagged), add a follow-on card to tune AI sensitivity per cam. Do NOT retune during the observation -- that would confound the before/after diff."
+    }
+  ]
+}
