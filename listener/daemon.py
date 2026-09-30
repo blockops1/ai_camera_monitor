@@ -493,8 +493,8 @@ def _run_pipeline(alert: dict) -> dict:
     # Stage 11: build TG#2.
     tg2 = stage_build_tg2(mode, vm2_result, a_p, b_p, camera_label, alert)
 
-    # Stage 12: per-class match.
-    match_result = stage_perform_match(mode, vm2_result)
+    # Stage 12: per-class match (person branch gated to FRONT/BACK cameras).
+    match_result = stage_perform_match(mode, vm2_result, camera_label)
 
     # Stage 13: build TG#3 (text only; dispatch handled by caller).
     tg3 = stage_build_tg3(

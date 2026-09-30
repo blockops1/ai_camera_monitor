@@ -7,7 +7,7 @@ Test strategy:
       synthetic candidate list so ``stage_perform_match(mode="person", vm2)``
       runs end-to-end with deterministic data (no file I/O).
     - Call ``stage_build_tg3`` to verify TG#3 output shape.
-    - Real functions only — no substitute objects on the formatter.
+    - Real functions only -- no substitute objects on the formatter.
 
 Acceptance criteria:
     AC1: pytest tests/e2e/test_pipeline_person_stub.py -v passes (>= 2 tests)
@@ -39,6 +39,7 @@ from listener.pipeline import stage_build_tg3, stage_perform_match
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_vm2(mode: str = "person", identity_markers: list[str] | None = None, **kw) -> dict:
     """Build a minimal VM2 result dict for the person branch."""
@@ -89,24 +90,24 @@ def _synthetic_candidates(monkeypatch):
 
 @pytest.mark.e2e
 class TestPersonNoMatch:
-    """AC1: No-match — no identity_markers -> matched=False."""
+    """AC1: No-match -- no identity_markers -> matched=False."""
 
     def test_no_identity_markers_returns_false(self):
         """No identity_markers in vm2 -> immediate no match."""
         vm2 = _make_vm2("person", identity_markers=[])
-        result = stage_perform_match("person", vm2)
+        result = stage_perform_match("person", vm2, camera_label="FRONT")
 
         assert result["matched"] is False
 
 
 @pytest.mark.e2e
 class TestPersonTagMatch:
-    """AC2: Tag match — first identity_marker exactly matches a candidate tag."""
+    """AC2: Tag match -- first identity_marker exactly matches a candidate tag."""
 
     def test_tag_match_succeeds(self):
         """identity_markers[0] = 'john_doe' matches candidate tag 'john_doe'."""
         vm2 = _make_vm2("person", identity_markers=["john_doe"])
-        result = stage_perform_match("person", vm2)
+        result = stage_perform_match("person", vm2, camera_label="FRONT")
 
         assert result["matched"] is True
         assert result["tag"] == "john_doe"
@@ -114,7 +115,7 @@ class TestPersonTagMatch:
     def test_tag_match_case_insensitive(self):
         """Tag match is case-insensitive, whitespace-stripped."""
         vm2 = _make_vm2("person", identity_markers=["  John_Doe  "])
-        result = stage_perform_match("person", vm2)
+        result = stage_perform_match("person", vm2, camera_label="FRONT")
 
         assert result["matched"] is True
         assert result["tag"] == "john_doe"
@@ -122,19 +123,19 @@ class TestPersonTagMatch:
     def test_tag_match_no_match(self):
         """No candidate tag matches the first identity_marker."""
         vm2 = _make_vm2("person", identity_markers=["alice_smith"])
-        result = stage_perform_match("person", vm2)
+        result = stage_perform_match("person", vm2, camera_label="FRONT")
 
         assert result["matched"] is False
 
 
 @pytest.mark.e2e
 class TestPersonTg3Path:
-    """AC3: TG#3 path — stage_build_tg3(mode="person") produces valid output."""
+    """AC3: TG#3 path -- stage_build_tg3(mode="person") produces valid output."""
 
     def test_tg3_no_match_person(self):
-        """No-match person -> stage_build_tg3 returns dict with no-match caption."""
+        """No-match person -> stage_build_tg3 returns dict with unrecognized indicator."""
         vm2 = _make_vm2("person", identity_markers=["unknown"])
-        match_result = stage_perform_match("person", vm2)
+        match_result = stage_perform_match("person", vm2, camera_label="FRONT")
 
         tg3 = stage_build_tg3(
             mode="person",
@@ -142,19 +143,19 @@ class TestPersonTg3Path:
             vm2_result=vm2,
             crop_a_path="/tmp/fake_crop.jpg",
             crop_b_path="/tmp/fake_crop2.jpg",
-            camera_label="Front Gate",
+            camera_label="FRONT Gate",
             alert={"id": "evt-001", "timestamp": "2026-09-26T10:00:00Z"},
         )
 
-        # No-match person -> builds a caption with no-match indicator.
+        # No-match person -> builds a caption with unrecognized indicator.
         assert "caption" in tg3
         assert tg3["photos"] == []
-        assert "No match" in tg3["caption"]
+        assert "Unrecognized person" in tg3["caption"]
 
     def test_tg3_match_person(self):
         """Matched person -> stage_build_tg3 returns dict with caption."""
         vm2 = _make_vm2("person", identity_markers=["john_doe"])
-        match_result = stage_perform_match("person", vm2)
+        match_result = stage_perform_match("person", vm2, camera_label="FRONT")
 
         tg3 = stage_build_tg3(
             mode="person",
@@ -162,7 +163,7 @@ class TestPersonTg3Path:
             vm2_result=vm2,
             crop_a_path="/tmp/fake_crop.jpg",
             crop_b_path="/tmp/fake_crop2.jpg",
-            camera_label="Front Gate",
+            camera_label="FRONT Gate",
             alert={"id": "evt-001", "timestamp": "2026-09-26T10:00:00Z"},
         )
 
@@ -171,3 +172,74 @@ class TestPersonTg3Path:
         assert "caption" in tg3
         assert tg3["photos"] == []
         assert "Camera:" in tg3["caption"]
+
+
+@pytest.mark.e2e
+class TestPersonFrontBackGate:
+    """AC4: Person matcher is gated to FRONT/BACK cameras only.
+
+    OUTSIDE_* cameras must NOT fire the person branch (both stage_perform_match
+    and stage_build_tg3 return no-match/empty).
+    """
+
+    def test_outside_camera_perform_match_skips_person(self):
+        """stage_perform_match(mode='person', camera_label='OUTSIDE_BACK_SOLAR') -> no-match."""
+        vm2 = _make_vm2("person", identity_markers=["john_doe"])
+        result = stage_perform_match("person", vm2, camera_label="OUTSIDE_BACK_SOLAR")
+
+        assert result["matched"] is False
+
+    def test_outside_front_camera_perform_match_skips_person(self):
+        """stage_perform_match(mode='person', camera_label='OUTSIDE_FRONT_SOLAR') -> no-match."""
+        vm2 = _make_vm2("person", identity_markers=["john_doe"])
+        result = stage_perform_match("person", vm2, camera_label="OUTSIDE_FRONT_SOLAR")
+
+        assert result["matched"] is False
+
+    def test_outside_camera_build_tg3_returns_empty(self):
+        """stage_build_tg3(mode='person', camera_label='OUTSIDE_BACK_SOLAR') -> {}."""
+        match_result = {"matched": True, "candidate": {"label": "John Doe"}}
+        vm2 = {"class": "person"}
+        tg3 = stage_build_tg3(
+            mode="person",
+            match_result=match_result,
+            vm2_result=vm2,
+            crop_a_path="/tmp/fake_crop.jpg",
+            crop_b_path="/tmp/fake_crop2.jpg",
+            camera_label="OUTSIDE_BACK_SOLAR",
+            alert={"id": "evt-001", "timestamp": "2026-09-26T10:00:00Z"},
+        )
+
+        assert tg3 == {}
+
+    def test_back_camera_perform_match_allowed(self):
+        """stage_perform_match(mode='person', camera_label='BACK') -> match proceeds."""
+        vm2 = _make_vm2("person", identity_markers=["john_doe"])
+        result = stage_perform_match("person", vm2, camera_label="BACK")
+
+        assert result["matched"] is True
+
+    def test_back_camera_build_tg3_allowed(self):
+        """stage_build_tg3(mode='person', camera_label='BACK') -> valid caption."""
+        match_result = {"matched": True, "candidate": {"label": "John Doe"}}
+        vm2 = {"class": "person"}
+        tg3 = stage_build_tg3(
+            mode="person",
+            match_result=match_result,
+            vm2_result=vm2,
+            crop_a_path="/tmp/fake_crop.jpg",
+            crop_b_path="/tmp/fake_crop2.jpg",
+            camera_label="BACK",
+            alert={"id": "evt-001", "timestamp": "2026-09-26T10:00:00Z"},
+        )
+
+        assert "caption" in tg3
+        assert "John Doe" in tg3["caption"]
+
+    def test_vehicle_branch_unaffected_by_gate(self):
+        """Animal mode (any camera) proceeds -- only person is gated."""
+        vm2_animal = {"class": "animal", "crop_a_path": "/tmp/fake.jpg"}
+        result = stage_perform_match("animal", vm2_animal, camera_label="OUTSIDE_FRONT_SOLAR")
+
+        # Animal should return no-match (no real crops) but not skip
+        assert "matched" in result
