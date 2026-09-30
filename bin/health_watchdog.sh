@@ -65,6 +65,15 @@ WATCHDOG_LOG_INTERVAL_MIN="${WATCHDOG_LOG_INTERVAL_MIN:-15}"
 WATCHDOG_DISK_GB_WARN="${WATCHDOG_DISK_GB_WARN:-150}"
 WATCHDOG_REMOTE_URL="${WATCHDOG_REMOTE_URL:-}"
 
+# Restart ladder config.
+# WATCHDOG_MAX_RESTART_ATTEMPTS -- max restart attempts for restartable failures
+#   (default 3; 0 = disable retry, old single-alert behavior).
+WATCHDOG_MAX_RESTART_ATTEMPTS="${WATCHDOG_MAX_RESTART_ATTEMPTS:-3}"
+
+# WATCHDOG_RESTART_BACKOFF_SECONDS -- comma-separated backoff in seconds between
+#   restart attempts. Default '30,60,120' (3m30s total).
+WATCHDOG_RESTART_BACKOFF_SECONDS="${WATCHDOG_RESTART_BACKOFF_SECONDS:-'30,60,120'}"
+
 # -----------------------------------------------------------------------
 # 1. Helpers
 # -----------------------------------------------------------------------
@@ -81,6 +90,131 @@ fail() {
   FAIL=$((FAIL + 1))
   echo "  FAIL: $1" >&2
   ALERT_LINES+=("$1")
+}
+
+# -----------------------------------------------------------------------
+# 1.5. Restart ladder helpers
+# -----------------------------------------------------------------------
+WATCHDOG_LOG_FILE="$(dirname "$0")/../logs/health_watchdog.log"
+RESTART_LOG_LINES=()
+
+# Log a restart attempt to both stdout and the watchdog log file.
+_watchdog_log() {
+  local msg="$1"
+  echo "$msg"
+  mkdir -p "$(dirname "$WATCHDOG_LOG_FILE")" 2>/dev/null || true
+  echo "$(date '+%Y-%m-%d %H:%M:%S') $msg" >> "$WATCHDOG_LOG_FILE" 2>/dev/null || true
+  RESTART_LOG_LINES+=("$msg")
+}
+
+# Attempt to restart the listener via Python subprocess.run pattern.
+# Returns 0 if PID changed, 1 otherwise.
+_restart_listener() {
+  python3 -c "
+import sys, os, subprocess, time
+
+def _get_pid():
+    r = subprocess.run(['launchctl','list'], capture_output=True, text=True, timeout=10)
+    for l in r.stdout.splitlines():
+        p = l.split()
+        if len(p) >= 3 and p[2] == 'com.farm.surveillance.v2':
+            return p[0]
+    return ''
+
+uid = str(os.getuid())
+old = _get_pid()
+
+# kickstart -k
+kr = subprocess.run(['launchctl','kickstart','-k',f'gui/{uid}/com.farm.surveillance.v2'],
+                    capture_output=True, text=True, timeout=30)
+
+# fallback: bootout + bootstrap if kickstart failed
+if kr.returncode != 0:
+    subprocess.run(['launchctl','bootout',f'gui/{uid}/com.farm.surveillance.v2'],
+                   capture_output=True, text=True, timeout=30)
+    plist = os.path.expanduser('~/Library/LaunchAgents/com.farm.surveillance.v2.plist')
+    subprocess.run(['launchctl','bootstrap',f'gui/{uid}',plist],
+                   capture_output=True, text=True, timeout=30)
+
+time.sleep(2)
+new = _get_pid()
+if old and new and old != new:
+    print(f'rotated {old} -> {new}')
+    sys.exit(0)
+else:
+    print(f'not rotated (old={old}, new={new})')
+    sys.exit(1)
+" 2>/dev/null
+  return $?
+}
+
+# Run the restart ladder for a restartable failure.
+# Returns 0 if listener is back up, 1 if all retries exhausted.
+# Prints 'restarted' or 'retry_exhausted' to stdout for the caller.
+run_restart_ladder() {
+  local failure_label="$1"
+
+  if [ "$WATCHDOG_MAX_RESTART_ATTEMPTS" = "0" ]; then
+    _watchdog_log "restart ladder disabled (WATCHDOG_MAX_RESTART_ATTEMPTS=0), skipping"
+    echo "disabled"
+    return 1
+  fi
+
+  _watchdog_log "=== Restart ladder started for: $failure_label ==="
+
+  # Parse backoff values.
+  IFS=',' read -ra BACKOFFS <<< "${WATCHDOG_RESTART_BACKOFF_SECONDS}"
+
+  local attempts=0
+  local total_elapsed=0
+  local started_successfully=false
+
+  for ((i=1; i<=WATCHDOG_MAX_RESTART_ATTEMPTS; i++)); do
+    attempts=$i
+    _watchdog_log "attempt $i/$WATCHDOG_MAX_RESTART_ATTEMPTS: restarting listener..."
+
+    if _restart_listener; then
+      _watchdog_log "attempt $i: listener restarted successfully"
+      started_successfully=true
+      echo "restarted"
+      return 0
+    fi
+
+    total_elapsed=$((total_elapsed + 30))  # kickstart + sleep overhead
+
+    # Backoff before next attempt.
+    if [ "$i" -lt "$WATCHDOG_MAX_RESTART_ATTEMPTS" ]; then
+      local idx=$((i - 1))
+      local wait=30
+      if [ "$idx" -lt "${#BACKOFFS[@]}" ]; then
+        wait="${BACKOFFS[$idx]//\'/}"
+        wait="${wait// /}"
+      fi
+      _watchdog_log "attempt $i failed, backoff ${wait}s before attempt $((i+1))"
+      sleep "$wait"
+      total_elapsed=$((total_elapsed + wait))
+    fi
+  done
+
+  _watchdog_log "restart ladder exhausted after $attempts attempts ($((total_elapsed / 60))m${total_elapsed % 60}s elapsed)"
+  echo "retry_exhausted"
+  return 1
+}
+
+# Check if the listener is currently running.
+_listener_is_up() {
+  local pid=""
+  if command -v /usr/sbin/lsof >/dev/null 2>&1; then
+    pid=$(/usr/sbin/lsof -iTCP:8090 -sTCP:LISTEN -n -P 2>/dev/null \
+      | awk 'NR>1 && /python/{print $2}' \
+      | head -1 | tr -d ' ')
+    if [ -z "$pid" ]; then
+      pid=$(launchctl list 2>/dev/null \
+        | awk '$3 == "com.farm.surveillance.v2" {print $1}' \
+        | head -1 | tr -d ' ')
+    fi
+  fi
+  [ -n "$pid" ]
 }
 
 # -----------------------------------------------------------------------
@@ -107,6 +241,33 @@ if [ -n "$LISTENER_PID" ]; then
   ok "listener is running (PID $LISTENER_PID)"
 else
   fail "listener is NOT running (no process on :8090, no launchd label)"
+  # Listener PID is restartable -- attempt the restart ladder.
+  LADDER_RESULT=$(run_restart_ladder "listener PID down") || true
+  if [ "$LADDER_RESULT" = "restarted" ]; then
+    # Listener came back; re-check and mark OK.
+    LISTENER_PID=""
+    if command -v /usr/sbin/lsof >/dev/null 2>&1; then
+      LISTENER_PID=$(/usr/sbin/lsof -iTCP:8090 -sTCP:LISTEN -n -P 2>/dev/null \
+        | awk 'NR>1 && /python/{print $2}' \
+        | head -1 | tr -d ' ')
+      if [ -z "$LISTENER_PID" ]; then
+        LISTENER_PID=$(launchctl list 2>/dev/null \
+          | awk '$3 == "com.farm.surveillance.v2" {print $1}' \
+          | head -1 | tr -d ' ')
+      fi
+    fi
+    if [ -n "$LISTENER_PID" ]; then
+      # Remove the failure line and add a success line.
+      ALERT_LINES=("${ALERT_LINES[@]//listener is NOT running*/listener restarted by watchdog (PID $LISTENER_PID)}")
+      ok "listener is running (PID $LISTENER_PID) after watchdog restart"
+    else
+      # Still not up after the ladder -- add exhaustion note.
+      ALERT_LINES+=("restart ladder exhausted for listener PID (no retry)")
+    fi
+  else
+    # Ladder exhausted or disabled -- add exhaustion note.
+    ALERT_LINES+=("restart ladder exhausted for listener PID ($attempts attempts)")
+  fi
 fi
 
 # -----------------------------------------------------------------------
@@ -321,6 +482,15 @@ ${FAIL} of ${TOTAL} checks failed:
     ALERT_BODY+="$(printf '%s' "$line" | sed 's/^/  - /')
 "
   done
+
+  # Append restart-ladder exhaustion note if applicable.
+  if [ "${RESTART_LOG_LINES[*]:-}" != "" ]; then
+    for rline in "${RESTART_LOG_LINES[@]}"; do
+      ALERT_BODY+="$(printf '%s' "$rline" | sed 's/^/  - /')
+"
+    done
+  fi
+
   ALERT_BODY+="
 PID: $LISTENER_PID
 Data size: ${DATA_SIZE_GB:-0} GB
