@@ -279,6 +279,7 @@ def build_match_message(
     match_threshold: float = 0.0,
     gap_threshold: float = 0.0,
     position: int | None = None,
+    mode: str | None = None,
 ) -> dict[str, Any]:
     """Build a TG#3 Telegram message dict for the match result.
 
@@ -289,6 +290,11 @@ def build_match_message(
     On match, uses build_match_alert_body for the matched-vehicle details
     (label, ID, owner, color, make/model, gap).
     On no-match, uses a slimmed body with only the top runner-up (US-067c).
+
+    When *mode* is provided, produces a compact caption format:
+    - mode='person' matched: 'person: <label> (cosine=X.XX, tier1=X.XX)'
+    - mode='person' no-match: 'person (unknown)'
+    - mode='animal': mirrors the animal branch structure.
 
     Args:
         match_result: Match result dict with 'matched' key.
@@ -301,6 +307,7 @@ def build_match_message(
         match_threshold: Score threshold used for match/no-match decision.
         gap_threshold: Gap threshold used for match/no-match decision.
         position: TG message position (1-3), used for the 'TG X of 3' marker.
+        mode: Optional mode for compact caption ('person', 'animal', etc.).
 
     Returns:
         Telegram-ready message dict with 'caption' and 'photos' keys.
@@ -356,6 +363,31 @@ def build_match_message(
             if top_candidates:
                 top_id, top_score = top_candidates[0]
                 lines.append(f"  Runner-up: <b>{top_id}</b> ({_format_runner_score(top_score)})")
+
+    # Compact caption mode: when mode='person' or mode='animal' is provided,
+    # replace the body lines with a simplified format.
+    if mode is not None:
+        if mode == "person":
+            if matched:
+                # 'person: <label> (cosine=X.XX, tier1=X.XX)'
+                label = match_result.get("candidate", {}).get(
+                    "label", match_result.get("label", "?")
+                )
+                cosine = match_result.get("cosine_score", 0.0)
+                tier1 = match_result.get("tier1_score", 0.0)
+                lines[-1] = f"person: {label} (cosine={cosine:.2f}, tier1={tier1:.2f})"
+            else:
+                # 'person (unknown)'
+                lines[-1] = "person (unknown)"
+        elif mode == "animal":
+            if matched:
+                # Mirror the animal branch structure: 'animal: <label>'
+                label = match_result.get("candidate", {}).get(
+                    "label", "unknown"
+                )
+                lines[-1] = f"animal: {label}"
+            else:
+                lines[-1] = "animal (unknown)"
 
     # Alert metadata (mirrors TG#1 / TG#2 caption layout).
     # Alert ID lines removed per US-073g — operator doesn't need these in TG captions.
