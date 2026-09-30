@@ -70,3 +70,6 @@ yolo*.pt
 # Runtime telemetry + push log (US-XXX housekeeping)
 data/gate_drops.jsonl
 scripts/push_log.txt
+
+# Per-event runtime output directories (one UUID per alert, written by listener/daemon.py)
+data/events/*/
