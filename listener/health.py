@@ -92,6 +92,21 @@ _INTERVAL_SECONDS: int = int(
     os.environ.get("LISTENER_HEALTH_INTERVAL_SECONDS", "600")
 )
 
+# US-092c: watchdog dispatch interval (seconds). Default 300 = 5 min.
+_WATCHDOG_INTERVAL_SECONDS: int = int(
+    os.environ.get("LISTENER_HEALTH_WATCHDOG_INTERVAL_SECONDS", "300")
+)
+
+# US-092c: watchdog dispatch enable flag. 1 = ON (default), 0 = OFF.
+_WATCHDOG_ENABLED: bool = os.environ.get("LISTENER_HEALTH_WATCHDOG_ENABLED", "1") == "1"
+
+# US-092c: path to the watchdog script.
+_WATCHDOG_SCRIPT: str = os.path.join(
+    os.environ.get("FARMSURV_PROJECT_ROOT", os.path.expanduser("~/farm-surveillance-v2")),
+    "bin",
+    "health_watchdog.sh",
+)
+
 # ---------------------------------------------------------------------------
 # Uptime formatting helpers
 # ---------------------------------------------------------------------------
@@ -136,6 +151,8 @@ class HealthReporter:
         self._api_healthz_last: float | None = None
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        # US-092c: watchdog dispatcher (separate thread from heartbeat).
+        self._watchdog = _WatchdogLoop()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -159,12 +176,16 @@ class HealthReporter:
             _INTERVAL_SECONDS,
             self._port,
         )
+        # US-092c: start the watchdog dispatcher thread.
+        self._watchdog.start()
 
     def stop(self, timeout: float = 5.0) -> None:
         """Signal the heartbeat thread to exit and wait up to *timeout* seconds."""
         self._stop_event.set()
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=timeout)
+        # US-092c: stop the watchdog dispatcher too.
+        self._watchdog.stop(timeout=timeout)
 
     # ------------------------------------------------------------------
     # Heartbeat core
@@ -615,6 +636,93 @@ class HealthReporter:
             bot_username=bot_username,
             last_send_age_s=last_send_age_s,
             errors_last_hour=errors_last_hour,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Watchdog dispatcher (US-092c): in-process daemon thread that fires the
+# health_watchdog.sh script on a regular cadence.
+#
+# This is a single in-process thread inside the supervised listener; it
+# satisfies the AGENTS.md no-backup-plist rule because no second supervisor
+# is involved. If the listener crashes, the watchdog goes with it, which is
+# the correct failure mode (no orphan dispatcher).
+#
+# Off-switches:
+#   - LISTENER_HEALTH_WATCHDOG_ENABLED=0  (dispatcher kill switch)
+#   - WATCHDOG_SILENT=1                   (script-level exit)
+# Either one being OFF skips the fire.
+# ---------------------------------------------------------------------------
+
+
+class _WatchdogLoop:
+    """Periodic watchdog dispatcher daemon thread.
+
+    Fires bin/health_watchdog.sh every _WATCHDOG_INTERVAL_SECONDS (default 300 s = 5 min).
+    First fire is after one full interval — NOT immediately.
+
+    Lifecycle:
+        wl = _WatchdogLoop()
+        wl.start()     # launches daemon thread, first fire at T+interval
+        wl.stop()      # signals thread to exit and joins (timeout=5s)
+    """
+
+    def __init__(self) -> None:
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        """Start the watchdog dispatcher thread."""
+        self._thread = threading.Thread(
+            target=self._loop,
+            name="WatchdogLoop",
+            daemon=True,
+        )
+        self._thread.start()
+        log.info(
+            "health: watchdog dispatcher started; interval=%ds script=%s",
+            _WATCHDOG_INTERVAL_SECONDS,
+            _WATCHDOG_SCRIPT,
+        )
+
+    def stop(self, timeout: float = 5.0) -> None:
+        """Signal the watchdog thread to exit and wait up to *timeout* seconds."""
+        self._stop_event.set()
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=timeout)
+
+    def _loop(self) -> None:
+        """Main loop: sleep interval, fire watchdog script, repeat until stop."""
+        while True:
+            if self._stop_event.wait(timeout=_WATCHDOG_INTERVAL_SECONDS):
+                break
+            try:
+                self._fire()
+            except Exception:
+                log.exception("health: watchdog loop raised")
+
+    def _fire(self) -> None:
+        """Execute the watchdog script and log the result."""
+        # Honor BOTH off-switches.
+        if not _WATCHDOG_ENABLED:
+            return
+        if os.environ.get("WATCHDOG_SILENT", "0") == "1":
+            return
+
+        result = subprocess.run(
+            ["bash", _WATCHDOG_SCRIPT],
+            capture_output=True,
+            text=True,
+            timeout=270,
+            check=False,
+        )
+        stdout_head = result.stdout[:200] if result.stdout else ""
+        stderr_head = result.stderr[:200] if result.stderr else ""
+        log.info(
+            "watchdog: rc=%d stdout_head=%s stderr_head=%s",
+            result.returncode,
+            stdout_head,
+            stderr_head,
         )
 
 
