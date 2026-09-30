@@ -28,6 +28,9 @@ __pycache__/
 venv/
 .pytest_cache/
 .mypy_cache/
+
+# Watchdog runtime log
+logs/health_watchdog.log
 .ruff_cache/
 .coverage
 htmlcov/
