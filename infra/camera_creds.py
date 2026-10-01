@@ -17,11 +17,14 @@ OUTPUTS:
 PUBLIC API:
     _parse_env(env_path: str) -> dict
         Parse camera-creds.env into a dict keyed by uppercase camera prefix.
-        Each entry: {name, ip, user, pass, rtsp_url, http_user, http_pass}.
+        Each entry: {name, ip, user, pass, rtsp_url, http_user, http_pass,
+            width, height, fps, frame_format}.
     get_camera(camera_id: str) -> dict | None
         Look up a single camera by uppercase ID. Returns None if not found.
     get_all_cameras() -> dict
         Return the full parsed camera dict.
+    get_frame_geometry(camera_id: str) -> dict | None
+        Return frame geometry {width, height, fps, frame_format} or None.
     validate_source_ip(camera_id: str, request_ip: str) -> bool
         Return True if request_ip matches the camera's registered IP.
 
@@ -154,6 +157,35 @@ def _parse_env(env_path: str) -> dict:
                     result.setdefault(camera_name, {})["http_user"] = value
                 elif key == f"{prefix}_http_pass":
                     result.setdefault(camera_name, {})["http_pass"] = value
+                elif key == f"{prefix}_width":
+                    entry = result.setdefault(camera_name, {})
+                    entry["name"] = camera_name
+                    entry["prefix"] = prefix.upper()
+                    try:
+                        entry["width"] = int(value)
+                    except (ValueError, TypeError):
+                        entry["width"] = None
+                elif key == f"{prefix}_height":
+                    entry = result.setdefault(camera_name, {})
+                    entry["name"] = camera_name
+                    entry["prefix"] = prefix.upper()
+                    try:
+                        entry["height"] = int(value)
+                    except (ValueError, TypeError):
+                        entry["height"] = None
+                elif key == f"{prefix}_frame_fps":
+                    entry = result.setdefault(camera_name, {})
+                    entry["name"] = camera_name
+                    entry["prefix"] = prefix.upper()
+                    try:
+                        entry["fps"] = float(value)
+                    except (ValueError, TypeError):
+                        entry["fps"] = 0.0
+                elif key == f"{prefix}_frame_format":
+                    entry = result.setdefault(camera_name, {})
+                    entry["name"] = camera_name
+                    entry["prefix"] = prefix.upper()
+                    entry["frame_format"] = value if value else None
 
     return result
 
@@ -183,6 +215,29 @@ def get_camera(camera_id: str) -> dict | None:
     for info in _all_cameras.values():
         if info.get("prefix") == camera_id_upper:
             return info
+    return None
+
+
+def get_frame_geometry(camera_id: str) -> dict | None:
+    """Return frame geometry for a camera.
+
+    Args:
+        camera_id: Uppercase prefix, e.g. "FRONT", "BACK".
+
+    Returns:
+        {"width": int | None, "height": int | None,
+         "fps": float, "frame_format": str | None}
+        or None if camera not found.
+    """
+    camera_id_upper = camera_id.upper()
+    for info in _all_cameras.values():
+        if info.get("prefix") == camera_id_upper:
+            return {
+                "width": info.get("width"),
+                "height": info.get("height"),
+                "fps": info.get("fps", 0.0),
+                "frame_format": info.get("frame_format"),
+            }
     return None
 
 
