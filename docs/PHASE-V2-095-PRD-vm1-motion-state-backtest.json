@@ -1,0 +1,88 @@
+{
+  "phase": "V2-095",
+  "title": "VM1 motion-state backtest harness (out-of-band, no production changes)",
+  "summary": "Operator hypothesis: VM1's prompt currently asserts the subject is moving, so when a parked car appears in a tree-wind motion bbox, VM1 returns the parked car as 'the moving subject' and the matcher fires TG#2/3. To test, build a STANDALONE backtest harness that takes yesterday's alert fixtures (frame_002, frame_003, composite) and re-feeds them through a NEW VM1 prompt that asks: (a) what class is moving, (b) bbox in frame_2 coords, (c) bbox in frame_3 coords. Render VM1's bboxes on the composite for operator review. NO production code changes; the backtest is offline-only.",
+  "operator_provided_problem": [
+    "Alert 15:15:59 EDT 2026-09-30 OUTSIDE_FRONT_GARAGE: tree motion triggered Reolink MD, YOLO found operator Tesla Model Y at the edge of the motion bbox, VM1 said 'blue car parked on gravel, partially visible', matcher hit v_darkblue_tesla_y_operator, TG#2 fired with 'Class confirmed: Tesla'.",
+    "Alert 13:13:45 EDT 2026-09-30 OUTSIDE_FRONT_SOLAR: tree motion triggered Reolink MD, YOLO found helper Silverado at lower-left corner of crop, VM2 said 'white Chevrolet pickup truck visible in the lower left corner of the image, parked on a gravel surface near a line of tall pine trees', match hit v_white_silverado_helper_a, TG#2 fired.",
+    "Both alerts: the vehicle did not move. Only the trees moved. Reolink fired alarm.type=vehicle because its AI detected the parked vehicle while tree motion triggered the MD. Current system has no way to distinguish 'parked car + tree motion' from 'car drove in'.",
+    "VM1 prompt line 79 of infra/vm1_prompt.py: 'The crops show one moving subject.' This pre-asserts motion; VM1 cannot return 'stationary' even when the subject is parked."
+  ],
+  "scope": {
+    "in_scope": [
+      "New module: infra/backtest_vm1_motion.py",
+      "Re-render composite.png from existing frame_001..frame_004 + diff (uses infra/motion_visualization.py)",
+      "Build a NEW prompt module: infra/backtest_vm1_prompt.py (NOT infra/vm1_prompt.py, which is production)",
+      "Send 3 images to local vision model: frame_002, frame_003, composite_with_red_overlay",
+      "Prompt asks: class (vehicle/person/animal/unsure), bbox in frame_2 native coords, bbox in frame_3 native coords",
+      "Render VM1's predicted bboxes on a copy of the composite as cyan boxes; save PNG per alert",
+      "Manifest JSON: alert_id, cam, gate_classification, vm1_predicted_class, vm1_predicted_bbox_a, vm1_predicted_bbox_b, IoU(VM1-bbox_a vs gate-bbox_a)",
+      "Run on 5-10 alert fixtures (suppressed alerts with frames on disk; gate_classification in {none})"
+    ],
+    "out_of_scope": [
+      "Modifying infra/vm1_prompt.py (production prompt)",
+      "Modifying listener/pipeline.py or any production module",
+      "Touching camera-creds.env, .env, AGENTS.md, or any existing module",
+      "Integrating new VM1 output into the live pipeline",
+      "Wait for new vehicle alerts (~90 min) for backtest (use existing suppressed alerts with frames instead)"
+    ]
+  },
+  "design_constraints": [
+    "Body size: <=2,500 chars per card (local 35B worker ceiling).",
+    "ASCII-clean bodies only (no em-dash, smart quote, arrow, <= glyph).",
+    "Standalone module \u2014 does not import from listener/ or any infra module that touches the live pipeline at boot.",
+    "Vision model endpoint: VISION_LLM_URL from .env (already 127.0.0.1:8080, model Qwen3-VL-8B-Instruct-UD-Q4_K_XL).",
+    "Rate-limit: max 1 vision call per ~3s to avoid saturating local model (--sleep-between-calls knob).",
+    "Reversible: no production files touched; safe to archive and abandon if results are bad."
+  ],
+  "stories": [
+    {
+      "id": "US-095a",
+      "title": "infra/backtest_vm1_motion.py \u2014 standalone harness with composite rebuild + new VM1 prompt + bbox render",
+      "scope_files": [
+        "infra/backtest_vm1_motion.py",
+        "infra/backtest_vm1_prompt.py",
+        "data/backtest/.gitkeep"
+      ],
+      "done_evidence": [
+        "infra/backtest_vm1_motion.py exists with: run_backtest(), render_motion_composite via infra.motion_visualization, vision POST to VISION_LLM_URL with frame_002 + frame_003 + composite as 3 images, BACKTEST_PROMPT, BACKTEST_SCHEMA, IoU helper, _render_cyan_rects, save outputs to data/backtest/<alert_id>/",
+        "infra/backtest_vm1_prompt.py exists with: build_backtest_prompt(), PROMPT_TEXT, SCHEMA_JSON (class enum + 2 bboxes)",
+        "data/backtest/ directory exists with .gitkeep",
+        "Module imports cleanly: .venv/bin/python -c 'import infra.backtest_vm1_motion'"
+      ],
+      "no_go": [
+        "Do not modify infra/vm1_prompt.py",
+        "Do not modify infra/motion_visualization.py",
+        "Do not modify listener/pipeline.py or any infra module that the running listener imports at boot"
+      ]
+    },
+    {
+      "id": "US-095b",
+      "title": "Run harness on 5-10 alert fixtures, save outputs + manifest",
+      "scope_files": [
+        "data/backtest/manifest.json"
+      ],
+      "done_evidence": [
+        "data/backtest/manifest.json exists with >=5 entries (alert_id, cam, gate_class, vm1_class, vm1_bbox_a, vm1_bbox_b, iou_a, iou_b)",
+        "data/backtest/<alert_id>/composite_with_vm1_bboxes.png exists for each manifest entry",
+        "Operator can open the PNGs and visually verify VM1 bbox position vs the gate's green motion bbox",
+        "All 5-10 alerts selected from FRONT, OUTSIDE_FRONT_GARAGE, OUTSIDE_FRONT_SOLAR cams (where we have surviving frame fixtures; gates=suppressed; gate_reason in {no_object_detected, global_change})"
+      ],
+      "no_go": [
+        "Do not include alerts from alerts with NO surviving frames (cleaned by US-061c)",
+        "Do not exceed 10 alerts in this first run (token budget + operator review time)"
+      ]
+    }
+  ],
+  "verification_recipe": [
+    "After US-095a: `uv run python -c 'import dotenv; dotenv.load_dotenv(\"infra/.env\"); import infra.backtest_vm1_motion as m; print(\"OK:\", m.run_backtest, m.BACKTEST_PROMPT, m.BACKTEST_SCHEMA, m.build_backtest_prompt if hasattr(m, \"build_backtest_prompt\") else m.PROMPT_TEXT)'` from /Users/jill/farm-surveillance-v2",
+    "After US-095a: verify `infra/backtest_vm1_prompt.py::build_backtest_prompt` and `infra/backtest_vm1_motion.py::BACKTEST_SCHEMA` exist by running: `uv run python -c 'import dotenv; dotenv.load_dotenv(\"~/.env\"); import infra.backtest_vm1_prompt; print(infra.backtest_vm1_prompt.build_backtest_prompt())'`",
+    "After US-095b: `cat data/backtest/manifest.json | jq '. | length'` returns >=5; `ls data/backtest/*/composite_with_vm1_bboxes.png | wc -l` matches manifest count",
+    "Operator reviews each PNG manually: does VM1's cyan bbox land on the moving subject (trees) or on the static parked object?"
+  ],
+  "results_interpretation": [
+    "If VM1's bboxes consistently land on the moving region (trees/foliage) and the class matches the moving region (not the parked car): the new prompt works. Next step is to consider integration into production (separate PRD, NOT this one).",
+    "If VM1's bboxes still land on the parked car: VM1 cannot tell motion from static given only 2 frames. The problem requires a different approach (e.g., cross-frame motion analysis in Python, or sending 4 frames). File a follow-up PRD.",
+    "If VM1's bboxes land somewhere random (neither motion nor parked car): prompt is too vague. Tighten prompt + retry."
+  ]
+}
