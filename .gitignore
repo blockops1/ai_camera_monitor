@@ -73,3 +73,7 @@ scripts/push_log.txt
 
 # Per-event runtime output directories (one UUID per alert, written by listener/daemon.py)
 data/events/*/
+
+# Backup files (created by orchestrator env file edits, not source)
+*.bak
+*.bak.*
