@@ -99,6 +99,36 @@ DEFAULT_BBOX_PAD_PCT = 0.10
 # frames).  Tunable via env var BBOX_INTERSECTION_DILATE_PCT.
 DEFAULT_INTERSECTION_DILATE_PCT = 0.01
 
+# Minimum connected-component area as a fraction of total frame area.
+# Components smaller than this are dropped BEFORE dilation.
+# Floor at 50 px regardless of frame size.
+# US-096c: at 4K, the old 22px dilation (1% of min_dim) bridges 153 small
+# noise components into one blob covering 96.9% of frame, triggering the
+# 60% global_change threshold. This filter prevents that.
+MIN_AREA_PCT = 0.0005  # 0.05% of frame area
+
+# Hardcoded dilation in pixels — applied AFTER component filtering.
+# NOT a percentage, NOT scaled by frame dimension.
+# US-096c: 12px bridges real motion without merging noise blobs.
+DILATE_PX = 12
+
+# Minimum connected-component area as a percent of total frame pixels.
+# Components smaller than this are filtered out BEFORE dilation.
+# Default 0.0005 = 0.05% of frame (filters single-pixel noise, JPEG
+# artifacts, sensor glitches). Tunable via env var MIN_AREA_PCT.
+# US-096c (2026-10-01): introduced to prevent noise-bridging where
+# 22px dilation bridges 153 small components into one giant blob.
+DEFAULT_MIN_AREA_PCT = 0.0005
+
+# Hardcoded dilation in pixels applied AFTER noise-component filtering.
+# NOT percent-based, NOT scaled — a fixed 12px structuring element.
+# US-096c operator directive: fixed 12px, never revert to percent-based.
+FILTER_DILATE_PX = 12
+
+# Minimum area in pixels for the MIN_AREA_PCT floor (prevents 0-area
+# components on tiny frames).
+MIN_AREA_PX_FLOOR = 50
+
 
 def _get_intersection_dilate_pct() -> float:
     """Read BBOX_INTERSECTION_DILATE_PCT at call time.
@@ -112,6 +142,25 @@ def _get_intersection_dilate_pct() -> float:
     return float(
         os.environ.get("BBOX_INTERSECTION_DILATE_PCT", DEFAULT_INTERSECTION_DILATE_PCT)
     )
+
+
+def _get_min_area_pct() -> float:
+    """Read MIN_AREA_PCT at call time.
+
+    Minimum connected-component area as a percent of total frame pixels.
+    Components smaller than MIN_AREA_PCT * (frame_w * frame_h) are
+    filtered out before dilation. Tunable via env var.
+
+    Reading at call time means operator changes to the env var take
+    effect on the next test run / next listener start.
+    """
+    raw = os.environ.get("MIN_AREA_PCT")
+    if raw is not None:
+        try:
+            return float(raw.strip())
+        except ValueError:
+            pass
+    return DEFAULT_MIN_AREA_PCT
 
 
 def _connected_components(
@@ -180,6 +229,58 @@ def _connected_components(
 
     num_labels = next_label - 1
     return num_labels, labels
+
+
+def _filter_components_and_dilate(
+    mask: np.ndarray,
+    dilate_px: int | None = None,
+) -> np.ndarray:
+    """Filter small connected components from a binary mask, then dilate.
+
+    Steps:
+    1. Run connected-components on the RAW (un-dilated) mask.
+    2. Drop components with area < MIN_AREA_PCT * (frame_w * frame_h),
+       with a floor of MIN_AREA_PX_FLOOR (50 px).
+    3. Build a filtered mask from surviving components.
+    4. Dilate the filtered mask by a HARDCODE 12px (or caller-provided).
+
+    This prevents noise-bridging where a large dilation (e.g. 22px = 1% of
+    min frame dim) bridges many small noise components into one giant blob
+    that covers most of the frame.
+
+    Returns a uint8 ndarray (0 or 255).
+    """
+    if mask is None or mask.size == 0:
+        return np.zeros_like(mask)
+
+    h, w = mask.shape
+
+    # Read at call time so tests can mutate env vars.
+    min_area_pct = _get_min_area_pct()
+    min_area_px = max(int(min_area_pct * h * w), MIN_AREA_PX_FLOOR)
+
+    if dilate_px is None:
+        dilate_px = FILTER_DILATE_PX
+
+    # Step 1: connected components on the RAW mask (no pre-dilation).
+    num_labels, labels = _connected_components(mask)
+
+    if num_labels < 1:
+        # No components at all — return empty mask.
+        return np.zeros_like(mask)
+
+    # Step 2: keep only components >= min_area_px.
+    filtered = np.zeros((h, w), dtype=np.uint8)
+    for i in range(1, num_labels + 1):
+        area = int(np.sum(labels == i))
+        if area >= min_area_px:
+            filtered[labels == i] = 255
+
+    # Step 3: dilate the filtered mask.
+    if dilate_px > 0:
+        filtered = _dilate_mask(filtered, dilate_px)
+
+    return filtered
 
 
 def _expand_bbox_pct(
@@ -395,17 +496,23 @@ def bbox_from_mask_with_intersection(
     pad_pct: float = DEFAULT_BBOX_PAD_PCT,
     dilate_pct: float | None = None,
 ) -> tuple[int, int, int, int] | None:
-    """Find the bbox anchored to the current frame by pixel-wise AND + dilate.
+    """Find the bbox anchored to the current frame by pixel-wise AND + filter + dilate.
 
-    Computes the pixel-wise AND of two consecutive diff masks, dilates the
-    result by 1% of the smaller frame dimension (configurable via
-    ``dilate_pct`` or env var ``BBOX_INTERSECTION_DILATE_PCT``), then takes
-    the largest connected component and bboxes it.
+    Computes the pixel-wise AND of two consecutive diff masks, filters out
+    small connected components (area < MIN_AREA_PCT * frame_area, floored at
+    50 px), dilates the remaining mask by a hard-coded 12 px, then takes the
+    largest connected component and bboxes it.
 
     The caller is expected to pass ``diff(1,2)`` as ``mask_prior`` and
     ``diff(2,3)`` as ``mask_curr``.  The AND result captures regions that
-    changed in BOTH consecutive time windows — i.e. the subject's persistent
+    changed in BOTH consecutive time windows -- i.e. the subject's persistent
     motion footprint.
+
+    US-096c: replaced percent-based dilation with a two-stage process:
+      1. Filter small CCs from the RAW AND mask (no dilation first).
+      2. Dilate the surviving mask by 12 px fixed.
+    This prevents noise-bridging where percent-dilation merges scattered
+    noise into a giant blob that exceeds the global_change threshold.
 
     Uses ``_expand_bbox_pct`` for padding and round-mult-32.
 
@@ -415,58 +522,59 @@ def bbox_from_mask_with_intersection(
     if mask_prior is None or mask_prior.size == 0 or mask_curr is None or mask_curr.size == 0:
         return None
 
-    # Dilate percentage: caller override, then env var (read at call time), then default.
-    if dilate_pct is None:
-        dilate_pct = _get_intersection_dilate_pct()
-
     # Step 1: pixel-wise AND
-    intersection = ((mask_prior > 0) & (mask_curr > 0)).astype(np.uint8) * 255
+    and_mask = ((mask_prior > 0) & (mask_curr > 0)).astype(np.uint8) * 255
 
-    # Step 2: dilate
-    h, w = mask_curr.shape
-    min_dim = min(h, w)
-    dilate_px = round(dilate_pct * min_dim)
-    intersection = _dilate_mask(intersection, dilate_px)
-
-    # Step 3: connected components, rank by intensity sum (not area).
-    #
-    # A vehicle that is driving onto the property and stopping produces a
-    # compact region of HIGH pixel-difference values (bright, concentrated
-    # motion) across both consecutive diff pairs.  A diffuse foliage / tree
-    # canopy region produces many more changed pixels but each one is only
-    # weakly different (low per-pixel intensity).  Ranking by area on the
-    # AND mask therefore rewards the diffuse noise and hides the vehicle —
-    # see US-073a regression analysis (truck bbox (403,497) 598x287 had
-    # 30.6 M intensity vs canopy's 13.8 M at 138k area).  Summing the raw
-    # uint8 intensity (np.sum of the mask values, not np.count_nonzero)
-    # across the AND mask gives us the total "brightness" of the
-    # persistent-motion region and correctly surfaces bright, compact
-    # vehicles above diffuse foliage noise.
-    num_labels, labels = _connected_components(intersection)
+    # Step 2: connected components on RAW AND mask (no pre-dilation).
+    num_labels, labels = _connected_components(and_mask)
     if num_labels < 1:
+        return None
+
+    # Step 3: drop components below MIN_AREA_PCT floor, build filtered mask.
+    frame_area = and_mask.shape[0] * and_mask.shape[1]
+    min_area = max(50, int(MIN_AREA_PCT * frame_area))
+
+    filtered_mask = np.zeros_like(and_mask)
+    for i in range(1, num_labels + 1):
+        comp_area = int(np.sum(labels == i))
+        if comp_area >= min_area:
+            filtered_mask[labels == i] = 255
+
+    # If no component survived, return None.
+    if filtered_mask.sum() == 0:
+        return None
+
+    # Step 4: dilate filtered mask by hardcoded 12 px (NOT percent).
+    dilated = _dilate_mask(filtered_mask, DILATE_PX)
+
+    # Step 5: connected components on dilated+filtered mask, rank by
+    # intensity sum of the AND mask (not area) so bright compact vehicles
+    # beat diffuse foliage — see US-073a analysis in the old code.
+    num_labels2, labels2 = _connected_components(dilated)
+    if num_labels2 < 1:
         return None
 
     best_intensity = 0
     best_idx = 1
-    for i in range(1, num_labels + 1):
-        comp_mask = (labels == i)
-        intensity = int(np.sum(mask_prior[comp_mask]))
+    for i in range(1, num_labels2 + 1):
+        comp_mask = (labels2 == i)
+        intensity = int(np.sum(and_mask[comp_mask]))
         if intensity > best_intensity:
             best_intensity = intensity
             best_idx = i
 
-    best_area = int(np.sum(labels == best_idx))
+    best_area = int(np.sum(labels2 == best_idx))
     if best_area < min_area_px:
         return None
 
-    rows = np.where(labels == best_idx)[0]
-    cols = np.where(labels == best_idx)[1]
+    rows = np.where(labels2 == best_idx)[0]
+    cols = np.where(labels2 == best_idx)[1]
     y_cc = int(rows.min())
     x_cc = int(cols.min())
     h_cc = int(rows.max() - rows.min() + 1)
     w_cc = int(cols.max() - cols.min() + 1)
 
-    # Step 4: expand and clamp
+    # Step 6: expand and clamp
     h_img, w_img = mask_curr.shape
     return _expand_bbox_pct((x_cc, y_cc, w_cc, h_cc), pad_pct, w_img, h_img)
 
@@ -600,10 +708,15 @@ def compute_cross_diff_bboxes(
     """Compute cross-diff bboxes for the motion gate pipeline.
 
     Loads 4 frames, computes diff(1,2), diff(2,3), diff(3,4) masks, then:
-      - bbox_a = bbox_from_mask_with_intersection(mask_12, mask_23, ...)
+      - bbox_a = filtered+ dilated bbox from AND(mask_12, mask_23)
         (anchored to frame_2 — the subject WAS here)
-      - bbox_b = bbox_from_mask_with_intersection(mask_23, mask_34, ...)
+      - bbox_b = filtered+ dilated bbox from AND(mask_23, mask_34)
         (anchored to frame_3 — the subject IS here)
+
+    Filter pipeline (US-096c): AND mask -> connected-components on RAW
+    -> drop small components -> dilate 12px -> largest-component bbox.
+    This prevents noise-bridging where large dilation merges many small
+    components into one giant blob covering most of the frame.
 
     Either may be None if no component meets the area threshold.
 
@@ -622,15 +735,14 @@ def compute_cross_diff_bboxes(
     mask_23 = pairwise_diff(f2, f3, threshold=threshold)
     mask_34 = pairwise_diff(f3, f4, threshold=threshold)
 
-    bbox_a = bbox_from_mask_with_intersection(
-        mask_12, mask_23,
-        min_area_px=min_area_px,
-        pad_pct=pad_pct,
-    )
-    bbox_b = bbox_from_mask_with_intersection(
-        mask_23, mask_34,
-        min_area_px=min_area_px,
-        pad_pct=pad_pct,
-    )
+    # US-096c: filter + dilate pipeline for each intersection pair.
+    and_a = ((mask_12 > 0) & (mask_23 > 0)).astype(np.uint8) * 255
+    and_b = ((mask_23 > 0) & (mask_34 > 0)).astype(np.uint8) * 255
+
+    filtered_a = _filter_components_and_dilate(and_a)
+    filtered_b = _filter_components_and_dilate(and_b)
+
+    bbox_a = bbox_from_mask(filtered_a, min_area_px=min_area_px, pad_pct=pad_pct)
+    bbox_b = bbox_from_mask(filtered_b, min_area_px=min_area_px, pad_pct=pad_pct)
 
     return bbox_a, bbox_b

@@ -56,7 +56,7 @@ _API_PORT = int(os.environ.get("FARMSURV_API_PORT", "8092"))
 _BOX_ID = os.environ.get("FARMSURV_BOX_ID", os.environ.get("FARM_BOX_ID", ""))
 
 # Server uptime at boot
-_SERVER_START = datetime.datetime.now(datetime.UTC)
+_SERVER_START = datetime.datetime.now(datetime.timezone.utc)
 
 # ---------------------------------------------------------------------------
 # Token validation (mirrors MCP server pattern)
@@ -302,7 +302,7 @@ class _APIHandler(BaseHTTPRequestHandler):
     def _handle_healthz(self):
         """Return health status."""
         uptime = (
-            datetime.datetime.now(datetime.UTC) - _SERVER_START
+            datetime.datetime.now(datetime.timezone.utc) - _SERVER_START
         ).total_seconds()
         response = {
             "ok": _API_ENABLED,
