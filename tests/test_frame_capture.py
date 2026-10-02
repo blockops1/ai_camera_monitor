@@ -333,5 +333,122 @@ class TestSubscribeGeometry(unittest.TestCase):
             os.unlink(env_path)
 
 
+class TestContainerLock(unittest.TestCase):
+    """Tests for US-097a: PersistentRTSPReader.stop() socket leak fix.
+
+    These are the tests US-049pr claimed to add (2026-09-17) but v2
+    never received. They verify that stop() closes the PyAV container
+    on join timeout, that close() is idempotent, and that _container_lock
+    prevents concurrent demux+close SIGSEGV.
+
+    Note: All IP addresses use RFC 5737 TEST-NET-1 (192.0.2.0/24).
+    """
+
+    def _make_reader(self):
+        """Create a PersistentRTSPReader with a mocked av.container."""
+        import sys
+        from unittest.mock import MagicMock
+
+        if "av" not in sys.modules:
+            _av_stub = MagicMock()
+            _av_stub.__version__ = "15.1.0"
+            _av_stub.container = MagicMock()
+            _av_stub.container.InputContainer = MagicMock
+            sys.modules["av"] = _av_stub
+
+        from infra.frame_capture import PersistentRTSPReader
+
+        reader = PersistentRTSPReader(
+            "rtsp://admin:pass@192.0.2.1:554/", camera_id="FRONT"
+        )
+        mock_container = MagicMock()
+        mock_container.close = MagicMock()
+        reader._container = mock_container
+        return reader, mock_container
+
+    # -- AC(a): stop after stuck demux closes the container --
+    def test_stop_stuck_demux_closes_container(self):
+        """When join() times out, stop() must call _container.close()
+        inside _container_lock to release the RTSP socket.
+
+        This is the core US-097a fix: the old code set
+        self._container = None WITHOUT calling close(), leaving the
+        C-level RTSP socket open and leaking one socket per reconnect.
+        """
+        reader, mock_container = self._make_reader()
+
+        reader._thread = MagicMock()
+        reader._thread.is_alive.return_value = True
+        reader._thread.join = MagicMock(side_effect=lambda timeout: None)
+
+        reader.stop(timeout=0.0)
+
+        mock_container.close.assert_called_once()
+        self.assertIsNone(reader._container)
+
+    # -- AC(b): close is idempotent --
+    def test_stop_close_is_idempotent(self):
+        """Calling stop() twice must not raise and must not error.
+        The container close() call is safe to invoke multiple times.
+        """
+        reader, mock_container = self._make_reader()
+
+        reader._thread = MagicMock()
+        reader._thread.is_alive.return_value = True
+        reader._thread.join = MagicMock(side_effect=lambda timeout: None)
+
+        reader.stop(timeout=0.0)
+        mock_container.close.assert_called_once()
+
+        reader.stop(timeout=0.0)
+
+        self.assertEqual(mock_container.close.call_count, 1)
+
+    # -- AC(c): lock prevents concurrent demux+close SIGSEGV --
+    def test_lock_prevents_concurrent_demux_close(self):
+        """When the demux loop holds _container_lock and stop() is
+        called, the lock in stop() must serialize with the demux
+        loop's own lock acquisition.  This prevents a SIGSEGV from
+        the demux thread using a container that close() just freed.
+        """
+        reader, mock_container = self._make_reader()
+
+        lock = reader._container_lock
+        acquired = __import__("threading").Event()
+
+        def demux_holds_lock():
+            with lock:
+                acquired.set()
+                __import__("time").sleep(0.2)
+
+        demux_thread = __import__("threading").Thread(target=demux_holds_lock)
+        demux_thread.start()
+
+        acquired.wait(timeout=2.0)
+        self.assertTrue(acquired.is_set(), "Demux thread should have acquired lock")
+
+        stop_completed = __import__("threading").Event()
+
+        def do_stop():
+            reader._thread = MagicMock()
+            reader._thread.is_alive.return_value = True
+            reader._thread.join = MagicMock(side_effect=lambda timeout: None)
+            reader.stop(timeout=0.0)
+            stop_completed.set()
+
+        stop_thread = __import__("threading").Thread(target=do_stop)
+        stop_thread.start()
+
+        stop_thread.join(timeout=3.0)
+        self.assertTrue(
+            stop_completed.is_set(),
+            "stop() should have completed after demux released lock",
+        )
+
+        mock_container.close.assert_called_once()
+
+        demux_thread.join(timeout=2.0)
+
+
 if __name__ == "__main__":
     unittest.main()

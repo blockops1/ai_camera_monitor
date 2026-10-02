@@ -329,11 +329,12 @@ class PersistentRTSPReader:
 
         After *timeout* seconds: the join has expired, the native
         demux() thread may still be blocked inside PyAV's C demux()
-        call.  We DO NOT call _container.close() from this thread —
-        that would race the native thread and cause a SIGSEGV.  We
-        drop the reference only; the native thread will error out
-        and GC will reclaim the container.  The decode thread
-        itself closes the container when demux() naturally returns.
+        call.  We acquire _container_lock to serialize with any
+        in-progress demux iteration, then explicitly call
+        _container.close() at the Python level to force the
+        underlying RTSP socket closed.  The lock prevents a
+        SIGSEGV from racing the native thread.  Idempotent:
+        repeated calls are safe.
         """
         if not self.is_running:
             return
@@ -342,12 +343,18 @@ class PersistentRTSPReader:
             self._thread.join(timeout=timeout)
             self._thread = None
         # Post-join: the demux thread may still be inside the native
-        # C call.  Acquiring _container_lock ensures demux is not
-        # mid-iteration.  We drop the reference WITHOUT calling
-        # close() — the decode thread owns the close when demux
-        # exits (single-owner rule).
+        # C call.  Acquiring _container_lock serializes with the
+        # demux loop's own _container_lock usage in _decode_iteration,
+        # so we can safely call close() here.
         with self._container_lock:
-            self._container = None
+            if self._container is not None:
+                try:
+                    self._container.close()
+                except Exception:
+                    # Container may already be closed by the demux
+                    # thread exiting; this is not an error.
+                    log.exception("stop: container.close() failed")
+                self._container = None
         self._healthy = False
 
     def get_recent_frames(
