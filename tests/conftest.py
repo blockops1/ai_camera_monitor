@@ -22,6 +22,15 @@ from __future__ import annotations
 import os
 
 # ---------------------------------------------------------------------------
+# Load .env so all tests have access to required env vars (MOTION_GATE_*,
+# TELEGRAM_*, FARMSURV_*, etc.).  Without this, infra imports crash at
+# module level on _require_env calls.
+# ---------------------------------------------------------------------------
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv()
+
+# ---------------------------------------------------------------------------
 # PyAV stub — the project venv may lack av; tests mock av.open() anyway.
 # Must run at import time (before test collection) so infra.frame_capture
 # can `import av` successfully.

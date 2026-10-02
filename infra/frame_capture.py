@@ -142,8 +142,10 @@ class PersistentRTSPReader:
         ring_size: int = RING_SIZE_DEFAULT,
         ffmpeg_flags: dict | None = None,
         max_reconnect_attempts: int = _UNSET,  # type: ignore[assignment]
+        camera_id: str | None = None,
     ) -> None:
         self._rtsp_url = rtsp_url
+        self._camera_id = camera_id
         self._ring_size = ring_size
         self._ring: deque[Image.Image] = deque(maxlen=ring_size)
         self._ring_lock = threading.Lock()
@@ -169,6 +171,7 @@ class PersistentRTSPReader:
         self.reconnects_total = 0
         self._teardowns_total = 0
         self._last_teardown_monotonic: float | None = None
+        self._geometry_subscribed = False  # US-096b: one-shot geo subscribe
 
     @property
     def is_running(self) -> bool:
@@ -204,6 +207,100 @@ class PersistentRTSPReader:
         if not self._healthy or self._last_frame_time is None:
             return False
         return (time.monotonic() - self._last_frame_time) < stale_seconds
+
+    def _subscribe_geometry(self) -> None:
+        """Probe cv2.VideoCapture for live stream geometry and write into
+        infra.camera_creds._all_cameras on the matching camera entry.
+
+        Called once at first RTSP open. Uses a lightweight metadata probe
+        — does NOT decode frames.  Idempotent: skips on teardown reconnects
+        via the _geometry_subscribed flag.
+
+        Failure modes:
+        - cap.get returns 0 for width or height -> log WARNING, proceed with
+          None for width/height (gate in US-096c falls back to frame.shape).
+        - cap reports width < 1280 -> log WARNING (substream), proceed.
+        - RTSP probe fails to open -> log WARNING, skip.
+        - No matching camera_creds entry -> log DEBUG, skip.
+        """
+        if self._camera_id is None:
+            return
+        # US-096b: one-shot — do not re-probe on teardown reconnects.
+        if self._geometry_subscribed:
+            return
+        # Look up the camera entry by matching our camera_id (prefix) to the
+        # prefix stored in each _all_cameras entry. Use get_all_cameras() at
+        # runtime, not the cached module dict from import time.
+        import cv2
+
+        import infra.camera_creds as _camera_creds
+
+        all_cam = _camera_creds.get_all_cameras()
+        cam_entry = None
+        for info in all_cam.values():
+            if info.get("prefix") == self._camera_id:
+                cam_entry = info
+                break
+        if cam_entry is None:
+            log.debug(
+                "frame_capture: no camera_creds entry for %s; skipping geometry",
+                self._camera_id,
+            )
+            return
+
+        # Lightweight cv2 probe — open the RTSP stream, read metadata, close.
+        cap = cv2.VideoCapture(self._rtsp_url)
+        if not cap.isOpened():
+            log.warning(
+                "frame_capture: %s cv2 probe failed to open RTSP; "
+                "geometry not populated",
+                self._camera_id,
+            )
+            cap.release()
+            return
+
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = float(cap.get(cv2.CAP_PROP_FPS))
+        cap.release()
+
+        fmt = cam_entry.get("frame_format")
+
+        # Zero-value guard
+        if w == 0 or h == 0:
+            log.warning(
+                "frame_capture: %s could not subscribe geometry, w=%d h=%d",
+                self._camera_id,
+                w,
+                h,
+            )
+            self._geometry_subscribed = True
+            return
+
+        # Substream guard
+        if w < 1280:
+            log.warning(
+                "frame_capture: %s negotiated substream %dx%d; "
+                "expected main stream >=1280 wide",
+                self._camera_id,
+                w,
+                h,
+            )
+
+        # Write into camera_creds
+        cam_entry["width"] = w
+        cam_entry["height"] = h
+        cam_entry["fps"] = fps
+        self._geometry_subscribed = True
+
+        log.info(
+            "frame_capture: %s subscribed %dx%d @ %.1ffps %s",
+            self._camera_id,
+            w,
+            h,
+            fps,
+            fmt or "unknown",
+        )
 
     def uptime_seconds(self) -> float:
         if self._start_time is None:
@@ -454,6 +551,9 @@ class PersistentRTSPReader:
         # Normal connect (or post-teardown reuse of self._container).
         if self._container is None:
             self._container = av.open(self._rtsp_url, options=self._ffmpeg_flags)
+        # Probe cv2.VideoCapture for live stream geometry and write into
+        # infra.camera_creds on each successful RTSP open.
+        self._subscribe_geometry()
         stream = self._container.streams.video[0]
         self._consecutive_errors = 0
         self._healthy = True
@@ -530,7 +630,7 @@ class CameraCaptureRegistry:
         rtsp_url = cam["rtsp_url"]
         if not rtsp_url:
             raise KeyError(f"Camera {camera_id} has no rtsp_url")
-        reader = PersistentRTSPReader(rtsp_url)
+        reader = PersistentRTSPReader(rtsp_url, camera_id=camera_id)
         reader.start()
         with inst._lock:
             inst._readers[camera_id] = reader
@@ -574,7 +674,7 @@ class CameraCaptureRegistry:
     def _boot_one(cls, camera_id: str, rtsp_url: str) -> None:
         if not rtsp_url:
             return
-        reader = PersistentRTSPReader(rtsp_url)
+        reader = PersistentRTSPReader(rtsp_url, camera_id=camera_id)
         reader.start()
         inst = cls._instance
         if inst is not None:
@@ -635,7 +735,9 @@ class CameraCaptureRegistry:
                     log.warning("Reader %s unhealthy; reconnecting.", cid)
                     dead_reader.stop(timeout=12.0)
                     inst._readers.pop(cid, None)
-                    new_reader = PersistentRTSPReader(dead_reader._rtsp_url)
+                    new_reader = PersistentRTSPReader(
+                        dead_reader._rtsp_url, camera_id=cid
+                    )
                     new_reader.start()
                     with inst._lock:
                         inst._readers[cid] = new_reader
