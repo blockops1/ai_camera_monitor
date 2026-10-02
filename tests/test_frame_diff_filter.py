@@ -22,9 +22,11 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from infra.frame_diff import (
+    DEFAULT_DIFF_THRESHOLD,
     DEFAULT_MIN_AREA_PCT,
     _dilate_mask,
     _filter_components_and_dilate,
+    _get_diff_threshold,
     _get_min_area_pct,
 )
 
@@ -271,3 +273,45 @@ class TestDilateMask:
         mask[0, 0] = 255
         result = _dilate_mask(mask, 100)  # huge dilation
         assert result.shape == (10, 10)
+
+
+# ============================================================================
+# _get_diff_threshold - env var reader for 4K H.265 codec noise
+# ============================================================================
+
+
+class TestGetDiffThreshold:
+    """_get_diff_threshold reads DIFF_THRESHOLD at call time.
+
+    Default 25 worked for 1080p H.264 but on 4K H.265 I-frame block
+    artifacts create per-pixel noise up to ~80/255, which floods the
+    diff mask. Raise via env to filter codec noise.
+    """
+
+    def test_default_when_env_unset(self, monkeypatch):
+        monkeypatch.delenv("DIFF_THRESHOLD", raising=False)
+        assert _get_diff_threshold() == DEFAULT_DIFF_THRESHOLD
+
+    def test_reads_env_value(self, monkeypatch):
+        monkeypatch.setenv("DIFF_THRESHOLD", "80")
+        assert _get_diff_threshold() == 80
+
+    def test_clamps_to_254_max(self, monkeypatch):
+        monkeypatch.setenv("DIFF_THRESHOLD", "999")
+        assert _get_diff_threshold() == 254
+
+    def test_clamps_to_1_min(self, monkeypatch):
+        monkeypatch.setenv("DIFF_THRESHOLD", "0")
+        assert _get_diff_threshold() == 1
+
+    def test_clamps_negative_to_1(self, monkeypatch):
+        monkeypatch.setenv("DIFF_THRESHOLD", "-10")
+        assert _get_diff_threshold() == 1
+
+    def test_invalid_string_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("DIFF_THRESHOLD", "not_a_number")
+        assert _get_diff_threshold() == DEFAULT_DIFF_THRESHOLD
+
+    def test_strips_whitespace(self, monkeypatch):
+        monkeypatch.setenv("DIFF_THRESHOLD", "  120  ")
+        assert _get_diff_threshold() == 120
