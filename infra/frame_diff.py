@@ -163,6 +163,31 @@ def _get_min_area_pct() -> float:
     return DEFAULT_MIN_AREA_PCT
 
 
+def _get_diff_threshold() -> int:
+    """Read DIFF_THRESHOLD at call time.
+
+    Grayscale pixel diff must exceed this to count as 'changed' between
+    two consecutive frames. Default 25 works well for 1080p H.264 streams;
+    on 4K H.265 streams the I-frame block artifacts create per-pixel noise
+    up to ~80/255 which floods the diff mask (every pixel 'changed' across
+    the entire frame). Raise to 80+ to filter codec noise on 4K.
+
+    Reading at call time means operator changes to the env var take
+    effect on the next test run / next listener start.
+
+    Returns:
+      int pixel-diff threshold (clamped to [1, 254]).
+    """
+    raw = os.environ.get("DIFF_THRESHOLD")
+    if raw is not None:
+        try:
+            val = int(raw.strip())
+            return max(1, min(254, val))
+        except ValueError:
+            pass
+    return DEFAULT_DIFF_THRESHOLD
+
+
 def _connected_components(
     mask: np.ndarray,
 ) -> tuple[int, np.ndarray]:
@@ -731,9 +756,9 @@ def compute_cross_diff_bboxes(
     if f1 is None or f2 is None or f3 is None or f4 is None:
         return None, None
 
-    mask_12 = pairwise_diff(f1, f2, threshold=threshold)
-    mask_23 = pairwise_diff(f2, f3, threshold=threshold)
-    mask_34 = pairwise_diff(f3, f4, threshold=threshold)
+    mask_12 = pairwise_diff(f1, f2, threshold=_get_diff_threshold())
+    mask_23 = pairwise_diff(f2, f3, threshold=_get_diff_threshold())
+    mask_34 = pairwise_diff(f3, f4, threshold=_get_diff_threshold())
 
     # US-096c: filter + dilate pipeline for each intersection pair.
     and_a = ((mask_12 > 0) & (mask_23 > 0)).astype(np.uint8) * 255
