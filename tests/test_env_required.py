@@ -411,8 +411,56 @@ def test_require_csv_env_returns_empty_when_blank() -> None:
     assert "OK" in result.stdout
 
 
-def test_require_csv_env_raises_when_unset() -> None:
-    """_require_csv_env raises RuntimeError when var is unset."""
+def test_require_csv_env_returns_empty_when_empty_string() -> None:
+    """_require_csv_env returns [] when var is set to empty string ''.
+
+    Regression test for V2-096e (2026-10-02): `_require_csv_env` previously
+    delegated to `_require_env` which raises on empty string. Operator
+    had `FARMSURV_NIGHT_SUPPRESS_CAMERAS=` in .env (empty = disabled),
+    and every pipeline alert crashed at night_suppress_match() during
+    the catch stage. The fix: `_require_csv_env` reads os.environ
+    directly and returns [] for any falsy result.
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", (
+            "import os\n"
+            "os.environ['CSV_TEST_VAL'] = ''\n"  # The actual bug case
+            "for v in ['MOTION_GATE_NIGHT_SUPPRESS_ENABLED',\n"
+            "          'FARMSURV_NIGHT_SUPPRESS_CAMERAS',\n"
+            "          'FARMSURV_NIGHT_SUPPRESS_CLASSES',\n"
+            "          'FARMSURV_QUIET_HOURS_ENABLED',\n"
+            "          'FARMSURV_BASELINE_OVERRIDE_ENABLED',\n"
+            "          'FARMSURV_MCP_TOKEN',\n"
+            "          'TELEGRAM_BOT_TOKEN', 'TELEGRAM_HOME_CHAT_ID']:\n"
+            "    os.environ.setdefault(v, 'placeholder')\n"
+            "import sys; sys.path.insert(0, '/Users/jill/farm-surveillance-v2')\n"
+            "import importlib.util\n"
+            "spec = importlib.util.spec_from_file_location(\n"
+            "    'env_required',\n"
+            "    '/Users/jill/farm-surveillance-v2/infra/env_required.py'\n"
+            ")\n"
+            "mod = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(mod)\n"
+            "result = mod._require_csv_env('CSV_TEST_VAL')\n"
+            "assert result == [], f'expected [], got {result}'\n"
+            "print('OK')\n"
+        )],
+        capture_output=True, text=True, check=False,
+        cwd="/Users/jill/farm-surveillance-v2",
+    )
+    assert result.returncode == 0, f"expected exit 0: {result.stderr}"
+    assert "OK" in result.stdout
+
+
+def test_require_csv_env_returns_empty_when_unset() -> None:
+    """_require_csv_env returns [] when var is unset (NOT raises).
+
+    Per the function's docstring (and the fix for V2-096e), an unset
+    empty/blank env var means "operator chose to disable" the feature.
+    Callers must explicitly check for empty lists if a non-empty result
+    is required. Use _require_env() if you want a RuntimeError on
+    missing values.
+    """
     result = subprocess.run(
         [sys.executable, "-c", (
             "import os\n"
@@ -433,12 +481,9 @@ def test_require_csv_env_raises_when_unset() -> None:
             ")\n"
             "mod = importlib.util.module_from_spec(spec)\n"
             "spec.loader.exec_module(mod)\n"
-            "try:\n"
-            "    mod._require_csv_env('UNSET_CSV_TEST')\n"
-            "except RuntimeError:\n"
-            "    print('OK')\n"
-            "else:\n"
-            "    print('FAIL'); import sys; sys.exit(1)\n"
+            "result = mod._require_csv_env('UNSET_CSV_TEST')\n"
+            "assert result == [], f'expected [] got {result!r}'\n"
+            "print('OK')\n"
         )],
         capture_output=True, text=True, check=False,
         cwd="/Users/jill/farm-surveillance-v2",
