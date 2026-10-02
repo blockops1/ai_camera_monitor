@@ -91,12 +91,17 @@ def _require_csv_env(name: str) -> list[str]:
         name: environment variable name (e.g. ``"FARMSURV_NIGHT_SUPPRESS_CAMERAS"``).
 
     Returns:
-        List of non-empty, stripped tokens. ``[]`` if the var is empty.
+        List of non-empty, stripped tokens. ``[]`` if the var is unset or empty.
 
     Raises:
-        RuntimeError: if the variable is unset.
+        Nothing — `_require_csv_env` is permissive on missing/empty values.
+        Use `_require_env` if you want a RuntimeError on missing.
     """
-    raw = _require_env(name)
-    if not raw.strip():
+    # NOTE: do NOT call _require_env() here. _require_env raises if the
+    # value is "" (empty string), but empty IS a valid operator choice
+    # for "feature disabled" semantics — see docstring above. Just read
+    # directly and return [] when absent or empty.
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
         return []
     return [tok.strip() for tok in raw.split(",") if tok.strip()]
