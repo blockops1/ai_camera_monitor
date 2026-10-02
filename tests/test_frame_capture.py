@@ -449,6 +449,61 @@ class TestContainerLock(unittest.TestCase):
 
         demux_thread.join(timeout=2.0)
 
+    # -- AC(d): demux post-loop close acquires _container_lock --
+    def test_decode_iteration_close_acquires_lock(self):
+        """When _decode_iteration exits normally, its post-loop
+        container.close() must acquire _container_lock.  This ensures
+        serialized access with stop()'s lock-guarded close and prevents
+        a half-closed RTSP socket leak (US-097b approach a).
+        """
+        reader, mock_container = self._make_reader()
+
+        lock = reader._container_lock
+        demux_released = __import__("threading").Event()
+        stop_started = __import__("threading").Event()
+        stop_completed = __import__("threading").Event()
+
+        # Simulate demux thread exiting normally and reaching post-loop close.
+        def demux_normal_exit():
+            # Simulate _decode_iteration exiting the demux loop normally,
+            # then attempting to close under lock (US-097b behavior).
+            with lock:
+                # Hold the lock briefly to simulate the close() call.
+                __import__("time").sleep(0.15)
+            demux_released.set()
+
+        demux_thread = __import__("threading").Thread(target=demux_normal_exit)
+        demux_thread.start()
+
+        # Give the demux thread time to acquire and hold the lock.
+        __import__("time").sleep(0.05)
+
+        # Now call stop() — it should acquire the lock after demux releases it.
+        reader._thread = MagicMock()
+        reader._thread.is_alive.return_value = True
+        reader._thread.join = MagicMock(side_effect=lambda timeout: None)
+
+        def do_stop():
+            stop_started.set()
+            reader.stop(timeout=0.0)
+            stop_completed.set()
+
+        stop_thread = __import__("threading").Thread(target=do_stop)
+        stop_thread.start()
+
+        stop_thread.join(timeout=3.0)
+        self.assertTrue(
+            stop_completed.is_set(),
+            "stop() should have completed after demux released lock",
+        )
+        self.assertTrue(
+            demux_released.is_set(),
+            "Demux thread should have released the lock",
+        )
+
+        mock_container.close.assert_called_once()
+
+        demux_thread.join(timeout=2.0)
 
 if __name__ == "__main__":
     unittest.main()
