@@ -589,12 +589,19 @@ class PersistentRTSPReader:
                         self._ring.append(img)
                     self.frames_decoded_total += 1
                     self._last_frame_time = time.monotonic()
-        try:
-            self._container.close()
-        except Exception:
-            log.exception("_decode_iteration: container.close() failed")
-            raise
-        self._container = None
+        # Close under lock so stop()'s lock-guarded close cannot race.
+        # When stop() times out on join and calls close() inside _container_lock,
+        # the demux thread's post-loop close must also acquire the lock,
+        # ensuring serialized access to the container and preventing a
+        # half-closed RTSP socket leak.
+        with self._container_lock:
+            if self._container is not None:
+                try:
+                    self._container.close()
+                except Exception:
+                    log.exception("_decode_iteration: container.close() failed")
+                    raise
+                self._container = None
         self._healthy = False
 
 
