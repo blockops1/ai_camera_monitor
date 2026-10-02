@@ -411,6 +411,30 @@ def _bbox_area_pct(bbox, frame_w: int, frame_h: int) -> float:
     return 100.0 * (w * h) / (frame_w * frame_h)
 
 
+def get_global_change_max_pct(cam_id: str) -> float:
+    """Return the global-change max-pct threshold for a camera.
+
+    Lookup order:
+      1. Per-cam env var ``{CAM_ID}_GLOBAL_CHANGE_MAX_PCT`` (uppercase cam_id)
+      2. Default ``FARMSURV_GLOBAL_CHANGE_MAX_PCT`` env var (default 60.0)
+
+    US-096c: per-camera override so open-door cameras (BACK) can use a
+    higher threshold (e.g. 85.0) since the garage door shows ~70% outdoor
+    area that is NOT global-change noise.
+    """
+    # Per-cam override: {CAM_ID}_GLOBAL_CHANGE_MAX_PCT
+    per_cam_key = f"{cam_id}_GLOBAL_CHANGE_MAX_PCT"
+    raw = os.environ.get(per_cam_key)
+    if raw is not None:
+        try:
+            return float(raw.strip())
+        except ValueError:
+            pass
+
+    # Global default
+    return _read_global_change_max_pct()
+
+
 # V2 routing thresholds (used in rule 5 only)
 V2_VEHICLE_OVERRIDE_MIN_CONF: float = (
     0.6  # vehicle must be at or above to override person
@@ -1192,9 +1216,9 @@ def run(
     # Threshold at 60% catches all 6 known false positives while losing
     # zero legitimate alerts.
     #
-    # See _read_global_change_max_pct() for the env var knob
-    # (FARMSURV_GLOBAL_CHANGE_MAX_PCT, default 60).
-    global_change_max_pct = _read_global_change_max_pct()
+    # See get_global_change_max_pct() / _read_global_change_max_pct() for
+    # the env var knob (FARMSURV_GLOBAL_CHANGE_MAX_PCT, default 60).
+    global_change_max_pct = get_global_change_max_pct(camera_name)
     if global_change_max_pct > 0:
         frame_w, frame_h = frame_2_pil.size
         pct_a = _bbox_area_pct(crop_bbox_a, frame_w, frame_h)
