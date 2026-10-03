@@ -14,7 +14,7 @@ PUBLIC API:
     start() — Open RTSP and start decode loop (idempotent).
     stop(timeout=5.0) — Stop decode loop and close socket (idempotent).
     get_recent_frames(n, output_dir) -> list[str]
-    is_healthy(stale_seconds=5.0) -> bool
+    is_healthy(stale_seconds=_UNSET → env-tuned, default 20.0) -> bool
     uptime_seconds() -> float
     get_frames_by_offset(indices, output_dir) -> list[str]
     CameraCaptureRegistry.start_all() — Boot one reader per camera.
@@ -75,6 +75,17 @@ _MAX_RECONNECT_ATTEMPTS_ENV = "FARMSV_RTSP_MAX_RETRIES"
 # PyAV's C demux() from wedging silently (go2rtc / Frigate pattern).
 TEARDOWN_INTERVAL_SECONDS = 3600.0
 
+# US-098: env-tunable stale-frame threshold. How many seconds with no frames
+# before a reader is considered unhealthy. Default 20.0 exceeds OFP's observed
+# 12s RTSP session-idle gap, so the listener rides through the natural cam gap
+# instead of false-triggering a reconnect into it.
+_STALE_SECONDS_ENV = "FARMSV_RTSP_STALE_SECONDS"
+
+# US-098: env-tunable anti-flapping guard. A reader alive < this many seconds
+# is NOT killed even if unhealthy (prevents reconnect storms during the cam's
+# initial 12s idle window when the listener first subscribes).
+_RECONNECT_MIN_UPTIME_ENV = "FARMSV_RTSP_RECONNECT_MIN_UPTIME"
+
 # Sentinel: signals that no explicit arg was passed (caller wants env/default).
 # Replaces `float | None` / `int | None` in resolver signatures — the None
 # branch would silently pick up env vars, creating two data sources for the
@@ -102,6 +113,48 @@ def _resolve_max_reconnect_attempts(arg_value: int | object = _UNSET) -> int:
     if env_val:
         return int(env_val)
     return RECONNECT_MAX_ATTEMPTS_DEFAULT
+
+
+# US-098 defaults (higher than legacy hardcoded values to reduce reconnect
+# aggressiveness for cams like OFP with 12s RTSP session-idle gaps).
+_STALE_SECONDS_DEFAULT = 20.0
+_RECONNECT_MIN_UPTIME_DEFAULT = 30.0
+
+
+def _resolve_stale_seconds(arg_value: float | object = _UNSET) -> float:
+    """Resolve the stale-frame threshold in seconds.
+
+    Precedence:
+    1. Explicit constructor arg (if not _UNSET)
+    2. Env var FARMSV_RTSP_STALE_SECONDS (if set + non-empty)
+    3. _STALE_SECONDS_DEFAULT (20.0)
+
+    Returns a float. Raises ValueError if env var is not a valid float.
+    """
+    if arg_value is not _UNSET:
+        return float(arg_value)
+    env_val = os.environ.get(_STALE_SECONDS_ENV)
+    if env_val:
+        return float(env_val)
+    return _STALE_SECONDS_DEFAULT
+
+
+def _resolve_reconnect_min_uptime(arg_value: float | object = _UNSET) -> float:
+    """Resolve the anti-flapping minimum uptime in seconds.
+
+    Precedence:
+    1. Explicit constructor arg (if not _UNSET)
+    2. Env var FARMSV_RTSP_RECONNECT_MIN_UPTIME (if set + non-empty)
+    3. _RECONNECT_MIN_UPTIME_DEFAULT (30.0)
+
+    Returns a float. Raises ValueError if env var is not a valid float.
+    """
+    if arg_value is not _UNSET:
+        return float(arg_value)
+    env_val = os.environ.get(_RECONNECT_MIN_UPTIME_ENV)
+    if env_val:
+        return float(env_val)
+    return _RECONNECT_MIN_UPTIME_DEFAULT
 
 
 def _sleep_until_stop_or_watchdog(
@@ -203,10 +256,18 @@ class PersistentRTSPReader:
             "is_running": self.is_running,
         }
 
-    def is_healthy(self, stale_seconds: float = 5.0) -> bool:
+    def is_healthy(self, stale_seconds: float | object = _UNSET) -> bool:
+        """Return True if the reader is healthy (recent frames, alive).
+
+        The default stale threshold comes from the env-tunable resolver (US-098)
+        rather than the legacy hardcoded 5.0, so the caller can use a sensible
+        default without passing an argument.
+        """
+        if stale_seconds is _UNSET:
+            stale_seconds = _resolve_stale_seconds()
         if not self._healthy or self._last_frame_time is None:
             return False
-        return (time.monotonic() - self._last_frame_time) < stale_seconds
+        return (time.monotonic() - self._last_frame_time) < stale_seconds  # type: ignore[operator]
 
     def _subscribe_geometry(self) -> None:
         """Probe cv2.VideoCapture for live stream geometry and write into
@@ -726,15 +787,23 @@ class CameraCaptureRegistry:
         inst = cls._instance
         if inst is None:
             return {}
+        stale_sec = _resolve_stale_seconds()
         with inst._lock:
-            return {cid: r.is_healthy() for cid, r in inst._readers.items()}
+            return {cid: r.is_healthy(stale_sec) for cid, r in inst._readers.items()}
 
     @classmethod
     def _reconnect_loop(cls) -> None:
-        """Monitor readers; restart ones unhealthy for 10s+."""
+        """Monitor readers; restart ones unhealthy past the env-tuned thresholds.
+
+        US-098: uses _resolve_stale_seconds() and
+        _resolve_reconnect_min_uptime() (env-tunable, defaults 20s / 30s)
+        instead of the legacy hardcoded 5s / 10s.
+        """
         inst = cls._instance
         if inst is None:
             return
+        stale_sec = _resolve_stale_seconds()
+        min_uptime = _resolve_reconnect_min_uptime()
         while not inst._reconnect_stop.is_set():
             inst = cls._instance
             if inst is None:
@@ -742,10 +811,10 @@ class CameraCaptureRegistry:
             dead: list[tuple[str, PersistentRTSPReader]] = []
             with inst._lock:
                 for cid, reader in inst._readers.items():
-                    if not reader.is_healthy():
+                    if not reader.is_healthy(stale_sec):
                         dead.append((cid, reader))
             for cid, dead_reader in dead:
-                if dead_reader.uptime_seconds() > 10.0:
+                if dead_reader.uptime_seconds() > min_uptime:
                     log.warning("Reader %s unhealthy; reconnecting.", cid)
                     dead_reader.stop(timeout=12.0)
                     inst._readers.pop(cid, None)
@@ -787,7 +856,8 @@ def _get_healthy_reader(camera_id: str):
     except KeyError:
         log.warning("No reader for camera %s; returning empty.", camera_id)
         return None
-    if not reader.is_healthy():
+    # US-098: use env-tuned stale threshold (default 20s) instead of 5s.
+    if not reader.is_healthy(_resolve_stale_seconds()):
         log.warning("Reader for %s is not healthy.", camera_id)
         return None
     return reader
