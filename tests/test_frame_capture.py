@@ -505,5 +505,68 @@ class TestContainerLock(unittest.TestCase):
 
         demux_thread.join(timeout=2.0)
 
+
+class TestResolveStaleSeconds(unittest.TestCase):
+    """Tests for US-098: _resolve_stale_seconds() env-tunable threshold."""
+
+    def _import_module(self):
+        import infra.frame_capture as m  # isort: skip
+        return m
+
+    def test_default_20_seconds(self):
+        """Without env set, default should be 20.0."""
+        m = self._import_module()
+        self.assertEqual(m._resolve_stale_seconds(), 20.0)
+
+    def test_env_override(self):
+        """When FARMSV_RTSP_STALE_SECONDS is set, resolver returns that value."""
+        import importlib
+
+        os.environ["FARMSV_RTSP_STALE_SECONDS"] = "42.0"
+        try:
+            m = self._import_module()
+            # Need to reimport to pick up the env var (resolvers read os.environ
+            # at call time, not import time — but the module might be cached).
+            importlib.reload(m)
+            self.assertEqual(m._resolve_stale_seconds(), 42.0)
+        finally:
+            os.environ.pop("FARMSV_RTSP_STALE_SECONDS", None)
+
+    def test_explicit_arg_takes_precedence(self):
+        """An explicit float arg overrides both env and default."""
+        m = self._import_module()
+        self.assertEqual(m._resolve_stale_seconds(15.5), 15.5)
+
+
+class TestResolveReconnectMinUptime(unittest.TestCase):
+    """Tests for US-098: _resolve_reconnect_min_uptime() env-tunable threshold."""
+
+    def _import_module(self):
+        import infra.frame_capture as m  # isort: skip
+        return m
+
+    def test_default_30_seconds(self):
+        """Without env set, default should be 30.0."""
+        m = self._import_module()
+        self.assertEqual(m._resolve_reconnect_min_uptime(), 30.0)
+
+    def test_env_override(self):
+        """When FARMSV_RTSP_RECONNECT_MIN_UPTIME is set, resolver returns that value."""
+        import importlib
+
+        os.environ["FARMSV_RTSP_RECONNECT_MIN_UPTIME"] = "60"
+        try:
+            m = self._import_module()
+            importlib.reload(m)
+            self.assertEqual(m._resolve_reconnect_min_uptime(), 60.0)
+        finally:
+            os.environ.pop("FARMSV_RTSP_RECONNECT_MIN_UPTIME", None)
+
+    def test_explicit_arg_takes_precedence(self):
+        """An explicit float arg overrides both env and default."""
+        m = self._import_module()
+        self.assertEqual(m._resolve_reconnect_min_uptime(45.0), 45.0)
+
+
 if __name__ == "__main__":
     unittest.main()
