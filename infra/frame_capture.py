@@ -795,6 +795,18 @@ class CameraCaptureRegistry:
     def _reconnect_loop(cls) -> None:
         """Monitor readers; restart ones unhealthy past the env-tuned thresholds.
 
+        Single-reader-per-cam invariant: exactly one PersistentRTSPReader owns
+        each camera at any time.  When a reader becomes unhealthy the reconnect
+        loop swaps it out.  The swap lifecycle:
+
+        1. The dead reader's decode thread is stopped and its PyAV container is
+           closed **under _container_lock** so no demux thread can race.
+        2. If the thread is still alive after the initial join, the loop forces
+           the container closed again (with a second join) to prevent the cam-
+           side TCP socket from lingering in ESTABLISHED state.
+        3. reconnects_total is incremented so every swap is counted.
+        4. A new reader is created, started, and registered in _readers.
+
         US-098: uses _resolve_stale_seconds() and
         _resolve_reconnect_min_uptime() (env-tunable, defaults 20s / 30s)
         instead of the legacy hardcoded 5s / 10s.
@@ -815,13 +827,37 @@ class CameraCaptureRegistry:
                         dead.append((cid, reader))
             for cid, dead_reader in dead:
                 if dead_reader.uptime_seconds() > min_uptime:
-                    log.warning("Reader %s unhealthy; reconnecting.", cid)
+                    reader_id = f"{dead_reader._rtsp_url.split('@')[-1]}"
+                    dead_uptime = dead_reader.uptime_seconds()
+                    retry_count = dead_reader._consecutive_errors
+                    log.warning(
+                        "Reader swap: %s (id=%s, uptime=%.0fs, "
+                        "consecutive_errors=%d); reconnecting.",
+                        cid, reader_id, dead_uptime, retry_count,
+                    )
+                    # AC1: Close the old reader fully before opening a new one.
+                    # stop() joins the thread (12s timeout) then closes the
+                    # container under _container_lock.  If the demux thread
+                    # is still stuck after 12s, we force-close a second time
+                    # to drain any lingering ESTABLISHED sockets on the cam
+                    # side — otherwise the socket persists ~60s past close().
                     dead_reader.stop(timeout=12.0)
+                    # Force a second close if the thread is still alive.
+                    with dead_reader._container_lock:
+                        if dead_reader._container is not None:
+                            try:
+                                dead_reader._container.close()
+                            except Exception:
+                                pass
+                            dead_reader._container = None
                     inst._readers.pop(cid, None)
                     new_reader = PersistentRTSPReader(
                         dead_reader._rtsp_url, camera_id=cid
                     )
                     new_reader.start()
+                    # AC2: Count every _reconnect_loop swap.
+                    # Carry over the dead reader's total and add 1 for this swap.
+                    new_reader.reconnects_total = dead_reader.reconnects_total + 1
                     with inst._lock:
                         inst._readers[cid] = new_reader
             inst._reconnect_stop.wait(timeout=5.0)
