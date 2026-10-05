@@ -38,13 +38,14 @@ import logging
 import os
 import socket
 import sys
+import uuid
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from typing import Any
 from urllib.parse import urlparse
 
-from infra.mcp_auth import authenticate, validate_token
+from infra.mcp_auth import authenticate, validate_token, www_authenticate_header
 
 log = logging.getLogger(__name__)
 
@@ -371,7 +372,10 @@ def _register_tools(registry: _ToolRegistry) -> None:
 
 
 def _handle_request(
-    method: str, params: dict | None, id_val: str | int | None
+    method: str,
+    params: dict | None,
+    id_val: str | int | None,
+    request_id: str | None = None,
 ) -> tuple[int, Any]:
     """Handle a single JSON-RPC 2.0 request.
 
@@ -379,13 +383,14 @@ def _handle_request(
         method: The JSON-RPC method name.
         params: The params dict, or None.
         id_val: The request ID (for responses).
+        request_id: Per-request UUID for tracing.
 
     Returns:
         (status_code, response_body) tuple.
     """
     registry = _GLOBAL_REGISTRY[0]
     if registry is None:
-        return 503, _json_error(id_val, -32000, "Server not initialized")
+        return 503, _json_error(id_val, -32000, "Server not initialized", request_id)
 
     if method == "initialize":
         return 200, _json_ok(
@@ -395,47 +400,56 @@ def _handle_request(
                 "capabilities": {"tools": {}, "resources": {}},
                 "serverInfo": {"name": "farm-surveillance", "version": "0.6.3"},
             },
+            request_id,
         )
 
     if method == "tools/list":
-        return 200, _json_ok(id_val, {"tools": registry.list_tools()})
+        return 200, _json_ok(id_val, {"tools": registry.list_tools()}, request_id)
 
     if method == "tools/call":
         if not params:
             return 400, _json_error(
-                id_val, -32602, "tools/call requires 'name' and 'arguments'"
+                id_val, -32602, "tools/call requires 'name' and 'arguments'", request_id
             )
         tool_name = params.get("name", "")
         arguments = params.get("arguments", {})
         try:
             result = registry.call_tool(tool_name, arguments)
             return 200, _json_ok(
-                id_val, {"content": [{"type": "text", "text": json.dumps(result)}]}
+                id_val,
+                {"content": [{"type": "text", "text": json.dumps(result)}]},
+                request_id,
             )
         except KeyError as exc:
-            return 404, _json_error(id_val, -32601, str(exc))
+            return 404, _json_error(id_val, -32601, str(exc), request_id)
         except Exception as exc:
             log.exception("mcp: tool call %s failed", tool_name)
-            return 500, _json_error(id_val, -32603, f"Internal error: {exc}")
+            return 500, _json_error(id_val, -32603, f"Internal error: {exc}", request_id)
 
     if method == "notifications/initialized":
         # Notification, no response needed
         return 200, None
 
     # Unknown method
-    return 400, _json_error(id_val, -32601, f"Method not found: {method}")
+    return 400, _json_error(id_val, -32601, f"Method not found: {method}", request_id)
 
 
-def _json_ok(id_val, result) -> dict:
-    return {"jsonrpc": "2.0", "result": result, "id": id_val}
+def _json_ok(id_val, result, request_id=None) -> dict:
+    resp: dict = {"jsonrpc": "2.0", "result": result, "id": id_val}
+    if request_id:
+        resp["request_id"] = request_id
+    return resp
 
 
-def _json_error(id_val, code, message) -> dict:
-    return {
+def _json_error(id_val, code, message, request_id=None) -> dict:
+    resp: dict = {
         "jsonrpc": "2.0",
         "error": {"code": code, "message": message},
         "id": id_val,
     }
+    if request_id:
+        resp["request_id"] = request_id
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +462,10 @@ _GLOBAL_REGISTRY: list[_ToolRegistry | None] = [None]
 class _MCPHandler(BaseHTTPRequestHandler):
     """Handle a single MCP HTTP request."""
 
+    # Fix 6: Suppress Python version leak in Server header
+    server_version = "farm-mcp/0.1"
+    sys_version = ""  # Suppress sys.version appended to Server header
+
     # Suppress default stderr logging (keep it clean for loggers)
     def log_message(self, format, *args):
         log.debug(format, *args)
@@ -458,8 +476,26 @@ class _MCPHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/healthz":
             self._handle_healthz()
+        elif parsed.path == "/mcp":
+            # Fix 4: JSON 405 for GET on /mcp (not HTML)
+            self._method_not_allowed()
         else:
             self._not_found()
+
+    # ---- PUT /mcp ----
+
+    def do_PUT(self):
+        self._method_not_allowed()
+
+    # ---- DELETE /mcp ----
+
+    def do_DELETE(self):
+        self._method_not_allowed()
+
+    # ---- OPTIONS /mcp ----
+
+    def do_OPTIONS(self):
+        self._method_not_allowed()
 
     # ---- POST /mcp ----
 
@@ -469,36 +505,36 @@ class _MCPHandler(BaseHTTPRequestHandler):
             self._not_found()
             return
 
+        # Fix 5: Per-request access log (capture start time)
+        import time as _time
+        _start = _time.time()
+
+        # Generate per-request UUID for tracing (Fix 3)
+        _req_id = str(uuid.uuid4())
+        self._request_id = _req_id  # Available to _log_access
+
         # Auth check
         auth_header = self.headers.get("Authorization")
         if not authenticate(auth_header):
-            self._send_json(
-                401,
-                {
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32000,
-                        "message": "Unauthorized: missing or invalid bearer token",
-                    },
-                    "id": None,
+            # Fix 1: WWW-Authenticate header on 401
+            body = {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32000,
+                    "message": "Unauthorized: missing or invalid bearer token",
                 },
-            )
+                "id": None,
+            }
+            self._send_json_with_headers(401, body, [("WWW-Authenticate", www_authenticate_header())])
+            self._log_access("POST /mcp", 401, _start)
             return
 
         # Read body
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length == 0:
-            self._send_json(
-                400,
-                {
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32700,
-                        "message": "Parse error: empty body",
-                    },
-                    "id": None,
-                },
-            )
+            status, response_body = _handle_request("POST /mcp", None, None, _req_id)
+            self._send_json(400, response_body)
+            _log_access("POST /mcp", 400, _start)
             return
 
         body = self.rfile.read(content_length)
@@ -516,16 +552,54 @@ class _MCPHandler(BaseHTTPRequestHandler):
                     "id": None,
                 },
             )
+            _log_access("POST /mcp", 400, _start)
             return
 
         method = message.get("method", "")
         params = message.get("params")
         id_val = message.get("id")
 
-        status, response_body = _handle_request(method, params, id_val)
+        status, response_body = _handle_request(method, params, id_val, _req_id)
         self._send_json(status, response_body)
+        _log_access(method, status, _start)
 
     # ---- Helpers ----
+
+    def _send_json_with_headers(self, status_code, body, extra_headers=None):
+        """Send a JSON response with optional extra headers."""
+        body_str = json.dumps(body) if isinstance(body, dict) else body
+        encoded = body_str.encode("utf-8") if isinstance(body_str, str) else body_str
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(encoded)))
+        if extra_headers:
+            for name, value in extra_headers:
+                self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def _log_access(self, method, status, start):
+        """Fix 5: Per-request access log. Format: mcp: method=X status=N elapsed_ms=Y request_id=Z box_id=W"""
+        elapsed_ms = round((datetime.datetime.now(datetime.UTC).timestamp() - start) * 1000, 1)
+        _req_id = getattr(self, '_request_id', '<none>')
+        log.info(
+            "mcp: method=%s status=%d elapsed_ms=%s request_id=%s box_id=%s",
+            method, status, elapsed_ms, _req_id, _BOX_ID,
+        )
+
+    def _method_not_allowed(self):
+        """Fix 4: JSON 405 for unsupported HTTP methods on /mcp."""
+        self._send_json(
+            405,
+            {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32601,
+                    "message": "Method not allowed",
+                },
+                "id": None,
+            },
+        )
 
     def _handle_healthz(self):
         """Return health status."""
@@ -554,6 +628,12 @@ class _MCPHandler(BaseHTTPRequestHandler):
                 "id": None,
             },
         )
+
+    # Fix 7: X-Content-Type-Options: nosniff on every response
+    # Override to inject the header into every response automatically.
+    def send_response(self, code, message=None):
+        super().send_response(code, message)
+        self.send_header("X-Content-Type-Options", "nosniff")
 
     def _send_json(self, status_code, body):
         """Send a JSON response."""
