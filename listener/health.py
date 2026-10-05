@@ -450,17 +450,31 @@ class HealthReporter:
             uptime_s = 0
 
         # Probe /healthz and record last successful timestamp.
+        # US-101y: when API binds to Tailscale-only (100.x), 127.0.0.1
+        # does not reach the listener. Try Tailscale IP first, fall back
+        # to loopback. Both use the configured API port.
+        import infra.net_bind
+
         last_healthz_str: str = "never"
-        try:
-            with httpx.Client(timeout=3.0) as client:
-                resp = client.get("http://127.0.0.1:8092/healthz")
-            if resp.status_code == 200:
-                self._api_healthz_last = time.monotonic()
-                last_healthz_str = datetime.datetime.now(datetime.UTC).strftime(
-                    "%Y-%m-%dT%H:%M:%SZ"
-                )
-        except httpx.HTTPError:
-            # If the server is disabled or crashed, record the last known time.
+        api_port = int(os.environ.get("FARMSURV_API_PORT", "8092"))
+        probe_urls = [
+            f"http://{infra.net_bind.TAILNET_BIND}:{api_port}/healthz",
+            f"http://127.0.0.1:{api_port}/healthz",
+        ]
+        for probe_url in probe_urls:
+            try:
+                with httpx.Client(timeout=3.0) as client:
+                    resp = client.get(probe_url)
+                if resp.status_code == 200:
+                    self._api_healthz_last = time.monotonic()
+                    last_healthz_str = datetime.datetime.now(datetime.UTC).strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    )
+                    break
+            except httpx.HTTPError:
+                continue
+        else:
+            # All probes failed — fall back to last known time.
             if self._api_healthz_last is not None:
                 last_healthz_str = datetime.datetime.fromtimestamp(
                     self._api_healthz_last, tz=datetime.UTC
