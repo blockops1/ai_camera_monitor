@@ -16,6 +16,7 @@ Bug classes covered:
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -124,15 +125,19 @@ class TestListEventsE2E:
     def test_returns_list_of_event_records(self, _events_e2e_env):
         from infra.farm_api.events import EventRecord, list_events
 
-        events = list_events()
+        result = list_events()
+        events = result["data"]
         assert isinstance(events, list)
         assert len(events) == 3
         assert all(isinstance(e, EventRecord) for e in events)
+        # Pagination info present
+        assert "next_page_token" in result
 
     def test_newest_first_order(self, _events_e2e_env):
         from infra.farm_api.events import list_events
 
-        events = list_events()
+        result = list_events()
+        events = result["data"]
         # Newest first: C (12:00) > B (11:00) > A (10:00)
         assert events[0].alert_id == _EVENT_C["alert_id"]
         assert events[1].alert_id == _EVENT_B["alert_id"]
@@ -141,7 +146,8 @@ class TestListEventsE2E:
     def test_event_fields_populated(self, _events_e2e_env):
         from infra.farm_api.events import list_events
 
-        events = list_events()
+        result = list_events()
+        events = result["data"]
         assert events[0].camera_id == "FRONT"
         assert events[0].dropped == "cooldown_expired"
         assert events[0].gate is not None
@@ -154,25 +160,27 @@ class TestFilterEventsE2E:
     def test_filter_by_camera_front(self, _events_e2e_env):
         from infra.farm_api.events import list_events
 
-        front_events = list_events(camera_id="FRONT")
-        assert len(front_events) == 2
-        assert all(e.camera_id == "FRONT" for e in front_events)
+        result = list_events(camera_id="FRONT")
+        events = result["data"]
+        assert len(events) == 2
+        assert all(e.camera_id == "FRONT" for e in events)
         # Newest first
-        assert front_events[0].alert_id == _EVENT_C["alert_id"]
-        assert front_events[1].alert_id == _EVENT_A["alert_id"]
+        assert events[0].alert_id == _EVENT_C["alert_id"]
+        assert events[1].alert_id == _EVENT_A["alert_id"]
 
     def test_filter_by_camera_back(self, _events_e2e_env):
         from infra.farm_api.events import list_events
 
-        back_events = list_events(camera_id="BACK")
-        assert len(back_events) == 1
-        assert back_events[0].alert_id == _EVENT_B["alert_id"]
+        result = list_events(camera_id="BACK")
+        events = result["data"]
+        assert len(events) == 1
+        assert events[0].alert_id == _EVENT_B["alert_id"]
 
     def test_filter_unknown_camera(self, _events_e2e_env):
         from infra.farm_api.events import list_events
 
-        none_events = list_events(camera_id="UNKNOWN")
-        assert none_events == []
+        result = list_events(camera_id="UNKNOWN")
+        assert result["data"] == []
 
 
 class TestGetEventE2E:
@@ -202,3 +210,74 @@ class TestGetEventE2E:
         assert result.gate is not None
         assert result.gate["classification"] == "pass"
         assert result.gate["class_label"] == "person"
+
+
+class TestPaginationE2E:
+    """E2E: pagination, limit cap, since datetime parse."""
+
+    def test_returns_next_page_token_when_more(self, _events_e2e_env):
+        """AC2: next_page_token is non-null when more events exist."""
+        from infra.farm_api.events import list_events
+
+        # With only 3 events and default limit=50, no next page
+        result = list_events()
+        assert result["next_page_token"] is None
+
+        # With limit=2, should have a next page
+        result = list_events(limit=2)
+        assert result["next_page_token"] is not None
+        assert len(result["data"]) == 2
+
+    def test_page_token_decodes_to_last_alert_id(self, _events_e2e_env):
+        """AC3: page_token decodes to the last alert_id of the previous page."""
+        from infra.farm_api.events import list_events
+
+        result = list_events(limit=2)
+        token = result["next_page_token"]
+        decoded = base64.b64decode(token).decode("utf-8")
+        assert decoded == result["data"][-1].alert_id
+
+    def test_next_page_starts_after_token(self, _events_e2e_env):
+        """AC3: next page returns events after the page_token cursor."""
+        from infra.farm_api.events import list_events
+
+        result1 = list_events(limit=2)
+        token = result1["next_page_token"]
+        last_id = base64.b64decode(token).decode("utf-8")
+
+        result2 = list_events(limit=2, page_token=token)
+        # No event in page 2 should equal the token's alert_id
+        assert all(e.alert_id != last_id for e in result2["data"])
+        assert len(result2["data"]) == 1  # only event A remains
+
+    def test_limit_cap_rejects_over_200(self, _events_e2e_env):
+        """AC4: limit > 200 raises ValueError."""
+        from infra.farm_api.events import list_events
+
+        with pytest.raises(ValueError, match="limit must be <= 200"):
+            list_events(limit=500)
+
+    def test_since_z_suffix_parses(self, _events_e2e_env):
+        """AC5: since=...Z suffix parses correctly (not string compare)."""
+        from infra.farm_api.events import list_events
+
+        # Events: A=10:00, B=11:00, C=12:00
+        # since=2026-09-22T11:00:00Z should return B and C
+        result = list_events(since="2026-09-22T11:00:00Z")
+        ids = [e.alert_id for e in result["data"]]
+        # B and C should be included; A should not
+        assert _EVENT_B["alert_id"] in ids
+        assert _EVENT_C["alert_id"] in ids
+        assert _EVENT_A["alert_id"] not in ids
+        assert len(result["data"]) == 2
+
+    def test_since_plus_camera_id(self, _events_e2e_env):
+        """Combined: since + camera_id filter."""
+        from infra.farm_api.events import list_events
+
+        # FRONT events: A=10:00, C=12:00
+        result = list_events(since="2026-09-22T10:30:00Z", camera_id="FRONT")
+        ids = [e.alert_id for e in result["data"]]
+        assert _EVENT_C["alert_id"] in ids
+        assert _EVENT_A["alert_id"] not in ids
+        assert len(result["data"]) == 1
