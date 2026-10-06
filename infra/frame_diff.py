@@ -19,8 +19,10 @@ PUBLIC API:
   - compute_diff_bbox(frame_a_path, frame_b_path, threshold=25, min_area=64)
       -> (x, y, w, h) — convenience wrapper, never returns None
   - crop_frame_to_bbox(frame_path, bbox) -> str | None
-  - bbox_from_mask_with_intersection(mask_prior, mask_curr, ...)
+  - bbox_from_mask_with_intersection(mask_prior, mask_curr, ..., cam_id=None)
       -> tuple[int,int,int,int] | None  # cross-diff intersection anchor
+  - compute_cross_diff_bboxes(f1, f2, f3, f4, ..., cam_id=None)
+      -> (bbox_a, bbox_b) | (None, None)  # cam_id for per-cam MIN_AREA_PCT
 DOES NOT DO:
   - Does NOT classify what's in the bbox (that's quick_classifier's job)
   - Does NOT persist anything to disk (caller saves crops)
@@ -144,16 +146,36 @@ def _get_intersection_dilate_pct() -> float:
     )
 
 
-def _get_min_area_pct() -> float:
-    """Read MIN_AREA_PCT at call time.
+def _get_min_area_pct(cam_id: str | None = None) -> float:
+    """Read MIN_AREA_PCT at call time, with optional per-cam override.
 
     Minimum connected-component area as a percent of total frame pixels.
     Components smaller than MIN_AREA_PCT * (frame_w * frame_h) are
     filtered out before dilation. Tunable via env var.
 
+    Lookup order:
+      1. Per-cam env var ``FARMSV_{CAM_ID}_MIN_AREA_PCT`` (uppercase cam_id,
+         e.g. ``FARMSV_OUTSIDE_FRONT_SOLAR_MIN_AREA_PCT``)
+      2. Global ``MIN_AREA_PCT`` env var
+      3. Default ``DEFAULT_MIN_AREA_PCT`` (0.0005)
+
     Reading at call time means operator changes to the env var take
     effect on the next test run / next listener start.
+
+    Args:
+        cam_id: Optional camera ID for per-cam override.  When None or empty,
+                only the global MIN_AREA_PCT and default are consulted.
     """
+    # Per-cam override: FARMSV_{CAM_ID}_MIN_AREA_PCT
+    if cam_id:
+        per_cam_key = f"FARMSV_{cam_id}_MIN_AREA_PCT"
+        raw = os.environ.get(per_cam_key)
+        if raw is not None:
+            try:
+                return float(raw.strip())
+            except ValueError:
+                pass
+
     raw = os.environ.get("MIN_AREA_PCT")
     if raw is not None:
         try:
@@ -161,6 +183,28 @@ def _get_min_area_pct() -> float:
         except ValueError:
             pass
     return DEFAULT_MIN_AREA_PCT
+
+
+def _get_dilate_px() -> int:
+    """Read FARMSV_FILTER_DILATE_PX at call time.
+
+    Fixed-pixel dilation applied AFTER noise-component filtering in the
+    filter pipeline.  Default 12 px (tuned for 1080p; may need higher for 4K).
+    Tunable via env var.
+
+    Reading at call time means operator changes to the env var take
+    effect on the next test run / next listener start.
+
+    Returns:
+        int pixel-dilation amount.
+    """
+    raw = os.environ.get("FARMSV_FILTER_DILATE_PX")
+    if raw is not None:
+        try:
+            return int(raw.strip())
+        except ValueError:
+            pass
+    return FILTER_DILATE_PX
 
 
 def _get_diff_threshold() -> int:
@@ -259,6 +303,7 @@ def _connected_components(
 def _filter_components_and_dilate(
     mask: np.ndarray,
     dilate_px: int | None = None,
+    cam_id: str | None = None,
 ) -> np.ndarray:
     """Filter small connected components from a binary mask, then dilate.
 
@@ -267,13 +312,23 @@ def _filter_components_and_dilate(
     2. Drop components with area < MIN_AREA_PCT * (frame_w * frame_h),
        with a floor of MIN_AREA_PX_FLOOR (50 px).
     3. Build a filtered mask from surviving components.
-    4. Dilate the filtered mask by a HARDCODE 12px (or caller-provided).
+    4. Dilate the filtered mask by a configurable amount (default 12px
+       from FARMSV_FILTER_DILATE_PX env var, or caller-provided).
+
+    MIN_AREA_PCT supports per-cam override via FARMSV_{CAM_ID}_MIN_AREA_PCT.
 
     This prevents noise-bridging where a large dilation (e.g. 22px = 1% of
     min frame dim) bridges many small noise components into one giant blob
     that covers most of the frame.
 
-    Returns a uint8 ndarray (0 or 255).
+    Args:
+        mask: Binary uint8 mask.
+        dilate_px: Optional fixed pixel dilation override.  When None, reads
+                   FARMSV_FILTER_DILATE_PX env var (default 12).
+        cam_id: Optional camera ID for per-cam MIN_AREA_PCT override.
+
+    Returns:
+        A uint8 ndarray (0 or 255).
     """
     if mask is None or mask.size == 0:
         return np.zeros_like(mask)
@@ -281,11 +336,11 @@ def _filter_components_and_dilate(
     h, w = mask.shape
 
     # Read at call time so tests can mutate env vars.
-    min_area_pct = _get_min_area_pct()
+    min_area_pct = _get_min_area_pct(cam_id)
     min_area_px = max(int(min_area_pct * h * w), MIN_AREA_PX_FLOOR)
 
     if dilate_px is None:
-        dilate_px = FILTER_DILATE_PX
+        dilate_px = _get_dilate_px()
 
     # Step 1: connected components on the RAW mask (no pre-dilation).
     num_labels, labels = _connected_components(mask)
@@ -520,13 +575,15 @@ def bbox_from_mask_with_intersection(
     min_area_px: int = DEFAULT_MIN_AREA_PX,
     pad_pct: float = DEFAULT_BBOX_PAD_PCT,
     dilate_pct: float | None = None,
+    cam_id: str | None = None,
 ) -> tuple[int, int, int, int] | None:
     """Find the bbox anchored to the current frame by pixel-wise AND + filter + dilate.
 
     Computes the pixel-wise AND of two consecutive diff masks, filters out
     small connected components (area < MIN_AREA_PCT * frame_area, floored at
-    50 px), dilates the remaining mask by a hard-coded 12 px, then takes the
-    largest connected component and bboxes it.
+    50 px), dilates the remaining mask by a configurable amount (default 12 px
+    from FARMSV_FILTER_DILATE_PX env var), then takes the largest connected
+    component and bboxes it.
 
     The caller is expected to pass ``diff(1,2)`` as ``mask_prior`` and
     ``diff(2,3)`` as ``mask_curr``.  The AND result captures regions that
@@ -569,8 +626,8 @@ def bbox_from_mask_with_intersection(
     if filtered_mask.sum() == 0:
         return None
 
-    # Step 4: dilate filtered mask by hardcoded 12 px (NOT percent).
-    dilated = _dilate_mask(filtered_mask, DILATE_PX)
+    # Step 4: dilate filtered mask by configurable px (default 12 from env).
+    dilated = _dilate_mask(filtered_mask, _get_dilate_px())
 
     # Step 5: connected components on dilated+filtered mask, rank by
     # intensity sum of the AND mask (not area) so bright compact vehicles
@@ -729,6 +786,7 @@ def compute_cross_diff_bboxes(
     threshold: int = DEFAULT_DIFF_THRESHOLD,
     min_area_px: int = DEFAULT_MIN_AREA_PX,
     pad_pct: float = DEFAULT_BBOX_PAD_PCT,
+    cam_id: str | None = None,
 ) -> tuple[tuple[int, int, int, int] | None, tuple[int, int, int, int] | None]:
     """Compute cross-diff bboxes for the motion gate pipeline.
 
@@ -739,11 +797,16 @@ def compute_cross_diff_bboxes(
         (anchored to frame_3 — the subject IS here)
 
     Filter pipeline (US-096c): AND mask -> connected-components on RAW
-    -> drop small components -> dilate 12px -> largest-component bbox.
+    -> drop small components -> dilate configurable px (default 12px from
+       FARMSV_FILTER_DILATE_PX env var) -> largest-component bbox.
+    MIN_AREA_PCT supports per-cam override via FARMSV_{CAM_ID}_MIN_AREA_PCT.
     This prevents noise-bridging where large dilation merges many small
     components into one giant blob covering most of the frame.
 
     Either may be None if no component meets the area threshold.
+
+    Args:
+        cam_id: Optional camera ID for per-cam MIN_AREA_PCT override.
 
     Returns (bbox_a, bbox_b).
     """
@@ -764,8 +827,8 @@ def compute_cross_diff_bboxes(
     and_a = ((mask_12 > 0) & (mask_23 > 0)).astype(np.uint8) * 255
     and_b = ((mask_23 > 0) & (mask_34 > 0)).astype(np.uint8) * 255
 
-    filtered_a = _filter_components_and_dilate(and_a)
-    filtered_b = _filter_components_and_dilate(and_b)
+    filtered_a = _filter_components_and_dilate(and_a, cam_id=cam_id)
+    filtered_b = _filter_components_and_dilate(and_b, cam_id=cam_id)
 
     bbox_a = bbox_from_mask(filtered_a, min_area_px=min_area_px, pad_pct=pad_pct)
     bbox_b = bbox_from_mask(filtered_b, min_area_px=min_area_px, pad_pct=pad_pct)

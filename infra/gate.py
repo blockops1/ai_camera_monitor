@@ -1162,6 +1162,7 @@ def run(
         threshold=_get_diff_threshold(),
         min_area_px=min_area_px,
         pad_pct=DEFAULT_BBOX_PAD_PCT,
+        cam_id=camera_name,
     )
     log.debug(
         f"[{alert_id}] motion_gate: compute_cross_diff_bboxes — "
