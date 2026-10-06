@@ -27,6 +27,7 @@ from infra.frame_diff import (
     _dilate_mask,
     _filter_components_and_dilate,
     _get_diff_threshold,
+    _get_dilate_px,
     _get_min_area_pct,
 )
 
@@ -315,3 +316,126 @@ class TestGetDiffThreshold:
     def test_strips_whitespace(self, monkeypatch):
         monkeypatch.setenv("DIFF_THRESHOLD", "  120  ")
         assert _get_diff_threshold() == 120
+
+
+# ============================================================================
+# _get_dilate_px - env var reader for FILTER_DILATE_PX
+# ============================================================================
+
+
+class TestGetDilatePx:
+    """_get_dilate_px reads FARMSV_FILTER_DILATE_PX at call time.
+
+    Default 12 px (tuned for 1080p; 4K H.265 may need higher).
+    """
+
+    def test_default_when_env_unset(self, monkeypatch):
+        from infra.frame_diff import FILTER_DILATE_PX
+
+        monkeypatch.delenv("FARMSV_FILTER_DILATE_PX", raising=False)
+        assert _get_dilate_px() == FILTER_DILATE_PX
+
+    def test_reads_env_value(self, monkeypatch):
+        monkeypatch.setenv("FARMSV_FILTER_DILATE_PX", "24")
+        assert _get_dilate_px() == 24
+
+    def test_invalid_falls_back_to_default(self, monkeypatch):
+        from infra.frame_diff import FILTER_DILATE_PX
+
+        monkeypatch.setenv("FARMSV_FILTER_DILATE_PX", "not_a_number")
+        assert _get_dilate_px() == FILTER_DILATE_PX
+
+    def test_strips_whitespace(self, monkeypatch):
+        monkeypatch.setenv("FARMSV_FILTER_DILATE_PX", "  30  ")
+        assert _get_dilate_px() == 30
+
+
+# ============================================================================
+# _filter_components_and_dilate - env tunable dilation
+# ============================================================================
+
+
+class TestFilterEnvDilatePx:
+    """_filter_components_and_dilate respects FARMSV_FILTER_DILATE_PX."""
+
+    def test_env_override_affects_output_size(self, monkeypatch):
+        """FARMSV_FILTER_DILATE_PX=24 produces larger output than default=12."""
+        from infra.frame_diff import _filter_components_and_dilate
+
+        mask = np.zeros((1296, 1920), dtype=np.uint8)
+        mask[600:650, 900:950] = 255  # 50x50 box
+
+        # Default env (12px)
+        monkeypatch.delenv("FARMSV_FILTER_DILATE_PX", raising=False)
+        result_default = _filter_components_and_dilate(mask)
+
+        # Override env (24px)
+        monkeypatch.setenv("FARMSV_FILTER_DILATE_PX", "24")
+        result_24 = _filter_components_and_dilate(mask)
+
+        assert result_24.sum() > result_default.sum()
+
+    def test_env_zero_kills_dilation(self, monkeypatch):
+        """FARMSV_FILTER_DILATE_PX=0 skips dilation entirely."""
+        from infra.frame_diff import _filter_components_and_dilate
+
+        mask = np.zeros((1296, 1920), dtype=np.uint8)
+        mask[600:650, 900:950] = 255
+
+        monkeypatch.setenv("FARMSV_FILTER_DILATE_PX", "0")
+        result = _filter_components_and_dilate(mask)
+
+        # Without dilation the box should be exactly 50x50 = 2500 px
+        assert result.sum() == 50 * 50 * 255
+
+
+# ============================================================================
+# _get_min_area_pct - per-cam override
+# ============================================================================
+
+
+class TestGetMinAreaPctPerCam:
+    """_get_min_area_pct supports per-cam override via FARMSV_{CAM_ID}_MIN_AREA_PCT."""
+
+    def test_per_cam_override(self, monkeypatch):
+        """FARMSV_OUTSIDE_FRONT_SOLAR_MIN_AREA_PCT=0.0001 returns 0.0001."""
+        monkeypatch.delenv("MIN_AREA_PCT", raising=False)
+        monkeypatch.setenv("FARMSV_OUTSIDE_FRONT_SOLAR_MIN_AREA_PCT", "0.0001")
+        assert _get_min_area_pct("OUTSIDE_FRONT_SOLAR") == 0.0001
+
+    def test_per_cam_takes_precedence_over_global(self, monkeypatch):
+        """Per-cam value overrides global MIN_AREA_PCT."""
+        monkeypatch.setenv("MIN_AREA_PCT", "0.001")
+        monkeypatch.setenv("FARMSV_OUTSIDE_FRONT_SOLAR_MIN_AREA_PCT", "0.0001")
+        assert _get_min_area_pct("OUTSIDE_FRONT_SOLAR") == 0.0001
+        # Non-matching cam_id should still see global
+        assert _get_min_area_pct("BACK") == 0.001
+
+    def test_per_cam_fallback_to_default_when_unset(self, monkeypatch):
+        """When neither per-cam nor global is set, returns DEFAULT."""
+        monkeypatch.delenv("MIN_AREA_PCT", raising=False)
+        monkeypatch.delenv("FARMSV_OUTSIDE_FRONT_SOLAR_MIN_AREA_PCT", raising=False)
+        assert _get_min_area_pct("OUTSIDE_FRONT_SOLAR") == DEFAULT_MIN_AREA_PCT
+
+    def test_per_cam_invalid_falls_back_to_global(self, monkeypatch):
+        """Invalid per-cam value falls through to global MIN_AREA_PCT."""
+        monkeypatch.setenv("MIN_AREA_PCT", "0.002")
+        monkeypatch.setenv("FARMSV_OUTSIDE_FRONT_SOLAR_MIN_AREA_PCT", "not_a_float")
+        assert _get_min_area_pct("OUTSIDE_FRONT_SOLAR") == 0.002
+
+    def test_per_cam_invalid_falls_back_to_default_when_no_global(self, monkeypatch):
+        """Invalid per-cam + no global -> DEFAULT_MIN_AREA_PCT."""
+        monkeypatch.delenv("MIN_AREA_PCT", raising=False)
+        monkeypatch.setenv("FARMSV_OUTSIDE_FRONT_SOLAR_MIN_AREA_PCT", "bad")
+        assert _get_min_area_pct("OUTSIDE_FRONT_SOLAR") == DEFAULT_MIN_AREA_PCT
+
+    def test_none_cam_id_uses_global(self, monkeypatch):
+        """cam_id=None skips per-cam lookup, uses global."""
+        monkeypatch.setenv("MIN_AREA_PCT", "0.003")
+        assert _get_min_area_pct(None) == 0.003
+        assert _get_min_area_pct() == 0.003
+
+    def test_empty_cam_id_uses_global(self, monkeypatch):
+        """cam_id='' skips per-cam lookup (truthiness check)."""
+        monkeypatch.setenv("MIN_AREA_PCT", "0.004")
+        assert _get_min_area_pct("") == 0.004
