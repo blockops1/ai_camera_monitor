@@ -377,7 +377,7 @@ def _run_pipeline(alert: dict) -> dict:
     else:
         alert_ts = datetime.now(UTC)
 
-    # Stage 3: load frames.
+    # Stage 3: load frames (await capture future if present).
     frames = stage_load_frames(alert)
 
     # Stage 4: YOLO gate.
@@ -657,9 +657,26 @@ def alert():
     from infra.frame_capture import get_recent_frames
 
     n_frames = 4
-    alert_dict["frames"] = get_recent_frames(
-        camera_id, n=n_frames, output_dir=alert_dir
-    )
+    # capture_around_now spawns a daemon thread; Future returns immediately.
+    frame_future = None
+    try:
+        from infra.frame_capture import CameraCaptureRegistry
+        reader = CameraCaptureRegistry.get(camera_id)
+        frame_future = reader.capture_around_now(
+            count=n_frames, stride_s=2.0, output_dir=alert_dir
+        )
+    except Exception:
+        log.warning(
+            "capture_around_now: reader unavailable for %s, "
+            "falling back to get_recent_frames",
+            camera_id,
+        )
+        alert_dict["frames"] = get_recent_frames(
+            camera_id, n=n_frames, output_dir=alert_dir
+        )
+    else:
+        alert_dict["frames"] = []  # placeholder; real frames from future
+    alert_dict["frame_future"] = frame_future
 
     # Run the alert through the full segmented pipeline
     # (stage functions imported above so tests can inspect them; dispatcher
