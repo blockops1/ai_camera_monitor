@@ -14,6 +14,7 @@ PUBLIC API:
     start() — Open RTSP and start decode loop (idempotent).
     stop(timeout=5.0) — Stop decode loop and close socket (idempotent).
     get_recent_frames(n, output_dir) -> list[str]
+    capture_around_now(count, stride_s, output_dir) -> concurrent.futures.Future
     is_healthy(stale_seconds=_UNSET → env-tuned, default 20.0) -> bool
     uptime_seconds() -> float
     get_frames_by_offset(indices, output_dir) -> list[str]
@@ -36,6 +37,7 @@ CALLS INTO:
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import os
 import threading
@@ -430,6 +432,76 @@ class PersistentRTSPReader:
         if not frames:
             return []
         return self._save_frames(frames, output_dir, start=1)
+
+    def capture_around_now(
+        self,
+        count: int,
+        stride_s: float,
+        output_dir: str,
+    ) -> concurrent.futures.Future:
+        """Capture *count* frames at *stride_s* intervals into *output_dir*.
+
+        Returns a ``concurrent.futures.Future`` immediately.  A per-alert
+        worker thread (daemon=True, name "capture-{camera_id}") grabs the
+        most recent frame from ``self._ring`` on each stride, saves it as
+        ``frame_NNN.png``, and sets the Future result to the list of paths.
+
+        Only ``future.result()`` blocks — the calling thread is free
+        immediately after this call returns.
+        """
+        future: concurrent.futures.Future[list[str]] = (
+            concurrent.futures.Future()
+        )
+        name = f"capture-{self._camera_id}" if self._camera_id else "capture-unknown"
+
+        def _worker() -> None:
+            """Run in a daemon thread; set Future result/exception."""
+            try:
+                result = self._capture_worker(count, stride_s, output_dir)
+                future.set_result(result)
+            except Exception as exc:
+                future.set_exception(exc)
+
+        t = threading.Thread(
+            target=_worker,
+            name=name,
+            daemon=True,
+        )
+        t.start()
+        return future
+
+    def _capture_worker(
+        self,
+        count: int,
+        stride_s: float,
+        output_dir: str,
+    ) -> list[str]:
+        """Per-capture worker: grab frame, sleep, repeat.
+
+        Called from a daemon thread so the Future is returned immediately
+        to the caller.
+        """
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        self._clean_old(output_dir)
+        out_paths: list[str] = []
+        for i in range(count):
+            if i > 0:
+                time.sleep(stride_s)
+            with self._ring_lock:
+                if self._ring:
+                    frame = self._ring[-1]
+                else:
+                    frame = None
+            if frame is not None:
+                self._save_one(frame, output_dir, i + 1, out_paths)
+            else:
+                log.warning(
+                    "capture_around_now: %s ring empty at i=%d, "
+                    "skipping frame",
+                    self._camera_id or "unknown",
+                    i,
+                )
+        return out_paths
 
     def get_frames_by_offset(
         self,

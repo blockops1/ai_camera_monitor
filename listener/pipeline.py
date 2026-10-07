@@ -111,13 +111,20 @@ def _load_person_candidates() -> list[dict]:
 def stage_load_frames(alert: dict) -> list[str]:
     """Stage 3: load frames from the alert payload.
 
-    Returns the list of frame paths. Raises RuntimeError if empty.
+    Waits on ``frame_future`` (if present) for the capture thread to
+    finish, then returns the list of frame paths.  Raises RuntimeError
+    if the final list is empty.
     """
     camera_id = alert.get("camera_id", "unknown")
-    frames = list(alert.get("frames", []))
+    alert_id = alert.get("id", "unknown")
+    frame_future = alert.get("frame_future")
+    if frame_future is not None:
+        frames = frame_future.result(timeout=10.0)
+    else:
+        frames = list(alert.get("frames", []))
     if not frames:
         raise RuntimeError(
-            f"no frames captured from camera {camera_id}, refusing to process alert {alert.get('id')}"
+            f"no frames captured from camera {camera_id}, refusing to process alert {alert_id}"
         )
     return frames
 
