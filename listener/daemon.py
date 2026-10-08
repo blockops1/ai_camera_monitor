@@ -40,7 +40,7 @@ CALLS INTO:
     - listener.pipeline: 10+ stage functions for segmented pipeline
     - flask: HTTP server + request parsing
     - infra.camera_creds: validate_source_ip() for anti-spoof
-    - infra.frame_capture: get_recent_frames() for RTSP frame pull
+    - infra.frame_capture: capture_around_now() for RTSP frame pull
     - uuid: generate alert_id strings
     - collections: defaultdict for learned camera maps
 """
@@ -654,28 +654,31 @@ def alert():
     alert_dict["id"] = alert_id
     alert_dir = str(infra_paths.data_dir_for(camera_id, alert_id))
 
-    from infra.frame_capture import get_recent_frames
-
     n_frames = 4
     # capture_around_now spawns a daemon thread; Future returns immediately.
     frame_future = None
+    from infra.frame_capture import CameraCaptureRegistry
+
+    reader = CameraCaptureRegistry.get(camera_id)
+    if reader is None:
+        log.error(
+            "No RTSP reader for camera %s — returning 503",
+            camera_id,
+        )
+        return jsonify({"status": "error", "reason": "no_reader"}), 503
+
     try:
-        from infra.frame_capture import CameraCaptureRegistry
-        reader = CameraCaptureRegistry.get(camera_id)
         frame_future = reader.capture_around_now(
             count=n_frames, stride_s=2.0, output_dir=alert_dir
         )
     except Exception:
-        log.warning(
-            "capture_around_now: reader unavailable for %s, "
-            "falling back to get_recent_frames",
+        log.exception(
+            "capture_around_now failed for %s — no fallback available",
             camera_id,
         )
-        alert_dict["frames"] = get_recent_frames(
-            camera_id, n=n_frames, output_dir=alert_dir
-        )
-    else:
-        alert_dict["frames"] = []  # placeholder; real frames from future
+        return jsonify({"status": "error", "reason": "capture_failed"}), 503
+
+    alert_dict["frames"] = []  # placeholder; real frames from future
     alert_dict["frame_future"] = frame_future
 
     # Run the alert through the full segmented pipeline

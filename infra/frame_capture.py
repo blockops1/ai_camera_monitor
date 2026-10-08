@@ -9,11 +9,10 @@ INPUTS:
     - ffmpeg_flags: dict | None (optional)
 
 OUTPUTS:
-    - list[str]: PNG file paths from get_recent_frames
+    - list[str]: PNG file paths from capture_around_now
 PUBLIC API:
     start() — Open RTSP and start decode loop (idempotent).
     stop(timeout=5.0) — Stop decode loop and close socket (idempotent).
-    get_recent_frames(n, output_dir) -> list[str]
     capture_around_now(count, stride_s, output_dir) -> concurrent.futures.Future
     is_healthy(stale_seconds=_UNSET → env-tuned, default 20.0) -> bool
     uptime_seconds() -> float
@@ -420,19 +419,6 @@ class PersistentRTSPReader:
                 self._container = None
         self._healthy = False
 
-    def get_recent_frames(
-        self,
-        n: int,
-        output_dir: str,
-    ) -> list[str]:
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        self._clean_old(output_dir)
-        with self._ring_lock:
-            frames = list(self._ring)[-n:]
-        if not frames:
-            return []
-        return self._save_frames(frames, output_dir, start=1)
-
     def capture_around_now(
         self,
         count: int,
@@ -801,9 +787,8 @@ class CameraCaptureRegistry:
             rtsp_url = cam_info["rtsp_url"]
             # Use the uppercase prefix as the registry key so it matches the
             # camera_id that the /alert pipeline resolves via IP fallback.
-            # Without this, get_recent_frames("OUTSIDE_FRONT_SOLAR") misses the
-            # boot reader keyed by friendly name and the lazy get() fallback
-            # would create a second reader under the prefix key.
+            # Without this, the boot reader is keyed by friendly name and the
+            # lazy get() fallback would create a second reader under the prefix key.
             registry_key = cam_info.get("prefix", camera_id)
             t = threading.Thread(
                 target=cls._boot_one,
@@ -969,27 +954,6 @@ def _get_healthy_reader(camera_id: str):
         log.warning("Reader for %s is not healthy.", camera_id)
         return None
     return reader
-
-
-def get_recent_frames(
-    camera_id: str,
-    n: int = 4,
-    output_dir: str | None = None,
-) -> list[str]:
-    """Get the *n* most recent frames for *camera_id*.
-
-    When *output_dir* is provided, *n* PNGs land in ``output_dir/frame_NNN.png``
-    (per-alert directory).  When *output_dir* is *None*, defaults to the
-    legacy per-camera ``FRAMES_DIR/<camera_id>`` path (preserved for
-    backward compatibility).
-    """
-    reader = _get_healthy_reader(camera_id)
-    if reader is None:
-        return []
-    from infra.paths import FRAMES_DIR
-
-    dir_to_use = output_dir if output_dir is not None else os.path.join(FRAMES_DIR, camera_id)
-    return reader.get_recent_frames(n, dir_to_use)
 
 
 def get_frames_by_offset(
