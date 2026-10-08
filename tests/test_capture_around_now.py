@@ -5,7 +5,6 @@ Verifies:
 - AC2: Calling thread is NOT blocked - method returns within 50ms.
 - AC3: Worker thread is daemon=True, named "capture-{camera_id}".
 - AC4: Exception in worker is captured into the Future.
-- AC7: Old get_recent_frames() still exists alongside the new method.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import MagicMock
 
 import PIL.Image
 
@@ -111,17 +109,10 @@ class TestCaptureAroundNow(unittest.TestCase):
             finally:
                 self.reader._capture_worker = original
 
-    def test_AC7_get_recent_frames_still_works(self):
-        """AC7: Old get_recent_frames() method still exists alongside capture_around_now."""
-        # Verify both methods are present on the reader.
+    def test_no_get_recent_frames_fallback(self):
+        """AC5: get_recent_frames is removed — no fallback path exists."""
         self.assertTrue(hasattr(self.reader, "capture_around_now"))
-        self.assertTrue(hasattr(self.reader, "get_recent_frames"))
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            paths = self.reader.get_recent_frames(2, tmpdir)
-            self.assertEqual(len(paths), 2)
-            for p in paths:
-                self.assertTrue(os.path.isfile(p))
+        self.assertFalse(hasattr(self.reader, "get_recent_frames"))
 
     def test_frame_names_ordered(self):
         """Helper test: frames are named frame_001.png through frame_NNN.png."""
