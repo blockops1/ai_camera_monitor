@@ -1,0 +1,23 @@
+{
+  "task_id": "t_ea4e0950",
+  "qa_round": 4,
+  "qa_timestamp": "2026-10-06T13:10:00-04:00",
+  "project_type": "mixed",
+  "verdict": "fail",
+  "hard_failures": [
+    "CRITICAL: Code was never committed to any branch. Worktree branch farm-surveillance/t_ea4e0950 is at commit 77d17dbd = main (zero diff). All 6 changed files exist on disk at their absolute paths but have no commit on any branch. Fundamental delivery failure.",
+    "AC1 (reboot test) not performed."
+  ],
+  "passing_checks": {
+    "ac2_3_gateway_reachability": "6/6 cams reachable at 127.0.0.1:9000 (outside_front_solar, outside_front_garage, outside_front_power, outside_back_solar = RLC-510A; back, front = RLC-833A)",
+    "ac4_aliases": "0 active aliases with :9000 suffix; 3 duplicates disabled with comments",
+    "ac7_listener_regression": "Listener PID 41932 alive, preflight smoke test passes",
+    "shell_syntax": "3/3 scripts clean (start-reolink-gateway.sh, user-session.d/reolink-gateway, install-gateway.sh)",
+    "plist_stub": "KeepAlive=false, RunAtLoad=false, empty ProgramArguments, deprecation comment present"
+  },
+  "unchanged_acs": {
+    "ac5_agents_md": "Orchestrator job per AGENTS.md rules — not a coder defect",
+    "ac6_v2094_prd": "Orchestrator job — not a coder defect"
+  },
+  "action_required": "Coder must commit all changes to the worktree branch, verify branch ahead of main, then re-request review."
+}

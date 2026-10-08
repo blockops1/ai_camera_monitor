@@ -1,55 +1,242 @@
 {
-  "_comment": "Per-camera overrides for the motion gate pipeline. Keys are camera PREFIXES (matching camera-creds.env): FRONT, BACK, OUTSIDE_FRONT_GARAGE, OUTSIDE_FRONT_POWER, OUTSIDE_FRONT_SOLAR, OUTSIDE_BACK_SOLAR. Consumed by infra/gate.py (load_thresholds, is_gate_enabled) and infra/gate_cooldown.py (get_gate_cooldown_seconds). Phase 6B.167 §13.4 (revised 2026-09-08): no CAM{N} translation — pipeline passes camera prefix directly. Tunable per camera: vehicle/person/dog/cat/.../cow/bear/bird confidence thresholds; gate_cooldown window in seconds (0 = no cooldown); gate_enabled event-type toggle. Optional 'subjects' key (list of class names) restricts gate to those subjects; when absent, default vehicle-priority behavior applies. Defaults below mirror module-level THRESHOLDS_BY_CLASS in infra/gate.py — operators tighten/loosen per camera based on noise level. Version-controlled because thresholds are tuning parameters, not private data. See <HOME_DIR>/.hermes/memories/USER.md 'Audit the class, not the instance' + 'No credentials in scripts/configs' rules for the env-vs-config split.",
+  "_comment": "Per-camera overrides for the motion gate pipeline. Keys are camera PREFIXES (matching camera-creds.env): FRONT, BACK, OUTSIDE_FRONT_GARAGE, OUTSIDE_FRONT_POWER, OUTSIDE_FRONT_SOLAR, OUTSIDE_BACK_SOLAR. Consumed by infra/gate.py (load_thresholds, is_gate_enabled) and infra/gate_cooldown.py (get_gate_cooldown_seconds). Phase 6B.167 \u00a713.4 (revised 2026-09-08): no CAM{N} translation \u2014 pipeline passes camera prefix directly. Tunable per camera: vehicle/person/dog/cat/.../cow/bear/bird confidence thresholds; gate_cooldown window in seconds (0 = no cooldown); gate_enabled event-type toggle. Optional 'subjects' key (list of class names) restricts gate to those subjects; when absent, default vehicle-priority behavior applies. Defaults below mirror module-level THRESHOLDS_BY_CLASS in infra/gate.py \u2014 operators tighten/loosen per camera based on noise level. Version-controlled because thresholds are tuning parameters, not private data. See <HOME_DIR>/.hermes/memories/USER.md 'Audit the class, not the instance' + 'No credentials in scripts/configs' rules for the env-vs-config split.",
   "_default_thresholds_reference": "infra/gate.py:THRESHOLDS_BY_CLASS",
   "FRONT": {
-    "_note": "Front Door Outside — primary entry, no relaxation",
-    "vehicle": 0.45,
-    "person": 0.35,
-    "bicycle": 0.45,
-    "gate_cooldown": {"vehicle": 60, "person": 30, "default": 45},
-    "gate_enabled": {"vehicle": true, "person": true, "motion": true},
-    "subjects": ["person", "animal", "vehicle", "bicycle"]
+    "_note": "Front Door Outside -- 2026-10-07 DIAGNOSTIC MODE: vehicle 0.30 / person 0.25 / -- all-animal 0.2 threshold (catches distant deer) / 120s cooldown (permissive to surface Carson's routine in TG)",
+    "vehicle": 0.3,
+    "person": 0.25,
+    "bicycle": 0.3,
+    "gate_cooldown": {
+      "vehicle": 120,
+      "person": 120,
+      "default": 120
+    },
+    "gate_enabled": {
+      "vehicle": true,
+      "person": true,
+      "motion": true
+    },
+    "subjects": [
+      "person",
+      "animal",
+      "vehicle",
+      "bicycle",
+      "dog",
+      "cat",
+      "horse",
+      "sheep",
+      "cow",
+      "bear",
+      "bird",
+      "elephant",
+      "zebra",
+      "giraffe"
+    ],
+    "dog": 0.2,
+    "cat": 0.2,
+    "horse": 0.2,
+    "sheep": 0.2,
+    "cow": 0.2,
+    "bear": 0.2,
+    "bird": 0.2,
+    "elephant": 0.2,
+    "zebra": 0.2,
+    "giraffe": 0.2
   },
   "BACK": {
-    "_note": "Back Door Inside — secondary entry",
-    "vehicle": 0.45,
-    "person": 0.35,
-    "bicycle": 0.45,
-    "gate_cooldown": {"vehicle": 60, "person": 30, "default": 45},
-    "gate_enabled": {"vehicle": true, "person": true, "motion": true},
-    "subjects": ["person", "animal", "vehicle", "bicycle"]
+    "_note": "Back Door Inside -- 2026-10-07 DIAGNOSTIC MODE: vehicle 0.30 / person 0.25 / -- all-animal 0.2 threshold (catches distant deer) / 120s cooldown",
+    "vehicle": 0.3,
+    "person": 0.25,
+    "bicycle": 0.3,
+    "gate_cooldown": {
+      "vehicle": 120,
+      "person": 120,
+      "default": 120
+    },
+    "gate_enabled": {
+      "vehicle": true,
+      "person": true,
+      "motion": true
+    },
+    "subjects": [
+      "person",
+      "animal",
+      "vehicle",
+      "bicycle",
+      "dog",
+      "cat",
+      "horse",
+      "sheep",
+      "cow",
+      "bear",
+      "bird",
+      "elephant",
+      "zebra",
+      "giraffe"
+    ],
+    "dog": 0.2,
+    "cat": 0.2,
+    "horse": 0.2,
+    "sheep": 0.2,
+    "cow": 0.2,
+    "bear": 0.2,
+    "bird": 0.2,
+    "elephant": 0.2,
+    "zebra": 0.2,
+    "giraffe": 0.2
   },
   "OUTSIDE_FRONT_GARAGE": {
-    "_note": "Outside Front Garage — driveway area",
-    "vehicle": 0.45,
-    "person": 0.40,
-    "bicycle": 0.45,
-    "gate_cooldown": {"vehicle": 90, "person": 45, "default": 60},
-    "gate_enabled": {"vehicle": true, "person": true, "motion": true},
-    "subjects": ["person", "animal", "vehicle", "bicycle"]
+    "_note": "Outside Front Garage -- 2026-10-07 DIAGNOSTIC MODE: vehicle 0.30 / person 0.25 / -- all-animal 0.2 threshold (catches distant deer) / 120s cooldown",
+    "vehicle": 0.3,
+    "person": 0.25,
+    "bicycle": 0.3,
+    "gate_cooldown": {
+      "vehicle": 120,
+      "person": 120,
+      "default": 120
+    },
+    "gate_enabled": {
+      "vehicle": true,
+      "person": true,
+      "motion": true
+    },
+    "subjects": [
+      "person",
+      "animal",
+      "vehicle",
+      "bicycle",
+      "dog",
+      "cat",
+      "horse",
+      "sheep",
+      "cow",
+      "bear",
+      "bird",
+      "elephant",
+      "zebra",
+      "giraffe"
+    ],
+    "dog": 0.2,
+    "cat": 0.2,
+    "horse": 0.2,
+    "sheep": 0.2,
+    "cow": 0.2,
+    "bear": 0.2,
+    "bird": 0.2,
+    "elephant": 0.2,
+    "zebra": 0.2,
+    "giraffe": 0.2
   },
   "OUTSIDE_FRONT_POWER": {
-    "_note": "Outside Front Power — perimeter",
-    "vehicle": 0.55,
-    "person": 0.45,
-    "gate_cooldown": {"vehicle": 90, "person": 45, "default": 60},
-    "gate_enabled": {"vehicle": true, "person": false, "motion": true}
+    "_note": "Outside Front Power -- 2026-10-07 DIAGNOSTIC MODE: vehicle 0.30 / 0.25 person threshold but person:false (vehicle-only cam)",
+    "vehicle": 0.3,
+    "person": 0.25,
+    "bicycle": 0.3,
+    "gate_cooldown": {
+      "vehicle": 120,
+      "person": 120,
+      "default": 120
+    },
+    "gate_enabled": {
+      "vehicle": true,
+      "person": false,
+      "motion": true
+    },
+    "dog": 0.2,
+    "cat": 0.2,
+    "horse": 0.2,
+    "sheep": 0.2,
+    "cow": 0.2,
+    "bear": 0.2,
+    "bird": 0.2,
+    "elephant": 0.2,
+    "zebra": 0.2,
+    "giraffe": 0.2
   },
   "OUTSIDE_FRONT_SOLAR": {
-    "_note": "Outside Front Solar — noisy perimeter; thresholds tightened 2026-09-15 to suppress 921 false alarms",
-    "vehicle": 0.55,
-    "person": 0.50,
-    "cat": 0.85,
-    "dog": 0.75,
-    "bird": 0.80,
-    "gate_cooldown": {"vehicle": 120, "person": 60, "default": 90},
-    "gate_enabled": {"vehicle": true, "person": false, "cat": false, "dog": false, "motion": true}
+    "_note": "Outside Front Solar -- 2026-10-07 DIAGNOSTIC MODE: vehicle 0.30 / person 0.25 / -- all-animal 0.2 threshold (catches distant deer) / 120s cooldown",
+    "vehicle": 0.3,
+    "person": 0.25,
+    "bicycle": 0.3,
+    "cat": 0.2,
+    "dog": 0.2,
+    "bird": 0.2,
+    "gate_cooldown": {
+      "vehicle": 120,
+      "person": 120,
+      "default": 120
+    },
+    "gate_enabled": {
+      "vehicle": true,
+      "person": true,
+      "cat": true,
+      "dog": true,
+      "motion": true
+    },
+    "subjects": [
+      "person",
+      "animal",
+      "vehicle",
+      "bicycle",
+      "dog",
+      "cat",
+      "horse",
+      "sheep",
+      "cow",
+      "bear",
+      "bird",
+      "elephant",
+      "zebra",
+      "giraffe"
+    ],
+    "horse": 0.2,
+    "sheep": 0.2,
+    "cow": 0.2,
+    "bear": 0.2,
+    "elephant": 0.2,
+    "zebra": 0.2,
+    "giraffe": 0.2
   },
   "OUTSIDE_BACK_SOLAR": {
-    "_note": "Outside Back Solar — rear perimeter",
-    "vehicle": 0.55,
-    "person": 0.45,
-    "gate_cooldown": {"vehicle": 90, "person": 45, "default": 60},
-    "gate_enabled": {"vehicle": true, "person": false, "motion": true}
+    "_note": "Outside Back Solar -- 2026-10-07 DIAGNOSTIC MODE: vehicle 0.30 / person 0.25 / -- all-animal 0.2 threshold (catches distant deer) / 120s cooldown",
+    "vehicle": 0.3,
+    "person": 0.25,
+    "bicycle": 0.3,
+    "gate_cooldown": {
+      "vehicle": 120,
+      "person": 120,
+      "default": 120
+    },
+    "gate_enabled": {
+      "vehicle": true,
+      "person": true,
+      "motion": true
+    },
+    "subjects": [
+      "person",
+      "animal",
+      "vehicle",
+      "bicycle",
+      "dog",
+      "cat",
+      "horse",
+      "sheep",
+      "cow",
+      "bear",
+      "bird",
+      "elephant",
+      "zebra",
+      "giraffe"
+    ],
+    "dog": 0.2,
+    "cat": 0.2,
+    "horse": 0.2,
+    "sheep": 0.2,
+    "cow": 0.2,
+    "bear": 0.2,
+    "bird": 0.2,
+    "elephant": 0.2,
+    "zebra": 0.2,
+    "giraffe": 0.2
   }
 }
