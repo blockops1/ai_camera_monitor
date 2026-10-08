@@ -71,13 +71,26 @@ _REPO_ENV_PATH: str = str(Path(__file__).resolve().parent.parent / ".env")
 
 
 def _load_home_env() -> int:
-    """Load .env files into os.environ. Existing keys win over file values.
+    """Load .env files into os.environ.
 
-    Resolution order (first file found wins for any given key, but already-set
-    env vars always win over file values):
+    Resolution order (precedence, lowest to highest):
 
-      1. <repo>/.env          — operator-owned, in-repo, mode 600 (canonical)
+      1. <repo>/.env          — operator-owned, in-repo, mode 600
       2. ~/.env               — operator-global fallback (legacy)
+      3. <repo>/telegram-creds.env -- per-app creds (highest precedence)
+      4. <repo>/camera-creds.env   -- per-app creds
+      5. <repo>/llm-creds.env      -- per-app creds
+
+    For steps 1-2: existing env vars win over file values
+    (``if k not in os.environ``). This lets launchd-injected env vars
+    and prior file loads take priority.
+
+    For steps 3-5 (per-app creds files): ALL keys override existing values.
+    This is the core safety mechanism from US-101z -- if a worker uses
+    write_file on <repo>/.env and clobbers the Telegram token with a
+    placeholder, the real token in telegram-creds.env still wins.
+    Incident 2026-10-05: 3 alerts lost to Telegram 404 when .env was
+    overwritten.
 
     US-017b: secrets (telegram token, etc.) live in a gitignored .env file
     rather than the launchd plist so they can be rotated without plist edits
@@ -90,29 +103,125 @@ def _load_home_env() -> int:
     NOTE: This function is called at module-import time, BEFORE any
     `from infra import ...` line below.  This ensures every infra module
     sees the correct env values when it reads os.environ at import time.
+
+    Returns:
+        Total number of keys loaded/overridden across all files.
     """
     from dotenv import dotenv_values  # python-dotenv
 
+    from infra import paths as _p  # for cred file paths
+
+    # Paths for steps 1-2: existing keys win (no override)
     candidate_paths = [
         _REPO_ENV_PATH,
         os.path.expanduser("~/.env"),
     ]
 
+    # Paths for steps 3-5: override everything (last wins)
+    creds_paths = [
+        str(_p.TELEGRAM_CREDS_FILE),
+        str(_p.CAMERA_CREDS_FILE),
+        str(_p.LLM_CREDS_FILE),
+    ]
+
+    # Per-app creds file labels for boot logging (F6)
+    creds_labels = {
+        str(_p.TELEGRAM_CREDS_FILE): "telegram",
+        str(_p.CAMERA_CREDS_FILE): "camera",
+        str(_p.LLM_CREDS_FILE): "llm",
+    }
+
     total_loaded = 0
+
+    # Steps 1-2: .env and ~/.env (existing keys win)
     for env_path in candidate_paths:
         if not os.path.exists(env_path):
             continue
         values = dotenv_values(env_path) or {}
-        loaded_here = 0
         for k, v in values.items():
             if v is None:
                 continue
             if k not in os.environ:
                 os.environ[k] = v
-                loaded_here += 1
-        total_loaded += loaded_here
+                total_loaded += 1
+
+    # Steps 3-5: per-app creds files (override everything)
+    for env_path in creds_paths:
+        if not os.path.exists(env_path):
+            continue
+        values = dotenv_values(env_path) or {}
+        for k, v in values.items():
+            if v is None:
+                continue
+            os.environ[k] = v  # always override (last wins)
+            total_loaded += 1
+
+    # F6: log which creds files were loaded and which were missing/empty
+    _log_creds_status(creds_labels, total_loaded)
 
     return total_loaded
+
+
+def _log_creds_status(creds_labels: dict[str, str], total_loaded: int) -> None:
+    """Log the status of per-app creds files at boot time.
+
+    Formats a summary like:
+        "Loaded creds: telegram=ok camera=ok llm=missing"
+    No secrets are logged.
+
+    NOTE: This runs at import time (before the logging config is fully
+    wired up), so it writes to stderr directly rather than through the
+    logger. The logging setup at line 153+ captures this if basicConfig
+    has already run; otherwise it's a fallback to stderr.
+    """
+    import logging
+
+    # At import time, basicConfig hasn't run yet (it's at line 163+).
+    # Use a temporary root logger that writes to stderr as a fallback.
+    tmp_log = logging.getLogger("daemon._creds")
+    if not tmp_log.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+        )
+        tmp_log.addHandler(handler)
+        tmp_log.setLevel(logging.INFO)
+
+    statuses: dict[str, str] = {}
+    for cred_path, label in creds_labels.items():
+        if not os.path.exists(cred_path):
+            statuses[label] = "missing"
+            continue
+        # Check for world-readable creds files (security warning, F4)
+        try:
+            file_stat = os.stat(cred_path)
+            file_mode = file_stat.st_mode & 0o777
+            if file_mode & 0o007:  # world-readable bits set
+                tmp_log.warning(
+                    "creds file %s is world-readable (mode=%s); "
+                    "set mode 600 to restrict access",
+                    cred_path, oct(file_mode),
+                )
+        except OSError:
+            statuses[label] = "unreadable"
+            continue
+        # Check if file has any non-comment, non-blank content
+        has_content = False
+        try:
+            with open(cred_path) as fh:
+                for line in fh:
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith("#"):
+                        has_content = True
+                        break
+        except OSError:
+            statuses[label] = "unreadable"
+            continue
+        statuses[label] = "ok" if has_content else "empty"
+
+    parts = [f"{label}={status}" for label, status in statuses.items()]
+    tmp_log.info("Loaded creds: %s", " ".join(parts))
+    tmp_log.info("env: loaded %d total keys across all env files", total_loaded)
 
 
 # Load .env BEFORE any infra imports.  The return value is stored in

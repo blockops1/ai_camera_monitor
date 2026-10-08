@@ -36,6 +36,31 @@ def _no_repo_env(monkeypatch) -> None:
     )
 
 
+def _redirect_home_env(monkeypatch, target: Path) -> None:
+    """Make ~/.env point at target (or nonexistent for no-home-env tests)."""
+    monkeypatch.setattr(
+        os.path, "expanduser",
+        lambda p: str(target) if p == "~/.env" else p,
+    )
+
+
+def _redirect_creds_files(monkeypatch, telegram: Path | None = None,
+                           camera: Path | None = None, llm: Path | None = None) -> None:
+    """Redirect all per-app creds file paths to safe (or nonexistent) targets."""
+    monkeypatch.setattr(
+        "infra.paths.TELEGRAM_CREDS_FILE",
+        str(telegram) if telegram else "/nonexistent/telegram-creds.env",
+    )
+    monkeypatch.setattr(
+        "infra.paths.CAMERA_CREDS_FILE",
+        str(camera) if camera else "/nonexistent/camera-creds.env",
+    )
+    monkeypatch.setattr(
+        "infra.paths.LLM_CREDS_FILE",
+        str(llm) if llm else "/nonexistent/llm-creds.env",
+    )
+
+
 class TestLoadHomeEnv:
     """Tests for listener.daemon._load_home_env()."""
 
@@ -46,13 +71,11 @@ class TestLoadHomeEnv:
             "TELEGRAM_BOT_TOKEN=7832687030:AA-real-token-from-test\n"
             "TELEGRAM_HOME_CHAT_ID=999\n"
         )
-        # Force the repo-rooted lookup to point at our temp file.
         _redirect_repo_env(monkeypatch, env_file)
-        # ~/.env redirect is no longer needed (repo wins), but keep parity.
-        monkeypatch.setattr(
-            os.path, "expanduser",
-            lambda p: str(tmp_path / "no_home.env") if p == "~/.env" else p,
-        )
+        # Redirect ~/.env to nonexistent so it doesn't interfere.
+        _redirect_home_env(monkeypatch, tmp_path / "no_home.env")
+        # Redirect creds files to nonexistent so they don't override.
+        _redirect_creds_files(monkeypatch)
         # Make sure no leak from outer env.
         monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
         monkeypatch.delenv("TELEGRAM_HOME_CHAT_ID", raising=False)
@@ -67,6 +90,8 @@ class TestLoadHomeEnv:
         env_file = tmp_path / ".env"
         env_file.write_text("TELEGRAM_BOT_TOKEN=from-file\n")
         _redirect_repo_env(monkeypatch, env_file)
+        _redirect_home_env(monkeypatch, tmp_path / "no_home.env")
+        _redirect_creds_files(monkeypatch)
         monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "from-launchd")
 
         _load_home_env()
@@ -79,10 +104,8 @@ class TestLoadHomeEnv:
         _no_repo_env(monkeypatch)
         home_env = tmp_path / "home.env"
         home_env.write_text("TELEGRAM_BOT_TOKEN=from-home-fallback\n")
-        monkeypatch.setattr(
-            os.path, "expanduser",
-            lambda p: str(home_env) if p == "~/.env" else p,
-        )
+        _redirect_home_env(monkeypatch, home_env)
+        _redirect_creds_files(monkeypatch)
         monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
 
         _load_home_env()
@@ -101,22 +124,22 @@ class TestLoadHomeEnv:
         for k in set(before) | set(os.environ):
             assert os.environ.get(k) == before.get(k), f"unexpected change to {k}"
 
-    def test_telegram_token_length_revealed_not_value(self, tmp_path, monkeypatch, caplog):
-        """The log lines must NOT contain the token value, only its length."""
-        fake_token = "secret-value-1234567890abcdef"  # 29 chars (real token is 46)
+    def test_telegram_token_value_not_in_logs(self, tmp_path, monkeypatch, caplog):
+        """The log lines must NOT contain the actual token value."""
+        fake_token = "secret-value-1234567890abcdef"  # 29 chars
         env_file = tmp_path / ".env"
         env_file.write_text(f"TELEGRAM_BOT_TOKEN={fake_token}\n")
         _redirect_repo_env(monkeypatch, env_file)
+        _redirect_home_env(monkeypatch, tmp_path / "no_home.env")
+        _redirect_creds_files(monkeypatch)
         monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
 
         with caplog.at_level(logging.INFO):
             _load_home_env()
 
-        # We emit one "env: loaded ... " per candidate and an "env load complete: ..."
-        # summary line — one of them has the token length.
+        # The token value must NOT appear in any log message.
         all_msgs = [r.getMessage() for r in caplog.records]
-        assert any("secret-value-1234567890abcdef" not in m for m in all_msgs)
-        # At least one log line must include the token length (29 chars for our fake token).
-        assert any(str(len(fake_token)) in m and "token" in m.lower() for m in all_msgs), (
-            f"expected token length {len(fake_token)} in some log line; got: {all_msgs}"
-        )
+        for msg in all_msgs:
+            assert fake_token not in msg, (
+                f"Token value leaked into log: {msg!r}"
+            )
