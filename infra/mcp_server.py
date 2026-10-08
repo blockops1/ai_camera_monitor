@@ -524,6 +524,7 @@ class _MCPHandler(BaseHTTPRequestHandler):
                     "message": "Unauthorized: missing or invalid bearer token",
                 },
                 "id": None,
+                "request_id": _req_id,
             }
             self._send_json_with_headers(401, body, [("WWW-Authenticate", www_authenticate_header())])
             self._log_access("POST /mcp", 401, _start)
@@ -532,9 +533,17 @@ class _MCPHandler(BaseHTTPRequestHandler):
         # Read body
         content_length = int(self.headers.get("Content-Length", 0))
         if content_length == 0:
-            status, response_body = _handle_request("POST /mcp", None, None, _req_id)
+            response_body = {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32700,
+                    "message": "Parse error: empty body",
+                },
+                "id": None,
+                "request_id": _req_id,
+            }
             self._send_json(400, response_body)
-            _log_access("POST /mcp", 400, _start)
+            self._log_access("POST /mcp", 400, _start)
             return
 
         body = self.rfile.read(content_length)
@@ -552,7 +561,7 @@ class _MCPHandler(BaseHTTPRequestHandler):
                     "id": None,
                 },
             )
-            _log_access("POST /mcp", 400, _start)
+            self._log_access("POST /mcp", 400, _start)
             return
 
         method = message.get("method", "")
@@ -561,7 +570,7 @@ class _MCPHandler(BaseHTTPRequestHandler):
 
         status, response_body = _handle_request(method, params, id_val, _req_id)
         self._send_json(status, response_body)
-        _log_access(method, status, _start)
+        self._log_access(method, status, _start)
 
     # ---- Helpers ----
 
