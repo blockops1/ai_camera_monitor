@@ -68,6 +68,8 @@ def _cached_token() -> str:
 def authenticate(auth_header: str | None) -> bool:
     """Check the Authorization header against the configured token.
 
+    Per RFC 6750 §3, the "Bearer" scheme prefix is case-insensitive.
+
     Args:
         auth_header: The raw Authorization header value, or None.
 
@@ -77,15 +79,25 @@ def authenticate(auth_header: str | None) -> bool:
     if auth_header is None:
         return False
 
-    # Expect "Bearer <token>"
-    if not auth_header.startswith("Bearer "):
+    # RFC 6750 §3: scheme is case-insensitive
+    lower = auth_header.lower()
+    if not lower.startswith("bearer "):
         return False
 
-    provided_token = auth_header[7:]  # Strip "Bearer " prefix
+    provided_token = auth_header[7:]  # Strip "Bearer " (preserves original case)
     expected_token = _cached_token()
 
     # Constant-time comparison to prevent timing attacks
     return _constant_time_compare(provided_token, expected_token)
+
+
+def www_authenticate_header() -> str:
+    """Return the WWW-Authenticate header value per RFC 6750 + MCP Authorization spec.
+
+    Returns:
+        'Bearer realm="farm-mcp"'
+    """
+    return 'Bearer realm="farm-mcp"'
 
 
 def _constant_time_compare(a: str, b: str) -> bool:
