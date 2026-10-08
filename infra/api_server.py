@@ -185,10 +185,18 @@ def _route_camera_snapshot(camera_id: str, **kwargs: Any) -> tuple[int, Any]:
     return 200, {"box_id": _BOX_ID, "snapshot_path": str(path)}
 
 
-def _route_events(limit: int = 50, since: str | None = None, **kwargs: Any) -> tuple[int, Any]:
+def _route_events(limit: int = 50, since: str | None = None,
+                  **kwargs: Any) -> tuple[int, Any]:
     from infra.farm_api.events import list_events
-    records = list_events(limit=limit, since=since)
-    return 200, {"box_id": _BOX_ID, "data": [r.__dict__ for r in records]}
+    try:
+        result = list_events(limit=limit, since=since, **kwargs)
+    except ValueError as exc:
+        return 400, {"error": str(exc)}
+    return 200, {
+        "box_id": _BOX_ID,
+        "data": [r.__dict__ for r in result["data"]],
+        "next_page_token": result.get("next_page_token"),
+    }
 
 
 def _route_event(alert_id: str, **kwargs: Any) -> tuple[int, Any]:
@@ -721,6 +729,8 @@ def _parse_qs(qs: dict[str, str]) -> dict[str, Any]:
     # Defaults
     result.setdefault("limit", 50)
     result.setdefault("since", None)
+    result.setdefault("page_token", None)
+    result.setdefault("camera_id", None)
     for key, val in qs.items():
         if key == "limit":
             try:
@@ -729,6 +739,8 @@ def _parse_qs(qs: dict[str, str]) -> dict[str, Any]:
                 pass
         elif key == "since":
             result["since"] = val
+        elif key in ("page_token", "camera_id"):
+            result[key] = val
     return result
 
 
