@@ -255,6 +255,12 @@ def _route_config(**kwargs: Any) -> tuple[int, Any]:
     return 200, {"box_id": _BOX_ID, "data": get_config().__dict__}
 
 
+def _route_openapi(**kwargs: Any) -> tuple[int, Any]:
+    """Return the OpenAPI 3.1 schema document."""
+    doc = _generate_openapi_doc()
+    return 200, doc
+
+
 # ---------------------------------------------------------------------------
 # URL routing table
 # ---------------------------------------------------------------------------
@@ -278,7 +284,249 @@ _ROUTE_TABLE: list[tuple[re.Pattern[str], Any]] = [
     (re.compile(r"^/api/v1/telegram/status$"), _route_telegram_status),
     (re.compile(r"^/api/v1/vision/status$"), _route_vision_status),
     (re.compile(r"^/api/v1/config$"), _route_config),
+    (re.compile(r"^/api/v1/openapi\.json$"), _route_openapi),
 ]
+
+# ---------------------------------------------------------------------------
+# OpenAPI 3.1 schema export
+# ---------------------------------------------------------------------------
+
+# Cache: generated once at import time from _ROUTE_TABLE.
+_openapi_cache: dict[str, Any] | None = None
+
+
+def _generate_openapi_doc() -> dict[str, Any]:
+    """Build an OpenAPI 3.1.0 document from _ROUTE_TABLE.
+
+    Each route is described as a GET operation. Path parameters are extracted
+    from named regex groups; query parameters are inferred from the route
+    handler's signature and _parse_qs defaults.
+    """
+    global _openapi_cache
+
+    if _openapi_cache is not None:
+        return _openapi_cache
+
+    paths: dict[str, Any] = {}
+
+    for pattern, handler in _ROUTE_TABLE:
+        regex_str = pattern.pattern
+        # Derive an OpenAPI path from the regex.
+        # Named groups (?P<name>...) -> {name}, everything else stripped.
+        # Replace full named group (name + inner pattern + closing paren).
+        path_str = re.sub(r"\(\?P<([^>]+)>[^)]*\)", "{\\1}", regex_str)
+        # Strip ^ and $ anchors
+        path_str = path_str.lstrip("^").rstrip("$")
+        # Replace literal regex dots with plain dots (e.g. openapi\.json)
+        path_str = path_str.replace("\\.", ".")
+
+        params: list[dict[str, Any]] = []
+
+        # Path parameters from named groups
+        for name in re.findall(r"\(\?P<([^>]+)>[^)]*\)", regex_str):
+            params.append({
+                "name": name,
+                "in": "path",
+                "required": True,
+                "schema": {"type": "string"},
+            })
+
+        # Query parameters from _parse_qs and handler defaults
+        qs_params = _infer_query_params(handler, pattern)
+        params.extend(qs_params)
+
+        # Build response schema — the handler returns (status, body) where
+        # body is a dict. We represent it as an object with generic properties.
+        resp_200: dict[str, Any] = {
+            "description": "Successful response",
+            "content": {
+                "application/json": {
+                    "schema": {"type": "object", "properties": {
+                        "box_id": {"type": "string"},
+                        "data": {"type": "object"},
+                        "request_id": {"type": "string"},
+                        "code": {"type": "string"},
+                        "status": {"type": "integer"},
+                    }, "required": ["request_id", "code", "status"]}
+                }
+            }
+        }
+
+        # Some handlers return non-standard schemas
+        resp_200 = _refine_response_schema(handler, regex_str, resp_200)
+
+        # Generate a human-readable summary from the path
+        summary = _path_to_summary(path_str)
+
+        paths[path_str] = {
+            "get": {
+                "summary": summary,
+                "parameters": params,
+                "responses": {
+                    "200": resp_200,
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {"type": "object", "properties": {
+                                    "error": {"type": "string"},
+                                    "request_id": {"type": "string"},
+                                    "code": {"type": "string"},
+                                    "status": {"type": "integer"},
+                                }, "required": ["error", "request_id", "code", "status"]}
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {"type": "object", "properties": {
+                                    "error": {"type": "string"},
+                                    "request_id": {"type": "string"},
+                                    "code": {"type": "string"},
+                                    "status": {"type": "integer"},
+                                }, "required": ["error", "request_id", "code", "status"]}
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {"type": "object", "properties": {
+                                    "error": {"type": "string"},
+                                    "request_id": {"type": "string"},
+                                }, "required": ["error", "request_id"]}
+                            }
+                        }
+                    },
+                },
+            }
+        }
+
+    doc: dict[str, Any] = {
+        "openapi": "3.1.0",
+        "info": {
+            "title": "Farm Surveillance V2 API",
+            "version": "0.1.0",
+            "description": "Read-only HTTP API server for farm-surveillance-v2. "
+                          "17 GET routes mirroring MCP tools 1:1 via farm_api.*",
+        },
+        "servers": [
+            {
+                "url": f"http://{infra.net_bind.TAILNET_BIND}:{_API_PORT}",
+                "description": "tailnet",
+            }
+        ],
+        "paths": paths,
+        "components": {
+            "securitySchemes": {
+                "Bearer": {
+                    "type": "http",
+                    "scheme": "bearer",
+                }
+            }
+        },
+    }
+
+    _openapi_cache = doc
+    return doc
+
+
+def _infer_query_params(handler, pattern: re.Pattern[str]) -> list[dict[str, Any]]:
+    """Infer query parameters for a route handler.
+
+    Only routes that actually accept query params (events, errors) get them
+    in the OpenAPI doc. Other routes that go through _parse_qs but don't
+    use those params aren't polluted with them.
+    """
+    params: list[dict[str, Any]] = []
+    route_path = pattern.pattern.rstrip("$")
+
+    # The events route: limit, since, page_token, camera_id
+    if re.search(r"/events$", route_path):
+        params.append({
+            "name": "limit",
+            "in": "query",
+            "required": False,
+            "schema": {"type": "integer"},
+            "description": "Max events to return (default 50, max 200).",
+        })
+        params.append({
+            "name": "since",
+            "in": "query",
+            "required": False,
+            "schema": {"type": "string"},
+            "description": "ISO-8601 timestamp filter (inclusive).",
+        })
+        params.append({
+            "name": "page_token",
+            "in": "query",
+            "required": False,
+            "schema": {"type": "string"},
+            "description": "Opaque cursor (base64 of last alert_id from previous page). "
+                           "Absent on first call.",
+        })
+        params.append({
+            "name": "camera_id",
+            "in": "query",
+            "required": False,
+            "schema": {"type": "string"},
+            "description": "Filter events by camera ID.",
+        })
+
+    # The errors route: limit, since
+    elif re.search(r"/listener/errors$", route_path):
+        params.append({
+            "name": "limit",
+            "in": "query",
+            "required": False,
+            "schema": {"type": "integer"},
+            "description": "Max errors to return (default 50).",
+        })
+        params.append({
+            "name": "since",
+            "in": "query",
+            "required": False,
+            "schema": {"type": "string"},
+            "description": "ISO-8601 timestamp filter (inclusive).",
+        })
+
+    return params
+
+
+def _path_to_summary(path_str: str) -> str:
+    """Generate a human-readable summary from an OpenAPI path string."""
+    # /api/v1/openapi.json -> GET OpenAPI schema
+    if path_str == "/api/v1/openapi.json":
+        return "Return OpenAPI 3.1 schema document"
+    # /api/v1/events/{alert_id} -> Get event by alert_id
+    parts = path_str.strip("/").split("/")
+    if len(parts) >= 3:
+        resource = parts[2]
+        if "{alert_id}" in parts[3] if len(parts) > 3 else False:
+            return f"Get {resource} by ID"
+        if "{camera_id}" in parts[3] if len(parts) > 3 else False:
+            sub = parts[4] if len(parts) > 4 else resource
+            return f"Get {resource} {sub} by ID"
+    # /api/v1/gate/suppression-rules -> List suppression rules
+    return f"List {parts[2] if len(parts) > 2 else path_str}"
+
+
+def _refine_response_schema(handler, route: str, default_schema) -> dict[str, Any]:
+    """Refine the 200 response schema based on route-specific knowledge."""
+    # Camera snapshot returns snapshot_path, not data
+    if "snapshot" in route:
+        default_schema["content"]["application/json"]["schema"]["properties"] = {
+            "box_id": {"type": "string"},
+            "snapshot_path": {"type": "string"},
+            "request_id": {"type": "string"},
+            "code": {"type": "string"},
+            "status": {"type": "integer"},
+        }
+    return default_schema
+
 
 # ---------------------------------------------------------------------------
 # HTTP request handler
