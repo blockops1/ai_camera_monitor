@@ -122,6 +122,15 @@ class _ToolRegistry:
             return None
         if isinstance(result, dict):
             result = dict(result)
+            # Convert EventRecord objects in "data" list to dicts for JSON
+            if "data" in result and isinstance(result["data"], list):
+                converted = []
+                for item in result["data"]:
+                    try:
+                        converted.append({**asdict(item)})
+                    except TypeError:
+                        converted.append(item)
+                result["data"] = converted
             result["box_id"] = self._box_id
         elif isinstance(result, list):
             # List of dataclasses (e.g. list[CameraInfo]) — map asdict over items
@@ -249,6 +258,10 @@ def _register_tools(registry: _ToolRegistry) -> None:
                 "limit": {
                     "type": "integer",
                     "description": "Max events to return (default 50).",
+                },
+                "page_token": {
+                    "type": "string",
+                    "description": "Opaque cursor (base64 of last alert_id from previous page).",
                 },
             },
             "required": [],
