@@ -104,18 +104,41 @@ def _load_home_env() -> int:
     `from infra import ...` line below.  This ensures every infra module
     sees the correct env values when it reads os.environ at import time.
 
+    CRITICAL IMPORT-ORDER FIX (US-103x-2, 2026-10-09):
+    The .env load (steps 1-2) runs BEFORE the `from infra import paths`
+    import. Without this ordering, the infra init chain (alert_overrides_baseline
+    → quick_classifier) hits a RuntimeError because os.environ is empty at
+    import time and _require_env_lower_bool() finds no value for
+    MOTION_GATE_NIGHT_SUPPRESS_ENABLED.
+
     Returns:
         Total number of keys loaded/overridden across all files.
     """
     from dotenv import dotenv_values  # python-dotenv
-
-    from infra import paths as _p  # for cred file paths
 
     # Paths for steps 1-2: existing keys win (no override)
     candidate_paths = [
         _REPO_ENV_PATH,
         os.path.expanduser("~/.env"),
     ]
+
+    # CRITICAL: load .env BEFORE importing infra, because
+    # infra/__init__.py -> alert_overrides_baseline -> quick_classifier
+    # calls _require_env_lower_bool() at module-import time.
+    _keys_loaded_by_this_call: set[str] = set()
+    for env_path in candidate_paths:
+        if not os.path.exists(env_path):
+            continue
+        values = dotenv_values(env_path) or {}
+        for k, v in values.items():
+            if v is None:
+                continue
+            if k not in os.environ:
+                os.environ[k] = v
+                _keys_loaded_by_this_call.add(k)
+
+    # NOW safe to import infra (env vars are already loaded)
+    from infra import paths as _p  # for cred file paths
 
     # Paths for steps 3-5: override everything (last wins)
     creds_paths = [
@@ -131,19 +154,7 @@ def _load_home_env() -> int:
         str(_p.LLM_CREDS_FILE): "llm",
     }
 
-    total_loaded = 0
-
-    # Steps 1-2: .env and ~/.env (existing keys win)
-    for env_path in candidate_paths:
-        if not os.path.exists(env_path):
-            continue
-        values = dotenv_values(env_path) or {}
-        for k, v in values.items():
-            if v is None:
-                continue
-            if k not in os.environ:
-                os.environ[k] = v
-                total_loaded += 1
+    total_loaded = len(_keys_loaded_by_this_call)
 
     # Steps 3-5: per-app creds files (override everything)
     for env_path in creds_paths:
