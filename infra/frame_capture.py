@@ -471,13 +471,17 @@ class PersistentRTSPReader:
         self._clean_old(output_dir)
         out_paths: list[str] = []
         for i in range(count):
-            if i > 0:
+            if i == 2:
                 time.sleep(stride_s)
             with self._ring_lock:
-                if self._ring:
-                    frame = self._ring[-1]
-                else:
+                if not self._ring:
                     frame = None
+                elif i == 0 and len(self._ring) >= 7:
+                    frame = self._ring[-6]
+                elif i == 1 and len(self._ring) >= 3:
+                    frame = self._ring[-2]
+                else:
+                    frame = self._ring[-1]   # underflow or i>=2
             if frame is not None:
                 self._save_one(frame, output_dir, i + 1, out_paths)
             else:
@@ -536,7 +540,7 @@ class PersistentRTSPReader:
         out_paths: list[str],
     ) -> None:
         out_path = os.path.join(output_dir, f"frame_{n:03d}.png")
-        img.save(out_path, format="PNG", optimize=True)
+        img.save(out_path, format="PNG")
         out_paths.append(out_path)
 
     def _run_loop(self) -> None:

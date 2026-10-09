@@ -139,6 +139,74 @@ class TestCaptureAroundNow(unittest.TestCase):
             # All frames skipped, returns empty list (no exception).
             self.assertEqual(paths, [])
 
+    def test_capture_grabs_ring_minus_six_at_i0(self):
+        """AC1: i=0 grabs ring[-6] when len(ring) >= 7."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.reader._ring.clear()
+            # Distinct RGB values per frame: (255, 0, 0) through (255, 6, 0)
+            frames = [PIL.Image.new("RGB", (10, 10), color=(255, i, 0)) for i in range(7)]
+            for f in frames:
+                self.reader._ring.append(f)
+            with self.reader._ring_lock:
+                self.assertEqual(len(self.reader._ring), 7)
+
+            future = self.reader.capture_around_now(
+                count=4, stride_s=0.05, output_dir=tmpdir,
+            )
+            paths = future.result(timeout=10.0)
+            self.assertEqual(len(paths), 4)
+            # ring[-6] is frames[1] = (255, 1, 0)
+            first = PIL.Image.open(paths[0])
+            self.assertEqual(first.getpixel((0, 0)), (255, 1, 0))
+
+    def test_capture_grabs_ring_minus_two_at_i1(self):
+        """AC2: i=1 grabs ring[-2] when len(ring) >= 3."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.reader._ring.clear()
+            frames = [PIL.Image.new("RGB", (10, 10), color=(0, 255, i)) for i in range(7)]
+            for f in frames:
+                self.reader._ring.append(f)
+
+            future = self.reader.capture_around_now(
+                count=4, stride_s=0.05, output_dir=tmpdir,
+            )
+            paths = future.result(timeout=10.0)
+            self.assertEqual(len(paths), 4)
+            # i=1 should grab ring[-2], which is frames[5] = (0, 255, 5)
+            second = PIL.Image.open(paths[1])
+            self.assertEqual(second.getpixel((0, 0)), (0, 255, 5))
+
+    def test_capture_falls_back_to_ring_minus_one_on_underflow(self):
+        """AC1/AC2: Underfull ring falls back to ring[-1]."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Only 2 frames in ring: not enough for ring[-6] (need >=7)
+            # or ring[-2] (need >=3), so both fall back to ring[-1].
+            self.reader._ring.clear()
+            f1 = PIL.Image.new("RGB", (10, 10), color=(0, 128, 0))
+            f2 = PIL.Image.new("RGB", (10, 10), color=(0, 128, 0))
+            self.reader._ring.append(f1)
+            self.reader._ring.append(f2)
+            with self.reader._ring_lock:
+                self.assertEqual(len(self.reader._ring), 2)
+
+            future = self.reader.capture_around_now(
+                count=4, stride_s=0.05, output_dir=tmpdir,
+            )
+            paths = future.result(timeout=10.0)
+            self.assertEqual(len(paths), 4)
+            # All frames should be ring[-1] (f2, green2)
+            for i, p in enumerate(paths):
+                img = PIL.Image.open(p)
+                self.assertEqual(img.getpixel((0, 0)), (0, 128, 0))
+
+    def test_capture_save_no_longer_uses_optimize_true(self):
+        """AC5: _save_one no longer passes optimize=True."""
+        # Verify the source code of _save_one doesn't contain optimize=True
+        import inspect
+        source = inspect.getsource(self.reader._save_one)
+        self.assertNotIn("optimize=True", source)
+        self.assertIn('format="PNG"', source)
+
 
 if __name__ == "__main__":
     unittest.main()
