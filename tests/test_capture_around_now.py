@@ -55,7 +55,7 @@ class TestCaptureAroundNow(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             start = time.monotonic()
             future = self.reader.capture_around_now(
-                count=4, stride_s=2.0,  # long stride
+                count=4, stride_s=2.0,
                 output_dir=tmpdir,
             )
             elapsed = time.monotonic() - start
@@ -63,16 +63,14 @@ class TestCaptureAroundNow(unittest.TestCase):
                 elapsed, 0.05,
                 f"capture_around_now blocked for {elapsed:.3f}s (should be < 50ms)"
             )
-            # The Future is already resolved-less at this point.
             self.assertFalse(future.done())
-            # Wait for it to finish (takes 3 * 2.0 = 6s total).
-            future.result(timeout=15.0)
+            # US-104b: fixed 1.0s sleep, total ~1.0s.
+            future.result(timeout=5.0)
 
     def test_AC3_worker_thread_name_and_daemon(self):
         """AC3: Worker thread is daemon=True, named 'capture-{camera_id}'."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Use a long stride so the worker thread is still running
-            # when we enumerate it.
+            # Thread starts immediately on capture_around_now return.
             future = self.reader.capture_around_now(
                 count=4, stride_s=2.0, output_dir=tmpdir,
             )
@@ -85,8 +83,8 @@ class TestCaptureAroundNow(unittest.TestCase):
                     self.assertTrue(t.daemon, "Worker thread must be daemon=True")
                     break
             self.assertTrue(found, "Worker thread 'capture-TEST_CAM' not found")
-            # Now wait for the worker to finish.
-            future.result(timeout=10.0)
+            # Wait for the worker to finish (~1s with US-104b fixed sleep).
+            future.result(timeout=5.0)
 
     def test_AC4_exception_captured_into_future(self):
         """AC4: Exception in worker is captured into the Future."""
@@ -159,8 +157,8 @@ class TestCaptureAroundNow(unittest.TestCase):
             first = PIL.Image.open(paths[0])
             self.assertEqual(first.getpixel((0, 0)), (255, 1, 0))
 
-    def test_capture_grabs_ring_minus_two_at_i1(self):
-        """AC2: i=1 grabs ring[-2] when len(ring) >= 3."""
+    def test_capture_grabs_ring_minus_four_at_i1(self):
+        """US-104b: i=1 grabs ring[-4] when len(ring) >= 4."""
         with tempfile.TemporaryDirectory() as tmpdir:
             self.reader._ring.clear()
             frames = [PIL.Image.new("RGB", (10, 10), color=(0, 255, i)) for i in range(7)]
@@ -170,17 +168,25 @@ class TestCaptureAroundNow(unittest.TestCase):
             future = self.reader.capture_around_now(
                 count=4, stride_s=0.05, output_dir=tmpdir,
             )
-            paths = future.result(timeout=10.0)
+            paths = future.result(timeout=5.0)
             self.assertEqual(len(paths), 4)
-            # i=1 should grab ring[-2], which is frames[5] = (0, 255, 5)
+            # US-104b: i=1 grabs ring[-4], which is frames[3] = (0, 255, 3)
             second = PIL.Image.open(paths[1])
-            self.assertEqual(second.getpixel((0, 0)), (0, 255, 5))
+            self.assertEqual(second.getpixel((0, 0)), (0, 255, 3))
 
     def test_capture_falls_back_to_ring_minus_one_on_underflow(self):
-        """AC1/AC2: Underfull ring falls back to ring[-1]."""
+        """US-104b: Underfull ring returns partial frames or [].
+
+        With ring offsets [-6, -4, -2, -1]:
+        - ring[-6] needs len >= 6
+        - ring[-4] needs len >= 4
+        - ring[-2] needs len >= 2
+        - ring[-1] needs len >= 1
+        If the first offset fails (ring[-6]), return [].
+        If an intermediate offset fails, return whatever was captured.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Only 2 frames in ring: not enough for ring[-6] (need >=7)
-            # or ring[-2] (need >=3), so both fall back to ring[-1].
+            # Only 2 frames in ring: ring[-6] (needs >=6) fails → returns [].
             self.reader._ring.clear()
             f1 = PIL.Image.new("RGB", (10, 10), color=(0, 128, 0))
             f2 = PIL.Image.new("RGB", (10, 10), color=(0, 128, 0))
@@ -192,12 +198,9 @@ class TestCaptureAroundNow(unittest.TestCase):
             future = self.reader.capture_around_now(
                 count=4, stride_s=0.05, output_dir=tmpdir,
             )
-            paths = future.result(timeout=10.0)
-            self.assertEqual(len(paths), 4)
-            # All frames should be ring[-1] (f2, green2)
-            for i, p in enumerate(paths):
-                img = PIL.Image.open(p)
-                self.assertEqual(img.getpixel((0, 0)), (0, 128, 0))
+            paths = future.result(timeout=5.0)
+            # i=0 needs ring[-6], ring has only 2 → empty.
+            self.assertEqual(paths, [])
 
     def test_capture_save_no_longer_uses_optimize_true(self):
         """AC5: _save_one no longer passes optimize=True."""

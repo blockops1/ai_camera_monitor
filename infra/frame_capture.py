@@ -42,6 +42,7 @@ import os
 import threading
 import time
 from collections import deque
+from enum import Enum
 from pathlib import Path
 
 import av
@@ -53,6 +54,13 @@ RING_SIZE_DEFAULT = 12
 RECONNECT_BACKOFF_INITIAL = 1.0   # seconds
 RECONNECT_BACKOFF_MAX = 30.0
 RECONNECT_BACKOFF_MULT = 2.0
+
+
+class _capture_result(Enum):
+    """Return sentinels for _capture_worker early-exit paths."""
+    NOTHING_TO_CAPTURE = 0   # ring empty at i=0, return []
+    PARTIAL = 1              # some frames saved, return partial list
+
 
 # US-017e — Phase 6B.155 (PLAN §11.78). Cap on consecutive failure-driven
 # reconnects. After N attempts the failure loop stops hammering the camera
@@ -466,32 +474,63 @@ class PersistentRTSPReader:
 
         Called from a daemon thread so the Future is returned immediately
         to the caller.
+
+        Captures 4 frames with uniform 1.0s spacing (US-104b):
+        ring offsets [-6, -4, -2, -1] — i=3 sleeps 1.0s before grab.
         """
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         self._clean_old(output_dir)
         out_paths: list[str] = []
-        for i in range(count):
-            if i == 2:
-                time.sleep(stride_s)
-            with self._ring_lock:
-                if not self._ring:
-                    frame = None
-                elif i == 0 and len(self._ring) >= 7:
-                    frame = self._ring[-6]
-                elif i == 1 and len(self._ring) >= 3:
-                    frame = self._ring[-2]
-                else:
-                    frame = self._ring[-1]   # underflow or i>=2
-            if frame is not None:
-                self._save_one(frame, output_dir, i + 1, out_paths)
-            else:
-                log.warning(
-                    "capture_around_now: %s ring empty at i=%d, "
-                    "skipping frame",
-                    self._camera_id or "unknown",
-                    i,
-                )
+        # US-104b: uniform 1.0s spacing with explicit ring offsets.
+        # stride_s is no longer used for the capture-loop delay (the sleep
+        # is a fixed 1.0s); it is preserved in the signature for backwards
+        # compatibility with callers and tests.
+        offsets = [-6, -4, -2, -1]
+
+        # i=0: T-2.5s  (ring[-6] = 6 slots back at 2fps = 2.5s pre-webhook)
+        img = self._grab_frame(offsets[0])
+        if img is None:
+            return []
+        self._save_one(img, output_dir, 1, out_paths)
+
+        # i=1: T-1.5s  (ring[-4] = 4 slots back = 1.5s pre-webhook)
+        img = self._grab_frame(offsets[1])
+        if img is None:
+            return out_paths
+        self._save_one(img, output_dir, 2, out_paths)
+
+        # i=2: T-0.5s  (ring[-2] = 2 slots back = 0.5s pre-webhook)
+        img = self._grab_frame(offsets[2])
+        if img is None:
+            return out_paths
+        self._save_one(img, output_dir, 3, out_paths)
+
+        # i=3: T+0.5s  (sleep 1.0s, then ring[-1] = newest = ~0.5s post-webhook)
+        time.sleep(1.0)
+        img = self._grab_frame(offsets[3])
+        if img is None:
+            return out_paths
+        self._save_one(img, output_dir, 4, out_paths)
+
         return out_paths
+
+    def _grab_frame(self, offset: int) -> Image.Image | None:
+        """Grab a single frame from the ring buffer at the given negative offset.
+
+        Returns the PIL Image or None if the ring is too short.
+        Thread-safe via _ring_lock.
+        """
+        with self._ring_lock:
+            if len(self._ring) < abs(offset):
+                log.warning(
+                    "capture_around_now: %s ring too short for offset %d "
+                    "(len=%d), skipping frame",
+                    self._camera_id or "unknown",
+                    offset,
+                    len(self._ring),
+                )
+                return None
+            return self._ring[offset]
 
     def get_frames_by_offset(
         self,
