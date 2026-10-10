@@ -15,7 +15,7 @@ PUBLIC API:
     run() -> dict
         Scan all alert directories under data/frames/<camera_id>/<alert_id>/,
         delete those whose newest file is older than FRAME_RETENTION_HOURS,
-        and respect FRAME_MAX_BYTES (10 GB) disk budget.
+        and respect FARMSURV_FRAME_EVICT_HIGH_BYTES / LOW_BYTES disk budget.
         Returns {deleted_dirs: int, freed_bytes: int, errors: int}.
 
 DOES NOT DO:
@@ -25,8 +25,10 @@ DOES NOT DO:
     - Delete the _sentinels/ sentinel file
 
 CALLS INTO:
-    - infra.paths: DATA_DIR, FRAMES_DIR, FRAME_RETENTION_HOURS, FRAME_MAX_BYTES,
-      CLEANUP_LOG, ensure_dirs()
+    - infra.paths: DATA_DIR, FRAMES_DIR, FRAME_RETENTION_HOURS,
+      FARMSURV_FRAME_EVICT_HIGH_BYTES, FARMSURV_FRAME_EVICT_LOW_BYTES,
+      FARMSURV_CLEANUP_ALERT_ENABLED, CLEANUP_LOG, ensure_dirs()
+    - infra.telegram_alerts (threshold-crossing / recovery notifications)
     - logging (for cleanup log output)
 
 RELATED:
@@ -60,6 +62,16 @@ log.propagate = False
 last_tick_monotonic: float | None = None
 last_reclaimed_bytes: int | None = None
 
+# ---------------------------------------------------------------------------
+# Hysteresis state (US-104c).
+# _was_over_high: True when we previously saw disk >= HIGH threshold,
+#   False/None when we were below HIGH.
+# _was_under_low: True when we previously saw disk <= LOW threshold,
+#   False/None when we were above LOW.
+# ---------------------------------------------------------------------------
+_was_over_high: bool | None = None
+_was_under_low: bool | None = None
+
 
 def _now_epoch() -> float:
     """Return current time as epoch seconds (UTC)."""
@@ -78,6 +90,11 @@ def _dir_oldest_mtime(directory: Path) -> float:
     return oldest if found else 0.0
 
 
+def _human_gb(n_bytes: int) -> str:
+    """Return a human-friendly GB string (1 decimal)."""
+    return f"{n_bytes / 1e9:.1f}"
+
+
 def run() -> dict:
     """Scan and prune alert-scoped artifact directories older than retention.
 
@@ -88,13 +105,22 @@ def run() -> dict:
     2. If the newest file in the directory is older than
        ``FRAME_RETENTION_HOURS``, the entire directory (and empty parents)
        is removed.
-    3. If the total disk usage of FRAMES_DIR exceeds ``FRAME_MAX_BYTES``,
-       the oldest directories are evicted first regardless of age.
+    3. If the total disk usage of FRAMES_DIR exceeds
+       ``FARMSURV_FRAME_EVICT_HIGH_BYTES``, the oldest directories are evicted
+       until total <= ``FARMSURV_FRAME_EVICT_LOW_BYTES`` (one batch per run).
+
+    Hysteresis (US-104c): Telegram alerts fire only on state *transitions*,
+    not on every tick:
+      - under_low → at_or_above_high: ⚠️ "Cleanup threshold crossed" + evict
+      - at_or_above_high → under_low: ✅ "Cleanup recovered"
+      - any other: silent on Telegram, daemon.log only
 
     Returns:
         dict with keys ``deleted_dirs`` (int), ``freed_bytes`` (int),
         ``errors`` (int).
     """
+    global _was_over_high, _was_under_low, last_tick_monotonic, last_reclaimed_bytes
+
     # ------------------------------------------------------------------
     # Kill switch — FARMSURV_CLEANUP_DISABLED
     # ------------------------------------------------------------------
@@ -106,6 +132,10 @@ def run() -> dict:
     retention_seconds = paths.FRAME_RETENTION_HOURS * 3600
     now = _now_epoch()
     cutoff = now - retention_seconds
+
+    high_bytes = paths.FARMSURV_FRAME_EVICT_HIGH_BYTES
+    low_bytes = paths.FARMSURV_FRAME_EVICT_LOW_BYTES
+    alert_enabled = paths.FARMSURV_CLEANUP_ALERT_ENABLED
 
     stats = {"deleted_dirs": 0, "freed_bytes": 0, "errors": 0}
 
@@ -158,26 +188,74 @@ def run() -> dict:
                     stats["errors"] += 1
 
     # ------------------------------------------------------------------
-    # Phase 2: disk-budget enforcement — evict oldest if over limit
+    # Phase 2: disk-budget enforcement — evict oldest if over HIGH threshold
     # ------------------------------------------------------------------
-    if frames_dir.is_dir():
-        total_bytes = _total_bytes(frames_dir)
-        if total_bytes > paths.FRAME_MAX_BYTES:
-            evict_budget = total_bytes - paths.FRAME_MAX_BYTES
+    total_bytes = _total_bytes(frames_dir)
+    over_high = total_bytes >= high_bytes
+
+    if over_high:
+        # Evict until total <= LOW (not just down to HIGH — AC7)
+        target = low_bytes
+        evict_budget = total_bytes - target
+        if evict_budget > 0:
             evicted = _evict_by_oldest(frames_dir, evict_budget)
             stats["freed_bytes"] += evicted
 
+        # Log still-over message (daemon.log only)
+        total_bytes = _total_bytes(frames_dir)
+        log.warning(
+            "cleanup: disk over HIGH threshold: %s GB (cap %s GB), "
+            "evicting down to %s GB",
+            _human_gb(total_bytes), _human_gb(high_bytes), _human_gb(low_bytes),
+        )
+
     # ------------------------------------------------------------------
-    # Post-cleanup: if still over cap, alert Telegram
+    # Post-cleanup: recompute total bytes for hysteresis state machine
     # ------------------------------------------------------------------
     total_bytes = _total_bytes(frames_dir)
-    if total_bytes > paths.FRAME_MAX_BYTES:
-        alert_msg = (
-            f"cleanup exceeded 20 GB cap: {total_bytes / 1e9:.2f} GB"
-        )
-        telegram_alerts.send(alert_msg)
+    under_low = total_bytes <= low_bytes
 
-    global last_tick_monotonic, last_reclaimed_bytes
+    # ------------------------------------------------------------------
+    # Hysteresis state transitions (US-104c).
+    #
+    # We observe `over_high` BEFORE eviction (the pre-eviction disk state).
+    # This is the "threshold crossed" observation.  Eviction happens first,
+    # so `under_low` reflects post-eviction state.
+    #
+    # Transition logic:
+    #   under_low → observed_over_high : fire ⚠️ threshold-crossed alert
+    #   observed_over_high → under_low : fire ✅ recovery alert
+    #   any other : silent (daemon.log only)
+    # ------------------------------------------------------------------
+    if alert_enabled:
+        # Transition: under_low (prev) → observed_over_high (now, before eviction)
+        # "The disk has climbed out of the safe band and crossed the high threshold."
+        if _was_under_low is True and over_high:
+            alert_msg = (
+                f"⚠️ Cleanup threshold crossed: {_human_gb(total_bytes)} GB "
+                f"(cap {_human_gb(high_bytes)}). Evicting down to {_human_gb(low_bytes)} GB."
+            )
+            telegram_alerts.send(alert_msg)
+            log.info("cleanup: Telegram alert sent: %s", alert_msg)
+
+        # Transition: observed_over_high (prev) → under_low (now, after eviction)
+        # "The eviction successfully brought disk back into the safe band."
+        if _was_over_high is True and under_low:
+            alert_msg = (
+                f"✅ Cleanup recovered: {_human_gb(total_bytes)} GB "
+                f"(below {_human_gb(low_bytes)} GB target)."
+            )
+            telegram_alerts.send(alert_msg)
+            log.info("cleanup: Telegram alert sent: %s", alert_msg)
+
+        # Update state for next tick
+        _was_over_high = over_high
+        _was_under_low = under_low
+    else:
+        # Even with alerts disabled, update state so re-enabling picks up correctly
+        _was_over_high = over_high
+        _was_under_low = under_low
+
     last_tick_monotonic = time.monotonic()
     last_reclaimed_bytes = stats["freed_bytes"]
 

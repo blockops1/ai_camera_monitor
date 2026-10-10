@@ -82,9 +82,12 @@ RELATED:
       fixture, used by every test that touches files)
 """
 
+import logging
 import os
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+_log = logging.getLogger(__name__)
 
 PRODUCTION_MODE = os.environ.get("FARMSURV_PRODUCTION", "0") == "1"
 
@@ -285,6 +288,9 @@ ALERT_RETENTION_DAYS = 7
 # first regardless of age. Bounded cleanup — without this, a camera
 # that floods (e.g. solar-camera-motion-storm) can blow past the time
 # retention and fill the disk.
+# Legacy alias — superseded by FARMSURV_FRAME_EVICT_HIGH_BYTES / LOW_BYTES
+# but kept for backward-compat. cleanup.py falls back to these defaults
+# when the new vars are unset.
 FRAME_MAX_BYTES = 20 * 1024 * 1024 * 1024  # 20 GB
 
 # Cleanup control knobs — environment variables for runtime tuning.
@@ -292,6 +298,55 @@ FRAME_MAX_BYTES = 20 * 1024 * 1024 * 1024  # 20 GB
 # FARMSURV_CLEANUP_INTERVAL_MIN=N  →  cleanup runs every N minutes (default 60)
 FARMSURV_CLEANUP_DISABLED = int(os.environ.get('FARMSURV_CLEANUP_DISABLED', '0'))
 FARMSURV_CLEANUP_INTERVAL_MIN = int(os.environ.get('FARMSURV_CLEANUP_INTERVAL_MIN', '60'))
+
+# Cleanup hysteresis thresholds (US-104c, 2026-10-10).
+# Two-threshold system replaces the single FRAME_MAX_BYTES alert:
+#   FARMSURV_FRAME_EVICT_HIGH_BYTES (default from FRAME_MAX_BYTES = 20 GB)
+#     → alert + eviction trigger. When disk >= HIGH, fire one Telegram
+#       alert and evict until total <= LOW.
+#   FARMSURV_FRAME_EVICT_LOW_BYTES (default 10 GB)
+#     → eviction target. Eviction runs in one batch until total <= LOW.
+#   FARMSURV_CLEANUP_ALERT_ENABLED=1 (default 1 = ON)
+#     → Telegram alerts on threshold transitions. Set to 0 to silence
+#       Telegram entirely while keeping daemon.log transitions visible.
+# Backward compat: if only FRAME_MAX_BYTES is set (no new vars), HIGH
+# defaults to FRAME_MAX_BYTES value, LOW defaults to FRAME_MAX_BYTES / 2.
+# If LOW >= HIGH in env, fall back to defaults and log a warning (AC5).
+def _env_bytes(name: str, fallback: int) -> int:
+    """Read a byte-count env var. Falls back to `fallback` if unset."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return fallback
+    return int(raw)
+
+# HIGH threshold — derived from FRAME_MAX_BYTES unless explicitly set.
+# Defaults to the legacy FRAME_MAX_BYTES value so existing .env configs
+# keep the same alert trigger point (20 GB).
+_FRAME_EVICT_HIGH_DEFAULT = FRAME_MAX_BYTES
+# LOW threshold — defaults to HALF of FRAME_MAX_BYTES so the hysteresis
+# band is 10 GB wide by default (20 GB → 10 GB).
+_FRAME_EVICT_LOW_DEFAULT = FRAME_MAX_BYTES // 2
+
+_FRAME_EVICT_HIGH_BYTES = _env_bytes('FARMSURV_FRAME_EVICT_HIGH_BYTES', _FRAME_EVICT_HIGH_DEFAULT)
+_FRAME_EVICT_LOW_BYTES = _env_bytes('FARMSURV_FRAME_EVICT_LOW_BYTES', _FRAME_EVICT_LOW_DEFAULT)
+
+# Validate: LOW must be strictly less than HIGH.
+if _FRAME_EVICT_LOW_BYTES >= _FRAME_EVICT_HIGH_BYTES:
+    _log.warning(
+        "cleanup config: FARMSURV_FRAME_EVICT_LOW_BYTES (%d) >= "
+        "FARMSURV_FRAME_EVICT_HIGH_BYTES (%d); falling back to "
+        "HIGH=%d, LOW=%d",
+        _FRAME_EVICT_LOW_BYTES, _FRAME_EVICT_HIGH_BYTES,
+        _FRAME_EVICT_HIGH_DEFAULT, _FRAME_EVICT_LOW_DEFAULT,
+    )
+    FARMSURV_FRAME_EVICT_HIGH_BYTES = _FRAME_EVICT_HIGH_DEFAULT
+    FARMSURV_FRAME_EVICT_LOW_BYTES = _FRAME_EVICT_LOW_DEFAULT
+else:
+    FARMSURV_FRAME_EVICT_HIGH_BYTES = _FRAME_EVICT_HIGH_BYTES
+    FARMSURV_FRAME_EVICT_LOW_BYTES = _FRAME_EVICT_LOW_BYTES
+
+# Alert off-switch (US-104c).
+FARMSURV_CLEANUP_ALERT_ENABLED = int(os.environ.get('FARMSURV_CLEANUP_ALERT_ENABLED', '1'))
 
 # Audit log rotation
 AUDIT_RETENTION_DAYS = 90
