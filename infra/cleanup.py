@@ -193,6 +193,10 @@ def run() -> dict:
     total_bytes = _total_bytes(frames_dir)
     over_high = total_bytes >= high_bytes
 
+    # Capture pre-eviction size for the threshold-crossed alert message
+    # (total_bytes gets recomputed after eviction at lines 205/215)
+    pre_eviction_bytes = total_bytes
+
     if over_high:
         # Evict until total <= LOW (not just down to HIGH — AC7)
         target = low_bytes
@@ -232,7 +236,7 @@ def run() -> dict:
         # "The disk has climbed out of the safe band and crossed the high threshold."
         if _was_under_low is True and over_high:
             alert_msg = (
-                f"⚠️ Cleanup threshold crossed: {_human_gb(total_bytes)} GB "
+                f"⚠️ Cleanup threshold crossed: {_human_gb(pre_eviction_bytes)} GB "
                 f"(cap {_human_gb(high_bytes)}). Evicting down to {_human_gb(low_bytes)} GB."
             )
             telegram_alerts.send(alert_msg)
