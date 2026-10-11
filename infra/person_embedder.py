@@ -2,9 +2,9 @@
 
 STATUS: stable
 THREAD SAFETY: thread-safe (model cached at module level via a lazy loader;
-    timm models are read-only after creation, so concurrent embed calls are safe)
+    torch models are read-only after creation, so concurrent embed calls are safe)
 
-LOADER CHOICE: timm (CLIP-ViT-B/32, openai)
+LOADER CHOICE: transformers (CLIP-ViT-B/32, openai)
     CLIP-ViT-B/32 from openai produces 512-dim embeddings suitable
     for re-ID at small scale.
 
@@ -40,7 +40,7 @@ CALLED BY:
     - listener.pipeline_stage_person: person branch embedding step.
 
 CALLS INTO:
-    - timm: create_model, data.resolve_model_data_config, create_transform
+    - transformers: CLIPModel, CLIPProcessor (from_pretrained)
     - torch: tensor creation, inference, cpu()
     - PIL.Image: image loading/conversion
     - numpy: array operations
@@ -112,24 +112,16 @@ def load_clip() -> nn.Module:
         _model = _DummyModel()  # type: ignore[assignment]
         return _model
 
-    import timm
-    from timm.data.config import resolve_model_data_config
-    from timm.data.transforms_factory import create_transform
+    from transformers import CLIPModel, CLIPProcessor
 
     logger.info("Loading CLIP-ViT-B/32 from hf-hub:openai/clip-vit-base-patch32 ...")
     t0 = time.time()
 
-    loaded_model: nn.Module = timm.create_model(
-        "hf-hub:openai/clip-vit-base-patch32",
-        pretrained=True,
-        num_classes=0,
-    )
+    loaded_model: nn.Module = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
     loaded_model.eval()
     loaded_model.requires_grad_(False)
 
-    # Preprocessing config
-    data_cfg = resolve_model_data_config(loaded_model)
-    _transform = create_transform(**data_cfg)
+    _transform = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
     elapsed = time.time() - t0
     logger.info("CLIP-ViT-B/32 loaded in %.1fs (%s)", elapsed, _model_dir())
@@ -179,10 +171,12 @@ def embed_person_crop(crop_path: str) -> np.ndarray:
     try:
         model = load_clip()
         img = Image.open(crop_path).convert("RGB")
-        tensor = _transform(img).unsqueeze(0)  # type: ignore[operator]
+        # CLIPProcessor returns {"pixel_values": tensor}, not a raw tensor.
+        inputs = _transform(images=img, return_tensors="pt")  # type: ignore[operator]
+        tensor = inputs["pixel_values"]
 
         with torch.no_grad():
-            embedding = model(tensor)
+            embedding = model.get_image_features(tensor)
 
         return embedding.squeeze(0).cpu().numpy().astype(np.float32)
     except Exception as exc:
@@ -206,14 +200,13 @@ def embed_person_batch(crop_paths: list[str]) -> np.ndarray:
 
     try:
         model = load_clip()
-        tensors = []
-        for path in crop_paths:
-            img = Image.open(path).convert("RGB")
-            tensors.append(_transform(img))  # type: ignore[operator]
-        batch = torch.stack(tensors)
+        imgs = [Image.open(path).convert("RGB") for path in crop_paths]
+        # CLIPProcessor handles batches natively.
+        inputs = _transform(images=imgs, return_tensors="pt")  # type: ignore[operator]
+        batch = inputs["pixel_values"]
 
         with torch.no_grad():
-            embeddings = model(batch)
+            embeddings = model.get_image_features(batch)
 
         return embeddings.cpu().numpy().astype(np.float32)
     except Exception as exc:
