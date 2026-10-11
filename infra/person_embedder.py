@@ -31,7 +31,7 @@ PUBLIC API:
         Shape (512,) float32.
 
 DOES NOT DO:
-    - Download model weights -- uses timm's built-in HuggingFace hub loading.
+    - Download model weights -- uses transformers' from_pretrained().
     - Fine-tune or train the model (pretrained weights only).
     - Match people (see infra.person_matcher).
 
@@ -92,7 +92,7 @@ def _model_dir() -> str:
 def load_clip() -> nn.Module:
     """Lazy-load the CLIP-ViT-B/32 model and cache it.
 
-    Uses timm to create the model from HuggingFace hub. The model is
+    Uses transformers CLIPModel.from_pretrained() to load the model. The model is
     cached at module level so subsequent calls return the same instance.
 
     Returns:
