@@ -49,7 +49,7 @@ def main() -> None:
     # Force the env var to 1 for this process (listener may have loaded it already)
     os.environ["PERSON_EMBEDDER_LIVE"] = "1"
 
-    from infra.person_embedder import embed_person_crop, load_clip  # noqa: E402
+    from infra.person_embedder import embed_person_crop, load_clip
 
     # Trigger model load explicitly
     logger.info("Forcing CLIP model load via load_clip() ...")
