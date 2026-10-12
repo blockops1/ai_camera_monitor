@@ -12,7 +12,7 @@ INPUTS:
 OUTPUTS:
     - Appends an entry to known_people.json.
     - Writes / updates embeddings.npz under keys:
-        {person_id}__{image_filename}  - per-image 512-dim vector
+        {person_id}__{cam_dir}__{image_filename}  - per-image 512-dim vector
         {person_id}__avg               - mean embedding across all images
     - Prints the enrolled person's id and label to stdout.
 
@@ -26,10 +26,9 @@ DOES NOT DO:
     - Network access.
 
 CALLS INTO:
-    - infra.person_embedder.embed_image() - 512-dim vector per image.
+    - infra.person_embedder.embed_person_crop() - 512-dim vector per image.
     - numpy - .npz save/load for embeddings.
     - json - known_people.json read/write.
-    - PIL.Image - image loading.
 
 RELATED:
     - docs/PHASE-V2-059-PRD-person-body-recognition.json
@@ -47,12 +46,11 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PIL import Image
 
 # ---------------------------------------------------------------------------
 # Constants - paths under project data/known/people/
 # ---------------------------------------------------------------------------
-PEOPLE_DIR: Path = Path(__file__).resolve().parents[2] / "data" / "known" / "people"
+PEOPLE_DIR: Path = Path(__file__).resolve().parents[1] / "data" / "known" / "people"
 KNOWN_PEOPLE_JSON: Path = PEOPLE_DIR / "known_people.json"
 EMBEDDINGS_NPZ: Path = PEOPLE_DIR / "embeddings.npz"
 
@@ -108,15 +106,16 @@ def _save_embeddings(embeddings: dict[str, np.ndarray]) -> None:
 
 def _embed_image_path(image_path: str, person_id: str) -> tuple[np.ndarray, str]:
     """Load an image file, produce a 512-dim embedding, return (vector, key)."""
-    img = Image.open(image_path).convert("RGB")
-    from infra.person_embedder import embed_image
+    from infra.person_embedder import embed_person_crop
 
-    vec = embed_image(img)
+    vec = embed_person_crop(image_path)
     assert vec.shape == (512,), (
         f"Expected embedding shape (512,), got {vec.shape}"
     )
-    filename = os.path.basename(image_path)
-    key = f"{person_id}__{filename}"
+    # Use the full resolved path as key to avoid filename collisions
+    # when multiple crop_a.png / crop_b.png from different alerts are enrolled.
+    resolved = Path(image_path).resolve()
+    key = f"{person_id}__{resolved.parent.name}__{resolved.name}"
     return vec, key
 
 
