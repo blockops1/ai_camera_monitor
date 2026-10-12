@@ -425,10 +425,7 @@ def render_html(report: dict[str, Any]) -> str:
             f"</tr>"
         )
 
-    # Webhook activity row
-    webhook_cells = " ".join(
-        f'<td class="num">{webhooks.get(c["alias"], 0)}</td>' for c in CAMS
-    )
+    # Webhook totals
     webhook_total = sum(v for k, v in webhooks.items() if k != "other")
     webhook_other = webhooks.get("other", 0)
 
@@ -439,8 +436,6 @@ def render_html(report: dict[str, Any]) -> str:
         f"{disk_free} GB free" if disk_free is not None else "—"
     )
     log_html = f"{disk_log} MB" if disk_log is not None else "—"
-
-    error_class = "section-bad" if errors > 50 else "section-ok"
 
     html = f"""<!doctype html>
 <html lang="en">
