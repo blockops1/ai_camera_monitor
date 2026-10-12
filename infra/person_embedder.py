@@ -176,7 +176,10 @@ def embed_person_crop(crop_path: str) -> np.ndarray:
         tensor = inputs["pixel_values"]
 
         with torch.no_grad():
-            embedding = model.get_image_features(tensor)
+            # transformers 5.x: get_image_features returns BaseModelOutputWithPooling;
+            # the image embedding is on .pooler_output. (Was a raw tensor in 4.x.)
+            output = model.get_image_features(tensor)
+            embedding = output.pooler_output if hasattr(output, "pooler_output") else output
 
         return embedding.squeeze(0).cpu().numpy().astype(np.float32)
     except Exception as exc:
@@ -206,7 +209,10 @@ def embed_person_batch(crop_paths: list[str]) -> np.ndarray:
         batch = inputs["pixel_values"]
 
         with torch.no_grad():
-            embeddings = model.get_image_features(batch)
+            # transformers 5.x: get_image_features returns BaseModelOutputWithPooling;
+            # the image embeddings are on .pooler_output. (Was a raw tensor in 4.x.)
+            output = model.get_image_features(batch)
+            embeddings = output.pooler_output if hasattr(output, "pooler_output") else output
 
         return embeddings.cpu().numpy().astype(np.float32)
     except Exception as exc:
