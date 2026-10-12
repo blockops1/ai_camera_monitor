@@ -726,31 +726,33 @@ class _APIHandler(BaseHTTPRequestHandler):
             self._log_access("POST", parsed.path, 401, elapsed)
             return
 
-        # Read body
-        content_length = int(self.headers.get("Content-Length", 0))
-        if content_length == 0:
-            self._send_json(400, {
-                "error": "Parse error: empty body",
-                "request_id": self._request_id,
-            })
-            elapsed = (time.monotonic() - start) * 1000
-            self._log_access("POST", parsed.path, 400, elapsed)
-            return
-
-        body = self.rfile.read(content_length)
-        try:
-            data = json.loads(body)
-        except json.JSONDecodeError:
-            self._send_json(400, {
-                "error": "Parse error: invalid JSON",
-                "request_id": self._request_id,
-            })
-            elapsed = (time.monotonic() - start) * 1000
-            self._log_access("POST", parsed.path, 400, elapsed)
-            return
-
         # Route POST requests
         if parsed.path == "/api/v1/identities/people":
+            # Body parsing is route-specific: empty-body check only applies
+            # to the identities/people route so that POSTs to other routes
+            # still return 405 (Method Not Allowed) instead of 400.
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length == 0:
+                self._send_json(400, {
+                    "error": "Parse error: empty body",
+                    "request_id": self._request_id,
+                })
+                elapsed = (time.monotonic() - start) * 1000
+                self._log_access("POST", parsed.path, 400, elapsed)
+                return
+
+            body = self.rfile.read(content_length)
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError:
+                self._send_json(400, {
+                    "error": "Parse error: invalid JSON",
+                    "request_id": self._request_id,
+                })
+                elapsed = (time.monotonic() - start) * 1000
+                self._log_access("POST", parsed.path, 400, elapsed)
+                return
+
             try:
                 result = self._handle_post_enroll_person(data)
                 status, resp = result
