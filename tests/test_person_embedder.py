@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 # Set required env vars BEFORE importing infra (infra/__init__.py imports
 # modules that call _require_env at module level).
-os.environ.setdefault("PERSON_EMBEDDER_LIVE", "0")
+os.environ["PERSON_EMBEDDER_LIVE"] = "0"
 os.environ.setdefault("MOTION_GATE_NIGHT_SUPPRESS_ENABLED", "0")
 os.environ.setdefault("FARMSURV_DATA_DIR", "data")
 
