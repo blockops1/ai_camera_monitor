@@ -201,7 +201,8 @@ def get_per_cam_status() -> list[dict[str, Any]]:
         try:
             r = subprocess.run(
                 [
-                    str(REOLINK_CLI), "--host", f"{cam['ip']}:9000", "--user", "admin",
+                    str(REOLINK_CLI), "--gateway-addr", "127.0.0.1:9000",
+                    "--host", f"{cam['ip']}:9000", "--user", "admin",
                     "config", "get", "performance", "--output", "json",
                 ],
                 env=env, capture_output=True, text=True, timeout=8,
@@ -218,7 +219,8 @@ def get_per_cam_status() -> list[dict[str, Any]]:
         try:
             r = subprocess.run(
                 [
-                    str(REOLINK_CLI), "--host", f"{cam['ip']}:9000", "--user", "admin",
+                    str(REOLINK_CLI), "--gateway-addr", "127.0.0.1:9000",
+                    "--host", f"{cam['ip']}:9000", "--user", "admin",
                     "encode", "get", "--output", "json",
                 ],
                 env=env, capture_output=True, text=True, timeout=8,
