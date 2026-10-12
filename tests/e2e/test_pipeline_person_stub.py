@@ -175,31 +175,35 @@ class TestPersonTg3Path:
 
 
 @pytest.mark.e2e
-class TestPersonFrontBackGate:
-    """AC4: Person matcher is gated to FRONT/BACK cameras only.
+class TestPersonNoGate:
+    """AC4: Person matcher runs on ALL cameras (no FRONT/BACK gate).
 
-    OUTSIDE_* cameras must NOT fire the person branch (both stage_perform_match
-    and stage_build_tg3 return no-match/empty).
+    OUTSIDE_* cameras now proceed through the person branch and produce
+    TG#3 (gate removed in US-106b).
     """
 
-    def test_outside_camera_perform_match_skips_person(self):
-        """stage_perform_match(mode='person', camera_label='OUTSIDE_BACK_SOLAR') -> no-match."""
+    def test_outside_camera_perform_match_proceeds(self):
+        """stage_perform_match(mode='person', camera_label='OUTSIDE_BACK_SOLAR') -> runs matcher."""
         vm2 = _make_vm2("person", identity_markers=["john_doe"])
         result = stage_perform_match("person", vm2, camera_label="OUTSIDE_BACK_SOLAR")
 
-        assert result["matched"] is False
+        # Tag 'john_doe' is in synthetic candidates -> matched=True
+        assert result["matched"] is True
+        assert result["tag"] == "john_doe"
 
-    def test_outside_front_camera_perform_match_skips_person(self):
-        """stage_perform_match(mode='person', camera_label='OUTSIDE_FRONT_SOLAR') -> no-match."""
+    def test_outside_front_camera_perform_match_proceeds(self):
+        """stage_perform_match(mode='person', camera_label='OUTSIDE_FRONT_SOLAR') -> runs matcher."""
         vm2 = _make_vm2("person", identity_markers=["john_doe"])
         result = stage_perform_match("person", vm2, camera_label="OUTSIDE_FRONT_SOLAR")
 
-        assert result["matched"] is False
+        # Tag 'john_doe' is in synthetic candidates -> matched=True
+        assert result["matched"] is True
+        assert result["tag"] == "john_doe"
 
-    def test_outside_camera_build_tg3_returns_empty(self):
-        """stage_build_tg3(mode='person', camera_label='OUTSIDE_BACK_SOLAR') -> {}."""
-        match_result = {"matched": True, "candidate": {"label": "John Doe"}}
-        vm2 = {"class": "person"}
+    def test_outside_camera_build_tg3_proceeds(self):
+        """stage_build_tg3(mode='person', camera_label='OUTSIDE_BACK_SOLAR') -> valid caption."""
+        match_result = {"matched": True, "tag": "john_doe"}
+        vm2 = {"class": "person", "identity_markers": ["john_doe"]}
         tg3 = stage_build_tg3(
             mode="person",
             match_result=match_result,
@@ -210,7 +214,8 @@ class TestPersonFrontBackGate:
             alert={"id": "evt-001", "timestamp": "2026-09-26T10:00:00Z"},
         )
 
-        assert tg3 == {}
+        assert "caption" in tg3
+        assert "OUTSIDE_BACK_SOLAR" in tg3["caption"]
 
     def test_back_camera_perform_match_allowed(self):
         """stage_perform_match(mode='person', camera_label='BACK') -> match proceeds."""
@@ -221,8 +226,14 @@ class TestPersonFrontBackGate:
 
     def test_back_camera_build_tg3_allowed(self):
         """stage_build_tg3(mode='person', camera_label='BACK') -> valid caption."""
-        match_result = {"matched": True, "candidate": {"label": "John Doe"}}
-        vm2 = {"class": "person"}
+        # Match shape with label for formatter (mimics cosine-match shape).
+        match_result = {
+            "matched": True,
+            "candidate": {"id": "john_doe", "label": "john_doe"},
+            "cosine_score": 0.0,
+            "tier1_score": 0.0,
+        }
+        vm2 = {"class": "person", "identity_markers": ["john_doe"]}
         tg3 = stage_build_tg3(
             mode="person",
             match_result=match_result,
@@ -234,10 +245,10 @@ class TestPersonFrontBackGate:
         )
 
         assert "caption" in tg3
-        assert "John Doe" in tg3["caption"]
+        assert "john_doe" in tg3["caption"]
 
     def test_vehicle_branch_unaffected_by_gate(self):
-        """Animal mode (any camera) proceeds -- only person is gated."""
+        """Animal mode (any camera) proceeds -- person gate removal doesn't affect animal."""
         vm2_animal = {"class": "animal", "crop_a_path": "/tmp/fake.jpg"}
         result = stage_perform_match("animal", vm2_animal, camera_label="OUTSIDE_FRONT_SOLAR")
 
