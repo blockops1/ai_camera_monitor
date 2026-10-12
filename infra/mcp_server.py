@@ -329,6 +329,35 @@ def _register_tools(registry: _ToolRegistry) -> None:
         input_schema={"type": "object", "properties": {}},
     )(identities.list_known_animals)
 
+    registry.tool(
+        name="enroll_person",
+        description="Enroll a known person with photos and metadata. Writes to data/known/people/known_people.json and embeddings.npz.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Display name / label for the person.",
+                },
+                "id": {
+                    "type": "string",
+                    "description": "Unique person identifier.",
+                },
+                "identity_markers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Identity marker tokens for matching (e.g. ['red-jacket', 'beard']).",
+                },
+                "image_paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Local file paths to sample images for enrollment.",
+                },
+            },
+            "required": ["name", "id", "image_paths"],
+        },
+    )(identities.enroll_known_person)
+
     # ---- listener ----
 
     registry.tool(

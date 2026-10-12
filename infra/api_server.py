@@ -692,8 +692,124 @@ class _APIHandler(BaseHTTPRequestHandler):
         self._send_json(405, body)
 
     def do_POST(self):
-        self._request_path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        self._request_path = parsed.path
+        self._request_id = self._generate_request_id()
+
+        start = time.monotonic()
+
+        # Auth check for all /api/* routes
+        if not parsed.path.startswith("/api/"):
+            self._send_json(404, {"error": "Not found"})
+            elapsed = (time.monotonic() - start) * 1000
+            self._log_access("POST", parsed.path, 404, elapsed)
+            return
+
+        auth_header = self.headers.get("Authorization")
+        if not _authenticate(auth_header):
+            body_str = json.dumps({
+                "request_id": self._request_id,
+                "code": "unauthorized",
+                "error": "Unauthorized: missing or invalid bearer token",
+                "status": 401,
+            })
+            encoded = body_str.encode("utf-8")
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("WWW-Authenticate", 'Bearer realm="farm-api"')
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(encoded)
+            elapsed = (time.monotonic() - start) * 1000
+            self._log_access("POST", parsed.path, 401, elapsed)
+            return
+
+        # Read body
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length == 0:
+            self._send_json(400, {
+                "error": "Parse error: empty body",
+                "request_id": self._request_id,
+            })
+            elapsed = (time.monotonic() - start) * 1000
+            self._log_access("POST", parsed.path, 400, elapsed)
+            return
+
+        body = self.rfile.read(content_length)
+        try:
+            data = json.loads(body)
+        except json.JSONDecodeError:
+            self._send_json(400, {
+                "error": "Parse error: invalid JSON",
+                "request_id": self._request_id,
+            })
+            elapsed = (time.monotonic() - start) * 1000
+            self._log_access("POST", parsed.path, 400, elapsed)
+            return
+
+        # Route POST requests
+        if parsed.path == "/api/v1/identities/people":
+            try:
+                result = self._handle_post_enroll_person(data)
+                status, resp = result
+            except Exception:
+                log.exception("api: POST /api/v1/identities/people failed")
+                self._request_id = self._generate_request_id()
+                self._send_json(500, {
+                    "error": "internal error",
+                    "request_id": self._request_id,
+                })
+                elapsed = (time.monotonic() - start) * 1000
+                self._log_access("POST", parsed.path, 500, elapsed)
+                return
+            self._send_json(status, resp)
+            elapsed = (time.monotonic() - start) * 1000
+            self._log_access("POST", parsed.path, status, elapsed)
+            return
+
         self._send_405_json()
+        elapsed = (time.monotonic() - start) * 1000
+        self._log_access("POST", parsed.path, 405, elapsed)
+
+    def _handle_post_enroll_person(self, data: dict) -> tuple[int, dict]:
+        """Handle POST /api/v1/identities/people — enroll a known person."""
+        from infra.farm_api import enroll_known_person
+
+        name = data.get("name")
+        person_id = data.get("id")
+        identity_markers = data.get("identity_markers", [])
+        image_paths = data.get("image_paths", [])
+
+        if not name or not person_id:
+            return 400, {
+                "error": "Bad request: 'name' and 'id' are required",
+                "request_id": self._request_id,
+            }
+        if not image_paths or not isinstance(image_paths, list):
+            return 400, {
+                "error": "Bad request: 'image_paths' must be a non-empty list",
+                "request_id": self._request_id,
+            }
+
+        try:
+            entry = enroll_known_person(
+                name=name,
+                person_id=person_id,
+                identity_markers=identity_markers,
+                image_paths=image_paths,
+            )
+            return 200, {
+                "box_id": _BOX_ID,
+                "request_id": self._request_id,
+                "data": entry,
+            }
+        except ValueError as exc:
+            return 409, {
+                "error": str(exc),
+                "request_id": self._request_id,
+            }
 
     def do_PUT(self):
         self._request_path = urlparse(self.path).path

@@ -1,14 +1,14 @@
-"""farm_api — Read-only system API for the farm-surveillance pipeline.
+"""farm_api — System API for the farm-surveillance pipeline.
 
-STATUS: alpha — V2-068, one resource group per module.
-THREAD SAFETY: read-only; safe for concurrent access.
+STATUS: alpha — V2-068, one resource group per module; write path US-106a.
+THREAD SAFETY: read operations are read-only; write operations serialize via file I/O.
 
 RESOURCE GROUPS:
     cameras      — CameraInfo, CameraHealth, list_cameras, get_camera_health, get_camera_snapshot
     events       — EventRecord re-export, list_events, get_event
     gate         — GateConfig, SuppressionRule, get_gate_config, list_suppression_rules
     cooldowns    — Cooldown, list_active_cooldowns
-    identities   — PersonIdentity, VehicleIdentity, AnimalIdentity, list_*
+    identities   — PersonIdentity, VehicleIdentity, AnimalIdentity, list_*, enroll_known_person
     listener     — ListenerStatus, ErrorRecord, get_listener_status, get_recent_errors
     telegram     — TelegramStatus, get_telegram_status
     vision       — VisionStatus, get_vision_status
@@ -16,9 +16,9 @@ RESOURCE GROUPS:
 
 USAGE:
     from infra.farm_api.cameras import list_cameras, get_camera_health
+    from infra.farm_api.identities import list_known_people, enroll_known_person
 
-All functions are pure or read from well-known filesystem paths.
-No transport awareness — the MCP server is the only consumer today.
+Transport: MCP server (infra.mcp_server) + REST API (infra.api_server).
 """
 
 __all__ = [
@@ -37,6 +37,7 @@ __all__ = [
     "EventRecord",
     # gate
     "GateConfig",
+    # listener
     "ListenerStatus",
     "PersonIdentity",
     "SuppressionRule",
@@ -45,6 +46,8 @@ __all__ = [
     "VehicleIdentity",
     # vision
     "VisionStatus",
+    "enroll_known_person",
+    # public functions
     "get_camera_health",
     "get_camera_snapshot",
     "get_config",
@@ -93,6 +96,7 @@ from infra.farm_api.identities import (
     AnimalIdentity,
     PersonIdentity,
     VehicleIdentity,
+    enroll_known_person,
     list_known_animals,
     list_known_people,
     list_known_vehicles,
