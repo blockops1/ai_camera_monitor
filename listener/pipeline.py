@@ -244,21 +244,6 @@ def stage_build_tg2(
     )
 
 
-def _is_person_camera(camera_label: str) -> bool:
-    """Return True when the camera is a FRONT or BACK camera (not OUTSIDE_*).
-
-    Person matcher branch is gated to FRONT/BACK cameras only — OUTSIDE_*
-    cameras use animal behavior only (no person matching).
-
-    Args:
-        camera_label: Human-readable camera name (e.g. 'FRONT', 'OUTSIDE_BACK_SOLAR').
-
-    Returns:
-        True for FRONT/BACK cameras; False for OUTSIDE_* or any other prefix.
-    """
-    return camera_label.startswith(("FRONT", "BACK"))
-
-
 def stage_perform_match(
     mode: str,
     vm2_result: dict,
@@ -267,21 +252,11 @@ def stage_perform_match(
     """Stage 12: per-class vehicle/person/animal match.
 
     Returns the match result dict.
-
-    Person matcher is gated: only executes when camera_label is a
-    FRONT or BACK camera (see _is_person_camera). OUTSIDE_* cameras
-    skip the person branch and return a no-match result.
     """
     if mode == "vehicle":
         candidates = _load_candidates()
         return match_vehicle(vm2_result, candidates)
     elif mode == "person":
-        if not _is_person_camera(camera_label):
-            log.info(
-                f"pipeline: person match skipped for camera={camera_label} "
-                f"(not FRONT/BACK, returning no-match)"
-            )
-            return {"matched": False}
         candidates = _load_person_candidates()
         return match_person(vm2_result, candidates)
     elif mode == "animal":
@@ -304,9 +279,6 @@ def stage_build_tg3(
     Returns the tg3 dict. The send_match_alert responsibility has been
     moved to daemon.py (per-stage dispatch, US-050b).
 
-    Person matcher branch is gated to FRONT/BACK cameras only —
-    OUTSIDE_* cameras get an empty dict (no person TG#3).
-
     Args:
         mode: VM1 classification ('vehicle', 'person', 'animal').
         match_result: Match result dict from stage_perform_match.
@@ -317,18 +289,9 @@ def stage_build_tg3(
         alert: Parent alert dict.
 
     Returns:
-        Telegram-ready message dict with 'caption' and 'photos' keys,
-        or empty dict when person branch is gated off.
+        Telegram-ready message dict with 'caption' and 'photos' keys.
     """
     if mode not in ("vehicle", "person", "animal"):
-        return {}
-
-    # Person matcher is gated: only FRONT/BACK cameras produce person TG#3.
-    if mode == "person" and not _is_person_camera(camera_label):
-        log.info(
-            f"pipeline: person TG#3 skipped for camera={camera_label} "
-            f"(not FRONT/BACK, returning empty)"
-        )
         return {}
 
     return build_match_message(
