@@ -43,8 +43,8 @@ def _cameras_e2e_env(tmp_path: Path):
     creds_file = tmp_path / "camera-creds.env"
     creds_file.write_text(_TEST_CREDS)
 
-    # Write real-ish frame files (the fixture name is "Front Door Outside")
-    frames_dir = tmp_path / "data" / "frames" / "Front Door Outside" / "test-alert-id"
+    # Write real-ish frame files under the camera's uppercase prefix dir
+    frames_dir = tmp_path / "data" / "frames" / "FRONT" / "test-alert-id"
     frames_dir.mkdir(parents=True)
     (frames_dir / "frame_001.png").write_bytes(b"fake png data")
     (frames_dir / "frame_002.png").write_bytes(b"fake png data 2")

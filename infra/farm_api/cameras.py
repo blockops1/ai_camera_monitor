@@ -164,8 +164,8 @@ def get_camera_health(camera_id: str) -> CameraHealth | None:
     if cam is None:
         return None
 
-    camera_name = cam.get("name", camera_id)
-    frames_dir = Path(FRAMES_DIR) / camera_name
+    camera_prefix = cam.get("prefix", camera_id)
+    frames_dir = Path(FRAMES_DIR) / camera_prefix
 
     last_frame_at = None
     online = False
@@ -195,7 +195,7 @@ def get_camera_health(camera_id: str) -> CameraHealth | None:
 def get_camera_snapshot(camera_id: str) -> Path | None:
     """Return the path to the latest frame for a camera.
 
-    Reads from data/frames/<camera_name>/ — finds the newest alert
+    Reads from data/frames/<camera_prefix>/ — finds the newest alert
     directory, then the newest frame file within it.
 
     Args:
@@ -208,8 +208,8 @@ def get_camera_snapshot(camera_id: str) -> Path | None:
     if cam is None:
         return None
 
-    camera_name = cam.get("name", camera_id)
-    frames_dir = Path(FRAMES_DIR) / camera_name
+    camera_prefix = cam.get("prefix", camera_id)
+    frames_dir = Path(FRAMES_DIR) / camera_prefix
 
     if not frames_dir.is_dir():
         return None
