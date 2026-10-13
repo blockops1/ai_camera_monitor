@@ -50,6 +50,23 @@ from infra.mcp_auth import authenticate, validate_token, www_authenticate_header
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Valid camera IDs for JSON Schema enum on camera_id parameters
+# ---------------------------------------------------------------------------
+# Derive from camera_creds so adding a camera auto-updates the MCP schema.
+# Falls back to empty list if camera_creds cannot be imported (e.g. missing
+# camera-creds.env at import time).
+try:
+    from infra.camera_creds import get_all_cameras
+
+    _CAMERAS = get_all_cameras()
+    VALID_CAMERA_PREFIXES: list[str] = sorted({
+        info.get("prefix", name.upper())
+        for name, info in _CAMERAS.items()
+    })
+except (ImportError, KeyError):
+    VALID_CAMERA_PREFIXES: list[str] = []
+
+# ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
@@ -216,6 +233,7 @@ def _register_tools(registry: _ToolRegistry) -> None:
                 "camera_id": {
                     "type": "string",
                     "description": "Camera prefix, e.g. FRONT, BACK.",
+                    "enum": VALID_CAMERA_PREFIXES,
                 },
             },
             "required": ["camera_id"],
@@ -231,6 +249,7 @@ def _register_tools(registry: _ToolRegistry) -> None:
                 "camera_id": {
                     "type": "string",
                     "description": "Camera prefix, e.g. FRONT, BACK.",
+                    "enum": VALID_CAMERA_PREFIXES,
                 },
             },
             "required": ["camera_id"],
@@ -246,6 +265,7 @@ def _register_tools(registry: _ToolRegistry) -> None:
                 "camera_id": {
                     "type": "string",
                     "description": "Camera prefix, e.g. FRONT, BACK.",
+                    "enum": VALID_CAMERA_PREFIXES,
                 },
             },
             "required": ["camera_id"],
@@ -265,6 +285,7 @@ def _register_tools(registry: _ToolRegistry) -> None:
                 "camera_id": {
                     "type": "string",
                     "description": "Filter by camera prefix.",
+                    "enum": VALID_CAMERA_PREFIXES,
                 },
                 "since": {
                     "type": "string",
@@ -481,7 +502,9 @@ def _handle_request(
             return 404, _json_error(id_val, -32601, str(exc), request_id)
         except Exception as exc:
             log.exception("mcp: tool call %s failed", tool_name)
-            return 500, _json_error(id_val, -32603, f"Internal error: {exc}", request_id)
+            return 500, _json_error(
+                id_val, -32603, f"Internal error: {exc}", request_id
+            )
 
     if method == "notifications/initialized":
         # Notification, no response needed
@@ -564,6 +587,7 @@ class _MCPHandler(BaseHTTPRequestHandler):
 
         # Fix 5: Per-request access log (capture start time)
         import time as _time
+
         _start = _time.time()
 
         # Generate per-request UUID for tracing (Fix 3)
@@ -583,7 +607,9 @@ class _MCPHandler(BaseHTTPRequestHandler):
                 "id": None,
                 "request_id": _req_id,
             }
-            self._send_json_with_headers(401, body, [("WWW-Authenticate", www_authenticate_header())])
+            self._send_json_with_headers(
+                401, body, [("WWW-Authenticate", www_authenticate_header())]
+            )
             self._log_access("POST /mcp", 401, _start)
             return
 
@@ -646,11 +672,17 @@ class _MCPHandler(BaseHTTPRequestHandler):
 
     def _log_access(self, method, status, start):
         """Fix 5: Per-request access log. Format: mcp: method=X status=N elapsed_ms=Y request_id=Z box_id=W"""
-        elapsed_ms = round((datetime.datetime.now(datetime.UTC).timestamp() - start) * 1000, 1)
-        _req_id = getattr(self, '_request_id', '<none>')
+        elapsed_ms = round(
+            (datetime.datetime.now(datetime.UTC).timestamp() - start) * 1000, 1
+        )
+        _req_id = getattr(self, "_request_id", "<none>")
         log.info(
             "mcp: method=%s status=%d elapsed_ms=%s request_id=%s box_id=%s",
-            method, status, elapsed_ms, _req_id, _BOX_ID,
+            method,
+            status,
+            elapsed_ms,
+            _req_id,
+            _BOX_ID,
         )
 
     def _method_not_allowed(self):
