@@ -54,7 +54,8 @@ from infra.unsure_prompt import SCHEMA_JSON as UNSURE_SCHEMA, build_unsure_promp
 from infra.vehicle_prompt import SCHEMA_JSON as VEHICLE_SCHEMA, build_vehicle_prompt
 from infra.vm1_prompt import SCHEMA_JSON as VM1_SCHEMA, build_vm1_prompt
 
-_VISION_URL = "http://localhost:8080/v1/chat/completions"
+_VISION_BASE_URL = "http://localhost:8080"
+_VISION_URL = _VISION_BASE_URL + "/v1/chat/completions"
 _VISION_MODEL = "qwen3-vl-8b"
 
 # ---------------------------------------------------------------------------
