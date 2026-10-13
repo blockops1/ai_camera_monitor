@@ -152,7 +152,7 @@ launchctl bootout gui/$UID/com.farm.surveillance.v2.plist
 ## Step 6 — Reolink / RTSP technical constants
 
 - **Reolink decode throughput:** 2 fps decode is the practical ceiling — don't promise higher.
-- **Ring buffer size = 180 frames = 90 seconds at 2 fps.** Per-camera `data/frames/<camera>/<alert_id>/` holds the alert's full pre/post-event window.
+- **Ring buffer size = 12 frames = 6 seconds at 2 fps.** Per-camera `data/frames/<camera>/<alert_id>/` holds the alert's full pre/post-event window.
 - **`offset_seconds = 6` is dead code.** Cut from the active path; do not reintroduce.
 - **TCP retransmit on RTSP** — readers should retry on transient `ECONNRESET` / `EPIPE`, not bail. Pattern: in-thread 3600s reconnect cadence inside `PersistentRTSPReader.run()`, NOT a watchdog thread (V2-049 banned outer supervisors for in-thread resources).
 
