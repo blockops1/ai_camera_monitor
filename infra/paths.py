@@ -201,6 +201,11 @@ PERSON_KNOWN_FILE = os.path.join(PEOPLE_DIR, "known_people.json")
 # cleanup. Disable with FARM_VEHICLE_ARTIFACTS=0 in the env.
 VEHICLE_ARTIFACTS_DIR = os.path.join(DATA_DIR, "vehicle_artifacts")
 
+# Live snapshot cache (US-101b). Fresh JPEG snapshots captured via
+# ReolinkClient.snapshot() are stored here, keyed by camera prefix.
+# Path: data/live_snapshots/<PREFIX>/<YYYYMMDD_HHMMSS>.jpg
+LIVE_SNAPSHOTS_DIR = os.path.join(DATA_DIR, "live_snapshots")
+
 
 # Channel retirement — vehicle_tracker is the only Telegram source for
 # vehicle events (project plan §"Phase 6B.9 vehicle-first two-message
@@ -374,6 +379,7 @@ def ensure_dirs() -> None:
         VEHICLES_DIR,
         ANIMALS_DIR,
         PEOPLE_DIR,
+        LIVE_SNAPSHOTS_DIR,
     ]:
         os.makedirs(d, exist_ok=True)
 
