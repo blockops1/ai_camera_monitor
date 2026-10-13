@@ -1329,8 +1329,10 @@ def main():
         )
         cleanup_thread.start()
         log.info(
-            "cleanup thread started; interval=%dm, cap=20 GB",
+            "cleanup thread started; interval=%dm, high=%d bytes, low=%d bytes",
             interval_min,
+            _p.FARMSURV_FRAME_EVICT_HIGH_BYTES,
+            _p.FARMSURV_FRAME_EVICT_LOW_BYTES,
         )
     else:
         log.info("cleanup thread skipped; interval=0")
