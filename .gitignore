@@ -16,6 +16,7 @@ data/private_identifiers.json
 
 # person identity data (enrolled people — not for public repo)
 data/known/people/known_people.json
+data/known/people/embeddings.npz
 
 # animal identity data + enrollment staging crops (biometric, not for public repo)
 data/known/animals/
