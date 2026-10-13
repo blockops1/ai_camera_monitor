@@ -549,7 +549,7 @@ class HealthReporter:
 
         from infra import vision_analyzer
 
-        vision_url = getattr(vision_analyzer, "_VISION_URL", None) or "unknown"
+        vision_url = getattr(vision_analyzer, "_VISION_BASE_URL", None) or "unknown"
         model = getattr(vision_analyzer, "_VISION_MODEL", None)
 
         up = False
