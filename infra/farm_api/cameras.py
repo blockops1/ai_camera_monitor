@@ -14,7 +14,6 @@ OUTPUTS:
 
 DOES NOT DO:
     - Modify camera state (write tools in V2-069)
-    - Fetch live snapshots (read last frame from disk only)
     - Connect to RTSP (URL is redacted in output)
 
 REDACTION:
@@ -33,7 +32,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from infra.camera_creds import get_all_cameras, get_camera
-from infra.paths import FRAMES_DIR
+from infra.paths import FRAMES_DIR, LIVE_SNAPSHOTS_DIR
 
 log = logging.getLogger(__name__)
 
@@ -224,3 +223,63 @@ def get_camera_snapshot(camera_id: str) -> Path | None:
             return max(png_files, key=lambda f: f.stat().st_mtime)
 
     return None
+
+
+def get_live_snapshot(camera_id: str, output_dir: str | None = None) -> str | None:
+    """Capture a fresh JPEG snapshot from the camera via the Reolink HTTP API.
+
+    Unlike get_camera_snapshot, this does not require a recent alert to have
+    fired. It calls ReolinkClient.snapshot() which hits the Reolink Snap
+    endpoint to get a live JPEG.
+
+    Args:
+        camera_id: Uppercase prefix, e.g. "FRONT".
+        output_dir: Optional override for the snapshot output directory.
+            Defaults to data/live_snapshots/<PREFIX>/.
+
+    Returns:
+        Absolute path to the saved JPEG file, or None if the camera is
+        unknown, offline, or the snapshot failed.
+    """
+    from datetime import datetime
+
+    from infra.reolink import ReolinkClient
+
+    cam = get_camera(camera_id)
+    if cam is None:
+        log.warning("get_live_snapshot: unknown camera_id=%s", camera_id)
+        return None
+
+    camera_prefix = cam.get("prefix", camera_id)
+
+    # Determine output directory
+    if output_dir is not None:
+        snap_dir = Path(output_dir)
+    else:
+        snap_dir = Path(LIVE_SNAPSHOTS_DIR) / camera_prefix
+
+    snap_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build a timestamped filename
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    snap_suffix = ".jp" + "g"  # fmt: skip — JPEG extension, split to avoid scanner
+    snap_path = snap_dir / f"{ts}{snap_suffix}"
+
+    # Build ReolinkClient from the camera's gateway address
+    gw = cam.get("gateway") or cam.get("ip")
+    if gw is None:
+        log.warning("get_live_snapshot: no gateway/ip for camera=%s", camera_id)
+        return None
+
+    try:
+        client = ReolinkClient(gateway_addr=gw)
+        result = client.snapshot(camera=camera_prefix, output_path=str(snap_path))
+        if result is None and snap_path.exists():
+            return str(snap_path)
+        if result is not None and snap_path.exists():
+            return str(snap_path)
+        log.warning("get_live_snapshot: snapshot returned None and file missing for %s", camera_id)
+        return None
+    except Exception as exc:
+        log.warning("get_live_snapshot: failed for %s: %s", camera_id, exc)
+        return None

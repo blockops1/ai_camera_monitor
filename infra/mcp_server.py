@@ -237,6 +237,21 @@ def _register_tools(registry: _ToolRegistry) -> None:
         },
     )(cameras.get_camera_snapshot)
 
+    registry.tool(
+        name="get_live_snapshot",
+        description="Capture a fresh JPEG from the camera right now. Unlike get_camera_snapshot, this does not require a recent alert.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "camera_id": {
+                    "type": "string",
+                    "description": "Camera prefix, e.g. FRONT, BACK.",
+                },
+            },
+            "required": ["camera_id"],
+        },
+    )(cameras.get_live_snapshot)
+
     # ---- events ----
 
     from infra.farm_api import events
