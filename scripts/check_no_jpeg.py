@@ -17,9 +17,9 @@ Exclusions:
   - .venv/, .git/
   - _b64() mime-fallback at infra/vision_analyzer.py:111
     (defensive: image/jpeg is a non-PNG fallback, not a JPEG producer)
-  - _sniff_mime() byte-sniffer at telegram_formatter/dispatcher.py:40,51
+  - _sniff_mime() byte-sniffer in telegram_formatter/dispatcher.py
     (defensive: detects JPG/JPEG magic bytes for send_media_group fallback,
-     does not produce JPEGs)
+     does not produce JPEGs. Excluded by function name to survive line drift.)
 
 Usage:
     python scripts/check_no_jpeg.py
@@ -67,22 +67,28 @@ _EXCLUDE_DIRS: set[str] = {
     "__pycache__",
 }
 
-# Known false positives: (relative_path, line_number)
+# Known false positives.
+#
+# Line-number-based exclusions (fragile across edits — keep small):
 _KNOWN_FP: set[tuple[str, int]] = {
-    ("infra/vision_analyzer.py", 111),   # mime fallback, not JPEG producer
-    # _sniff_mime() in dispatcher.py is a generic byte-magic sniffer used by
-    # the send_media_group fallback path: when Telegram refuses a PNG upload
-    # it must be able to identify a JPEG header and rename .jpg so the
-    # fallback message succeeds. Not a JPEG producer - a JPEG detector.
-    # Mirrors the same exclusion pattern as _b64() above.
-    ("telegram_formatter/dispatcher.py", 40),  # _sniff_mime docstring lists .png/.jpg/.bin
-    ("telegram_formatter/dispatcher.py", 51),  # _sniff_mime returns image/jpeg, .jpg
     # V2-030 EXCEPTION: Telegram photo delivery uses JPEG q88 1920px.
     # Authorized by operator (Rolfe) on 2026-09-13: this is the one permitted
     # JPEG producer path. Compression + cache + retention are wired per the
     # V2-030 PRD. Must not be re-flagged by this scanner.
     ("telegram_formatter/codec.py", 93),  # JPEG dst filename
     ("telegram_formatter/codec.py", 94),  # JPEG save call
+}
+
+# Function-name-based exclusions (durable across line drift):
+# Excludes every line INSIDE the named function (detected by a `def name(` line
+# preceding the match and the next top-level `def ` or end-of-file after it).
+_KNOWN_FP_BY_FUNCTION: set[tuple[str, str]] = {
+    # _b64() in vision_analyzer.py: image/jpeg is a non-PNG fallback for
+    # vision responses, not a JPEG producer. Defensive only.
+    ("infra/vision_analyzer.py", "_b64"),
+    # _sniff_mime() in dispatcher.py: detects JPG/JPEG magic bytes for the
+    # send_media_group fallback path. Does not produce JPEGs.
+    ("telegram_formatter/dispatcher.py", "_sniff_mime"),
 }
 
 
@@ -104,6 +110,31 @@ def _get_repo_root() -> Path:
     return Path(result.stdout.strip())
 
 
+def _function_line_ranges(text: str) -> dict[str, list[tuple[int, int]]]:
+    """Return {function_name: [(start_line, end_line), ...]} for top-level defs.
+
+    Top-level = column 0 (no indentation). Inner defs (inside classes or
+    functions) are NOT tracked — the `_KNOWN_FP_BY_FUNCTION` set should
+    only reference top-level functions whose names are stable.
+    """
+    lines = text.splitlines()
+    starts: list[tuple[int, str]] = []
+    for i, line in enumerate(lines, start=1):
+        if line.startswith("def ") and "(" in line:
+            # extract name
+            name = line[4:line.index("(")].strip()
+            starts.append((i, name))
+    # find end of each function: next top-level def or EOF
+    ranges: dict[str, list[tuple[int, int]]] = {}
+    for idx, (start_line, name) in enumerate(starts):
+        if idx + 1 < len(starts):
+            end_line = starts[idx + 1][0] - 1
+        else:
+            end_line = len(lines)
+        ranges.setdefault(name, []).append((start_line, end_line))
+    return ranges
+
+
 def _scan_file(filepath: Path, repo_root: Path) -> list[str]:
     """Return list of 'file:line [category] line' matches for filepath."""
     try:
@@ -117,8 +148,22 @@ def _scan_file(filepath: Path, repo_root: Path) -> list[str]:
     except OSError:
         return findings
 
+    # Build function-line ranges once for this file
+    func_ranges = _function_line_ranges(text)
+    # Map (rel, func_name) -> list of (start, end) ranges to skip
+    skip_ranges: list[tuple[int, int]] = []
+    for path, func_name in _KNOWN_FP_BY_FUNCTION:
+        if path == rel and func_name in func_ranges:
+            for start, end in func_ranges[func_name]:
+                skip_ranges.append((start, end))
+
+    def _in_skip_range(line_no: int) -> bool:
+        return any(start <= line_no <= end for start, end in skip_ranges)
+
     for line_no, line in enumerate(text.splitlines(), start=1):
         if (rel, line_no) in _KNOWN_FP:
+            continue
+        if _in_skip_range(line_no):
             continue
         for pattern, category in _JPEG_PATTERNS:
             if pattern.search(line):
