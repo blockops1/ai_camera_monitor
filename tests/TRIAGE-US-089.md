@@ -70,3 +70,24 @@ The existing `tests/TRIAGE-US-089.md` (from a prior run) has several incorrect d
 - test_check_no_jpeg.py: NOT MIME type detection — scanner correctly flags `.jpg` literal refs
 
 The env var issue at `infra/quick_classifier.py:82` is the root cause for 29 of 56 failures.
+
+## Resolution (2026-10-14, pre-public-release cleanup)
+
+The "intentional dead code" items in this triage were retained as scanner
+fixtures while scanners were being hardened. With the public release
+approaching, they are now being cleaned up:
+
+- `infra/env_utils.py` — DELETED 2026-10-14. `parse_csv_env` had zero
+  production callers; `infra/quiet_hours.py` and `infra/quick_classifier.py`
+  read env vars directly via `os.environ` and split themselves.
+- `telegram_formatter/no_match_telegram.py` — DELETED 2026-10-14. The
+  no-match body is built inline in `telegram_formatter/match_alert.py`
+  (US-067c slimmed-body path).
+- `infra/backtest_vm1_prompt.py` + `infra/backtest_vm1_motion.py` — MOVED
+  2026-10-14 to `scripts/backtests/`. These are investigation harnesses,
+  not production runtime. `tests/test_backtest_vm1.py` updated to import
+  from the new path.
+- `infra/watchdog_restart.py` — MOVED 2026-10-14 to `scripts/watchdog_restart.py`.
+  Called from `bin/health_watchdog.sh` via `python3 -m`, not from Python
+  import — the orphan scanner only sees Python imports, so `scripts/`
+  (which the scanner excludes) is the correct home for shell-driven tools.

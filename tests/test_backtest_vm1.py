@@ -1,4 +1,4 @@
-"""E2E smoke test for infra.backtest_vm1_motion.run_backtest.
+"""E2E smoke test for scripts.backtests.backtest_vm1_motion.run_backtest.
 
 Runs one alert fixture through the backtest harness, verifies the return
 dict shape, and asserts the output PNG exists and is non-trivial.
@@ -18,7 +18,7 @@ dotenv.load_dotenv(os.path.expanduser("~/.env"))
 # Ensure the v2 repo root is on sys.path so infra imports resolve.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import infra.backtest_vm1_motion as m
+from scripts.backtests.backtest_vm1_motion import run_backtest
 
 
 def test_run_backtest_smoke():
@@ -26,7 +26,7 @@ def test_run_backtest_smoke():
     alert_id = "00382a70-7708-48f8-bcc4-0b9095192dc6"
     frame_dir = "data/frames/FRONT/00382a70-7708-48f8-bcc4-0b9095192dc6"
 
-    result = m.run_backtest(
+    result = run_backtest(
         alert_id,
         frame_dir=frame_dir,
         gate_bbox_a=None,

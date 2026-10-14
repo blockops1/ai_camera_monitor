@@ -39,7 +39,7 @@ CALLS INTO:
     - httpx (POST to VISION_LLM_URL)
     - PIL.Image (frame loading, bbox rendering)
     - infra.motion_visualization.render_motion_composite (composite rebuild)
-    - infra.backtest_vm1_prompt (new prompt + schema)
+    - scripts.backtests.backtest_vm1_prompt (new prompt + schema)
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ import time
 import httpx
 from PIL import Image
 
-from infra.backtest_vm1_prompt import (
+from scripts.backtests.backtest_vm1_prompt import (
     PROMPT_TEXT as BACKTEST_PROMPT,
     SCHEMA_JSON as BACKTEST_SCHEMA,
 )
