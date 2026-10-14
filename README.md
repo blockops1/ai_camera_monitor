@@ -8,11 +8,11 @@ is the same as no notification at all: you silence the channel.
 **farm-surveillance-v2** is the opposite. It runs a small vision pipeline
 on each motion event — a YOLO first-pass gate to filter obvious noise, a
 vision-LLM (Qwen3-VL) to verify the subject and pull structured attributes
-(color, body, make/model, breed), and a motion-aware crop so only the
-**moving** subject ends up in the alert, not every vehicle visible in
-frame. Per-camera confidence thresholds let you tune a windy porch camera
-to demand 0.85 before an alert fires while a quiet driveway camera alerts
-at 0.50.
+(color, body, make/model, breed, count, face-visible), a per-camera
+cooldown, and a motion-aware crop so only the **moving** subject ends up
+in the alert, not every vehicle visible in frame. Per-camera confidence
+thresholds let you tune a windy porch camera to demand 0.85 before an
+alert fires while a quiet driveway camera alerts at 0.50.
 
 The pipeline delivers up to three Telegram messages per event: a
 wide-frame alert with the motion box, a cropped close-up of just the
@@ -24,18 +24,91 @@ is just the dog."
 Built for Reolink IP cameras; runs as a single Python daemon under
 `launchd` on macOS. Phase PRDs in [`docs/`](docs/).
 
+## What's new in v0.7.0 (2026-10-14)
+
+240 commits since v0.6.3. Major additions in this release:
+
+- **MCP harness** — 18 read-only tools at `infra/mcp_server.py` for
+  programmatic access to cameras, events, gate config, suppression rules,
+  cooldowns, identities (people/vehicles/animals), listener status,
+  recent errors, vision + Telegram status, and `get_live_snapshot` (a
+  one-shot JPEG pull from a camera, useful for "what does the porch
+  look like right now?"). Token auth via `FARMSURV_MCP_TOKEN`.
+- **HTTP API server** — read-only `infra/api_server.py` exposing
+  `/api/v1/cameras`, `/api/v1/events`, `/api/v1/gate/*`,
+  `/api/v1/identities/*`, `/api/v1/listener/status`, plus
+  `get_live_snapshot` mirroring the MCP tool 1:1. Token auth via
+  `FARMSURV_API_TOKEN`. Binds Tailscale-only by default.
+- **Daily status report cron** — `infra/daily_status_report.py` runs
+  once a day under launchd, generates an HTML report covering listener
+  health, per-cam RTSP / CPU / encode state, webhook counts, errors, and
+  disk usage, then sends it to a Telegram chat as a document. Plist
+  template: `bin/com.farm.surveillance.v2.smoke.plist`.
+- **Privacy guard** — 4 pre-push scanners
+  (`scripts/check_no_private_data.py`, `check_no_jpeg.py`,
+  `check_no_image_resize.py`, `check_no_orphan_modules.py`) plus a
+  `make check-privacy` target. The pre-push hook runs all of them on
+  the public remote (github) and blocks any push that would ship a
+  tracked credential file, a private LAN IP that the scanner regex
+  catches, a JPEG-in-source-code slip, an image-resize-in-production-
+  source slip, or an orphan module (production code with no caller).
+  See "Privacy guard" below.
+- **Animal matcher (Tier-2 cosine)** — `animal_matcher/match.py` +
+  `storage.py` + `infra/animal_embedder.py` + `scripts/enroll_animal.py`
+  for re-ID of returning animals (cats, dogs) across days.
+- **Person embedder + enroll_person** — `infra/person_embedder.py` +
+  `scripts/enroll_person.py` (OSNet body+face embedding scaffolding for
+  person re-ID). `person_matcher/` module with the same shape as
+  `animal_matcher/`.
+- **Vision schema v2** — US-060c/d/e: every alert now carries
+  `face_visible`, `count`, `subclass`, and `notes` fields alongside the
+  legacy `color/body/make/model/breed` tuple. Drives the structured TG
+  match line.
+- **`_camera_model` keyed by camera alias** (US-068b1) — internal
+  helper that used to look up the camera model by IP is now keyed by
+  camera alias (`FRONT`/`BACK`/etc.), so the function no longer depends
+  on the operator's LAN layout and works correctly in CI.
+- **`CAMS()` resolves cam IPs from `camera-creds.env` at runtime**
+  (US-038 follow-up) — `infra/daily_status_report.CAMS` is now a
+  function returning cam dicts with IPs filled in from the env file.
+  CI shows `[REDACTED-LAN-IP]` for all cams (no env file present);
+  production shows the real IPs.
+- **Health watchdog** — `bin/health_watchdog.sh` + plist monitoring
+  listener liveness, disk space, and webhook-receipt cadence. Silent
+  when healthy; alerts on failure.
+- **Telegram rate-limit guard** — `infra/telegram_alerts.py` honors
+  `FARMSURV_TG_RATE_LIMIT_PER_MIN` (default 30) to prevent bot API
+  rate-limit warnings from spamming the operator.
+- **File reorganization** — backtest scripts and `watchdog_restart.py`
+  moved from `infra/` to `scripts/` (orphans resolved); `env_utils.py`
+  and `telegram_formatter/no_match_telegram.py` removed (consolidated).
+  `animal_matcher/` and `person_matcher/` are now top-level packages.
+- **Test fixture pattern** — tests resolve cam IPs from env vars
+  (`FARM_TEST_FRONT_IP` / `FARM_TEST_BACK_IP`) with RFC 1918 placeholder
+  defaults, never hardcode production cam IPs. See the "Development"
+  section.
+
+Run `git log v0.6.3..v0.7.0 --oneline` for the full commit list.
+
 ## What this is
 
 A small Python service that:
 
-1. Listens on `:8090/alert` for Reolink motion webhooks (IP-validated)
+1. Listens on `:8090/alert` for Reolink motion webhooks (IP-validated,
+   rate-limited per source IP)
 2. Captures 4 frames around the motion event from a continuous per-camera
    RTSP ring buffer (12-frame lossless PNG ring per camera)
 3. Runs a YOLO gate to filter noise vs real subjects
 4. Verifies subject class via vision-LLM (Qwen3-VL on `:8080`)
-5. Asks vision-LLM for class-specific detail
-6. Sends three Telegram notifications: alert, detail, optional match
-7. Throttles per-`(camera, classification)` to avoid alert storms
+5. Asks vision-LLM for class-specific detail (color, body, make/model,
+   breed, count, face-visible, subclass, notes)
+6. Looks up the subject against the enrolled matcher (animal/person/vehicle)
+   and re-ID's returning subjects via Tier-2 cosine
+7. Sends three Telegram notifications: alert, detail, optional match
+8. Throttles per-`(camera, classification)` to avoid alert storms
+9. Exposes a read-only MCP harness + HTTP API for programmatic access
+10. Runs a daily status report cron that posts an HTML report to a
+    Telegram chat
 
 Pipeline shape in [`docs/PLAN.md`](docs/PLAN.md). PRDs by phase in
 [`docs/PHASE-V2-*.json`](docs/).
@@ -74,6 +147,57 @@ Example: a small fluffy dog crossing the gravel.
 
 Telegram format and alert wording are documented in
 [`telegram_formatter/`](telegram_formatter/).
+
+## Architecture overview
+
+```
+                 ┌──────────────┐
+Reolink cam ────▶│  /alert      │
+                 │  :8090       │  IP-validated
+                 │              │  rate-limited
+                 └──────┬───────┘
+                        │ webhook
+                        ▼
+            ┌────────────────────┐
+            │ listener/daemon.py │
+            │  + pipeline.py     │
+            │  + health.py       │
+            └─┬──────────┬───────┘
+              │          │
+   ring buffer│          │cooldown
+              ▼          ▼
+        ┌──────────┐  ┌─────────────┐
+        │ gate.py  │  │ pipeline_   │
+        │ (YOLO)   │  │  cooldown.py│
+        └────┬─────┘  └─────────────┘
+             │
+             ▼
+        ┌──────────────────┐
+        │ vision_analyzer  │  Qwen3-VL
+        │ (Qwen3-VL :8080) │  :8080
+        └────────┬─────────┘
+                 │
+                 ▼
+        ┌──────────────────┐
+        │ vision schema v2 │  color, body,
+        │ + matchers       │  make/model, breed,
+        │ (animal/person/  │  count, face-visible,
+        │  vehicle)        │  subclass, notes
+        └────────┬─────────┘
+                 │
+                 ▼
+        ┌──────────────────┐
+        │ telegram_        │  3 messages:
+        │  formatter       │  alert, detail,
+        │ (Telegram bot)   │  optional match
+        └──────────────────┘
+
+Side surfaces (read-only, do not affect pipeline):
+  infra/mcp_server.py  ─▶ 18 MCP tools at :8091 (Tailscale)
+  infra/api_server.py  ─▶ /api/v1/* at :8092 (Tailscale)
+  infra/daily_status_report.py  ─▶ HTML once/day, posted to TG
+  bin/health_watchdog.sh  ─▶ liveness + disk + webhook-rate check
+```
 
 ## Reolink camera setup
 
@@ -161,6 +285,140 @@ motion event on the camera. The pipeline should deliver a Telegram
 alert within 5-10 seconds. If nothing arrives, check
 `logs/daemon.log` for connection errors against the camera IP.
 
+## MCP harness (v0.7.0)
+
+`infra/mcp_server.py` exposes 18 read-only tools over the Model Context
+Protocol. The harness is **strictly read-only** — write tools (camera
+config, recipe apply, person/animal enrollment beyond `enroll_person`)
+ship in a later release. Tailscale-bound by default
+(`FARMSURV_MCP_BIND=tailnet-only`).
+
+Token auth via `FARMSURV_MCP_TOKEN` (32+ chars; same
+`secrets.token_urlsafe(32)` recipe as the API token). Configure once
+in `.env` or `~/.env`; the client supplies it as
+`Authorization: Bearer <token>`.
+
+| Tool | What it returns |
+|---|---|
+| `list_cameras` | CameraInfo for all configured cams (alias, label, model, redacted RTSP URL) |
+| `get_camera_health` | `CameraHealth` for one cam (online, last_frame_at, rtsp_errors_last_24h) |
+| `get_camera_snapshot` | Latest cached frame path (no live pull) |
+| `get_live_snapshot` | One-shot JPEG pull from the camera (useful for "what does the porch look like right now?") |
+| `list_events` | Recent webhook events (paginated) |
+| `get_event` | One event with full pipeline trace |
+| `get_gate_config` | Per-camera gate thresholds (subjects, vehicle/person confidence floors, motion gate) |
+| `list_suppression_rules` | Active suppression rules (night-suppress, baseline-override, global-change-max-pct) |
+| `list_active_cooldowns` | Per-(cam, classification) cooldowns in effect |
+| `list_known_people` | Enrolled person identities |
+| `list_known_vehicles` | Enrolled vehicle identities |
+| `list_known_animals` | Enrolled animal identities |
+| `enroll_person` | Enroll a new person (writes to `data/known/people/`) |
+| `get_listener_status` | Listener health: PID, uptime, ports, alerts/min, mcp_enabled |
+| `get_recent_errors` | Last N daemon.log ERROR lines |
+| `get_vision_status` | Qwen3-VL endpoint health, model load state, request count |
+| `get_telegram_status` | Telegram bot health, last-send timestamp, rate-limit headroom |
+| `get_config` | Operator-configured env vars (no secrets — token values redacted) |
+
+Live smoke test: `bin/mcp_live_smoke.sh`.
+
+## API server (v0.7.0)
+
+`infra/api_server.py` exposes the same 18 read-only surfaces as a
+plain JSON HTTP API. Tailscale-bound by default
+(`FARMSURV_API_BIND=tailnet-only`); token auth via `FARMSURV_API_TOKEN`.
+
+Runs as a thread inside the listener process by default; can be run
+standalone with `python -m infra.api_server` for diagnostics. Mirror
+mapping (MCP tool → API path):
+
+| MCP tool | API path |
+|---|---|
+| `list_cameras` | `GET /api/v1/cameras` |
+| `get_camera_health` | `GET /api/v1/cameras/{id}/health` |
+| `get_camera_snapshot` | `GET /api/v1/cameras/{id}/snapshot` |
+| `get_live_snapshot` | `GET /api/v1/cameras/{id}/live_snapshot` |
+| `list_events` | `GET /api/v1/events?limit=N&since=ISO8601` |
+| `get_event` | `GET /api/v1/events/{id}` |
+| `get_gate_config` | `GET /api/v1/gate` |
+| `list_suppression_rules` | `GET /api/v1/gate/suppression-rules` |
+| `list_active_cooldowns` | `GET /api/v1/cooldowns` |
+| `list_known_people` | `GET /api/v1/identities/people` |
+| `list_known_vehicles` | `GET /api/v1/identities/vehicles` |
+| `list_known_animals` | `GET /api/v1/identities/animals` |
+| `get_listener_status` | `GET /api/v1/listener/status` |
+| `get_recent_errors` | `GET /api/v1/listener/errors` |
+| `get_vision_status` | `GET /api/v1/vision/status` |
+| `get_telegram_status` | `GET /api/v1/telegram/status` |
+| `get_config` | `GET /api/v1/config` |
+
+Each response is wrapped: `{"box_id": "...", "data": {...}}` (list
+endpoints) or `{"box_id": "...", "data": {...}, "next_page_token": "..."}`
+(paginated list endpoints). LAN IPs in any string field are
+auto-redacted to `[REDACTED-LAN-IP]` (192.168.x.x only — see
+`infra/farm_api/cameras._redact_ip`).
+
+Health probe: `GET /healthz` returns
+`{"status": "healthy", "pid": N, "uptime_seconds": N, ...}`.
+
+Live smoke test: `bin/api_live_smoke.sh`.
+
+## Daily status report (v0.7.0)
+
+`infra/daily_status_report.py` runs once a day under launchd
+(operator template plist: `bin/com.farm.surveillance.v2.smoke.plist`).
+Generates an HTML report covering:
+
+- Listener health (PID, uptime, port status)
+- Per-camera RTSP connection count + CPU + main-stream encode
+- Webhook counts (last 24h, per camera)
+- Error count + recent error lines
+- Disk free space + daemon.log size
+- Crop + frame artifact retention cap
+
+The HTML is saved to
+`logs/daily-status/crestview-orchards-surveillance-status-YYYY-MM-DD.html`
+and posted to a Telegram chat as a document via `TELEGRAM_BOT_TOKEN` +
+`TELEGRAM_HOME_CHAT_ID`. Pure-function design:
+`build_report()` → `render_html()` → `save_report()` → `send_document()`,
+each independently testable.
+
+## Privacy guard (v0.7.0)
+
+The public github release ships 4 pre-push scanners that run on every
+push to the github remote (the forgejo mirror is allowed full creds;
+the hook short-circuits for it). All 4 must exit 0 for the push to
+succeed.
+
+| Scanner | Catches | File |
+|---|---|---|
+| `check_no_private_data` | Tracked `.env`, `*-creds.env`, and any LAN IP literal in the scanner's regex range (192.168.[1-9].1[0-9]{2} — production-cam `.108`, `.103`, `.113`) | `scripts/check_no_private_data.py` |
+| `check_no_jpeg` | JPEG references in production source code (we do PNG-only for ring buffer; jpeg only allowed in the vision-LLM client for the live-snapshot response) | `scripts/check_no_jpeg.py` |
+| `check_no_image_resize` | Image-resize calls in production source (we use bbox-based cropping, never Pillow resize — that's lossy) | `scripts/check_no_image_resize.py` |
+| `check_no_orphan_modules` | Production modules with no caller (catches the `infra/env_utils.py` class of dead code) | `scripts/check_no_orphan_modules.py` |
+
+Two-tier exclusion: `_KNOWN_FP` (line number, for one-off exclusions)
+and `_KNOWN_FP_BY_FUNCTION` (function name, durable across line drift
+when the source is edited).
+
+Plus `scripts/release/config.yaml` `strip_paths` (defense in depth):
+the public-cut pipeline strips `*.env` files even if they somehow get
+tracked. **The scanner is the primary defense** — `strip_paths` is
+the backup.
+
+Run all 4 locally before pushing to github: `make check-privacy`.
+
+**Scanner blind spots** (by design — scanner regex is narrow to avoid
+flagging documentation placeholders like `192.168.1.1`):
+
+- Last octet < 100 (e.g. `.39`, `.50`, `.73`, `.85`) — scanner does
+  not match these. Production code uses `192.168.[1-9].1[0-9]{2}`
+  ranges; the `.39/.50/.73/.85` addresses that the scanner misses
+  were caught in a manual pass and redacted to `<FRONT_CAM_IP>` /
+  `<OFG_CAM_IP>` placeholders in PRDs, and to env-driven defaults in
+  test fixtures.
+- Anything outside `192.168.*.*` (e.g. `10.0.0.x`, RFC 5737) — not a
+  leak; standard RFC 1918 / documentation ranges.
+
 ## RTSP robustness
 
 Each camera has its own RTSP reader with two layers of recovery:
@@ -174,21 +432,48 @@ Together these prevent two failure modes: silent decoder stalls
 (triggered when no frames arrive for too long) and infinite reconnect
 loops when a camera is genuinely offline.
 
+The per-camera ring buffer is **12 frames** (down from 180 in v0.6.x
+per US-057a; the wider buffer wasn't being used and ate disk on
+high-traffic cameras). Lossless PNG, 4 pre-motion + 8 post-motion
+frames per alert.
+
 ## Diagnostics
 
-- `GET /debug/rtsp` — per-reader ring size, decoded total, last-frame age,
-  container-open, health flag, error count
+- `GET /api/v1/listener/status` — PID, uptime, port status,
+  alerts/min, mcp_enabled, env_var count (live via Tailscale)
+- `GET /api/v1/listener/errors?limit=N` — last N daemon.log ERROR lines
+- `GET /api/v1/cameras` — per-cam `CameraInfo` (alias, label, model,
+  redacted RTSP URL)
+- `GET /api/v1/cameras/{id}/health` — `CameraHealth` (online,
+  last_frame_at, rtsp_errors_last_24h)
+- `GET /api/v1/cameras/{id}/live_snapshot` — one-shot JPEG pull
+- `bin/health_watchdog.sh` — listener liveness + disk space +
+  webhook-receipt cadence. Silent when healthy; alerts on failure.
 - Unified log: `logs/daemon.log` (single stream, daemon writes here)
+- Daily report: `logs/daily-status/crestview-orchards-surveillance-status-YYYY-MM-DD.html`
+  (HTML, one per day, sent to Telegram)
 
 ## Layout
 
 ```
 infra/                   # shared modules: gate, frame_capture, cooldown, schemas
-listener/                # webhook receiver + linear pipeline
-vehicle_position/        # trajectory + crop extraction
-telegram_formatter/      # Telegram stage formatters
+  api_server.py          # HTTP read-only API (Tailscale-bound)
+  mcp_server.py          # MCP read-only tools (Tailscale-bound)
+  daily_status_report.py # HTML report builder + Telegram send
+  camera_creds.py        # per-cam IP / user / pass resolver
+  net_bind.py            # tailnet vs all bind helpers
+  farm_api/              # per-resource read-only API modules (cameras, events, gate, …)
+listener/                # webhook receiver + linear pipeline + health
+vehicle_matcher/         # re-ID for returning vehicles (cosine Tier-2)
+animal_matcher/          # re-ID for returning animals (cosine Tier-2)
+person_matcher/          # re-ID for returning people (cosine Tier-2, scaffolding)
+telegram_formatter/      # Telegram stage formatters (alert, detail, match)
+scripts/                 # operator scripts: enroll_*, smoke_*, watchdog, scanners
+  backtests/             # prompt + motion backtest scripts (moved from infra/)
+bin/                     # shell helpers + plist templates
+config/                  # motion_gate_thresholds.json, camera_recipes.toml
+docs/                    # PLAN.md, architecture diagrams, PRD JSONs
 tests/                   # pytest
-docs/                    # PLAN.md, architecture diagrams
 camera-creds.env.example # template for camera credentials
 telegram-creds.env.example # template for Telegram credentials
 llm-creds.env.example    # template for vision-LLM endpoint
@@ -197,17 +482,19 @@ llm-creds.env.example    # template for vision-LLM endpoint
 ## Configuration
 
 Env files are mode 600 and **never committed**. Daemon reads them at
-boot from these locations:
+boot from these locations, last-write-wins per key:
 
 | File | What | Loaded by |
 |---|---|---|
 | `camera-creds.env` (repo root) | per-camera IP / HTTP user+pass / RTSP user+pass+url | `infra/camera_creds.py` |
-| `~/.env` (user home) | Telegram credentials + runtime flags (see `.env.example`) | `listener/daemon.py` |
+| `telegram-creds.env` (repo root) | Telegram bot token + chat ID | `listener/daemon.py` |
+| `llm-creds.env` (repo root) | vision-LLM endpoint + auth | `infra/vision_analyzer.py` |
+| `~/.env` (user home) | runtime flags (see `.env.example`) | `listener/daemon.py` |
 
-`*.env.example` files at the repo root are the templates. Copy,
-fill in real values, mode 600, never commit.
+`*.env.example` files at the repo root are the templates. Copy, fill
+in real values, mode 600, never commit.
 
-Other env vars honored at runtime:
+Public-facing env vars (no secrets; values shown in `.env.example`):
 
 | Var | Default | Purpose |
 |---|---|---|
@@ -215,8 +502,35 @@ Other env vars honored at runtime:
 | `LISTEN_PORT` | `8090` | webhook bind |
 | `VISION_LLM_URL` | `http://127.0.0.1:8080` | Qwen3-VL endpoint |
 | `LOG_LEVEL` | `INFO` | log level |
-| `FARMSV_RTSP_RECONNECT_SECONDS` | `3600` | scheduled reconnect cadence |
+| `DISPLAY_TZ` | `America/New_York` | Telegram timestamp TZ (IANA name) |
+| `FARMSV_RTSP_RECONNECT_SECONDS` | `3600` | scheduled RTSP reconnect cadence |
 | `FARMSV_RTSP_MAX_RETRIES` | `10` | reconnect attempt cap before deferring |
+| `FARMSURV_MCP_ENABLED` | `0` | MCP harness (1=ON, 0=OFF) |
+| `FARMSURV_MCP_BIND` | `tailnet-only` | MCP bind (tailnet-only / all / interface) |
+| `FARMSURV_MCP_PORT` | `8091` | MCP port |
+| `FARMSURV_MCP_TOKEN` | (required) | MCP bearer token (32+ chars) |
+| `FARMSURV_API_ENABLED` | `0` | HTTP API (1=ON, 0=OFF) |
+| `FARMSURV_API_BIND` | `tailnet-only` | API bind (tailnet-only / all / interface) |
+| `FARMSURV_API_PORT` | `8092` | API port |
+| `FARMSURV_API_TOKEN` | (required) | API bearer token (32+ chars) |
+| `FARMSURV_BOX_ID` | `''` | box identifier in API responses |
+| `FARMSURV_TG_RATE_LIMIT_PER_MIN` | `30` | Telegram bot API rate-limit guard |
+| `FARMSURV_FARM_LAT` | `34.5782` | suntime twilight calc (Resaca, GA) |
+| `FARMSURV_FARM_LON` | `-84.9438` | suntime twilight calc |
+| `FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN` | `0` | night-window buffer (minutes) |
+| `MOTION_GATE_NIGHT_SUPPRESS_ENABLED` | `1` | night motion-gate suppression (1=ON, 0=OFF) |
+| `FARMSURV_QUIET_HOURS_ENABLED` | `0` | quiet-hours Telegram suppression (1=ON, 0=OFF) |
+| `FARMSURV_BASELINE_OVERRIDE_ENABLED` | `0` | distant-vehicle threat demotion (1=ON, 0=OFF) |
+| `FARMSURV_GLOBAL_CHANGE_MAX_PCT` | `60` | suppress if motion bbox > N% of frame area |
+
+Boolean env vars: **write what each value does, not just the variable.**
+Every `=0`/`=1` declaration in `.env.example` has an inline comment
+showing what each value does. Established convention: `1 = ON, 0 = OFF`.
+
+Per-camera tunables live in `config/motion_gate_thresholds.json`
+(`subjects`, `vehicle_confidence_floor`, `person_confidence_floor`,
+`gate_enabled`). Per-camera recipe (vision-LLM prompt adjustments
+and re-ID threshold) lives in `config/camera_recipes.toml`.
 
 ## Daemon management
 
@@ -237,6 +551,9 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.farm.surveillance.v2
 exit. The plist does **not** carry Telegram credentials — those load
 from `~/.env` at boot.
 
+The daily status report runs as a separate launchd job
+(`com.farm.surveillance.v2.smoke`, plist template in `bin/`).
+
 ## Development
 
 Requires Python 3.11. Setup:
@@ -253,6 +570,26 @@ The test suite covers:
 - Decoder failure handling (always-raise mock decoder)
 - Crop selector and trajectory extraction
 - Telegram formatting stages
+- `farm_api.*` read paths (cameras, events, gate, identities, listener status)
+- `mcp_server` tool dispatch (mock client, 18 tools)
+- Privacy scanners (`check_no_private_data`, `check_no_jpeg`,
+  `check_no_image_resize`, `check_no_orphan_modules`)
+- Daily status report (`build_report` → `render_html` → `save_report`)
+- Animal/person/vehicle matcher (Tier-2 cosine on mock embeddings)
+
+**Test fixture pattern:** tests resolve cam IPs from env vars with
+RFC 1918 placeholder defaults — never hardcode production cam IPs.
+Use `os.environ.get("FARM_TEST_FRONT_IP", "192.168.1.1")` for tests
+that need to assert on `_redact_ip` behavior (the production redaction
+only matches `192.168.*.*`); use `10.0.0.*` or `[REDACTED-LAN-IP]`
+for tests that don't. Established 2026-10-14 after the operator note:
+*"Tests should use environmental values not hardcoding."*
+
+Pre-push before opening a PR:
+
+```bash
+make check-privacy   # 4 scanners + cred-guard
+```
 
 ## Forgejo recovery mirror
 
