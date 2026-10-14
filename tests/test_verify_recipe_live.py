@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import tempfile
 from typing import cast
 from unittest.mock import MagicMock, patch
 
 from scripts.verify_recipe_live import _scrub_sensitive
+
+# CAMERA_META in scripts/verify_recipe_live.py uses [REDACTED-LAN-IP] as a
+# placeholder. If the production deployment overrides the cam IPs via
+# VERIFY_RECIPE_TEST_FRONT_IP (or the source fixture is changed), the test
+# expectation follows. This is the same env-driven pattern as the other
+# test files (FARM_TEST_FRONT_IP / FARM_TEST_BACK_IP).
+_TEST_FRONT_IP = os.environ.get("VERIFY_RECIPE_TEST_FRONT_IP", "[REDACTED-LAN-IP]")
 
 # ---------------------------------------------------------------------------
 # _scrub_sensitive tests
@@ -265,5 +273,5 @@ class TestVerifyRecipeLiveMain:
         with open(tmp_path) as fh:
             evidence = cast(dict, json.load(fh))
         front = next(c for c in evidence["cameras"] if c["camera"] == "front")
-        assert front["ip"] == "192.168.1.39"
+        assert front["ip"] == _TEST_FRONT_IP
         assert front["model"] == "RLC-833A"

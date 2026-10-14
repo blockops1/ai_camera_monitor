@@ -10,9 +10,14 @@ All tests mock _run / subprocess at the boundary — no real network calls.
 from __future__ import annotations
 
 import json
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# Test fixture IP for FRONT cam mocks. Override with FARM_TEST_FRONT_IP env var.
+# Default is RFC 5737 reserved range -- safe for any network.
+_TEST_FRONT_IP = os.environ.get("FARM_TEST_FRONT_IP", "10.0.0.39")
 
 
 @pytest.fixture()
@@ -92,7 +97,7 @@ class TestReolinkCliPath:
             if cmd[0] == "launchctl" and cmd[1] == "list":
                 return 0, "75924 0 com.farm.surveillance.v2\n", ""
             if cmd[0] == "lsof" and "-sTCP:ESTABLISHED" in " ".join(cmd):
-                return 0, "python3.11  75924 jill   10u  IPv6 0x1234      0t0 TCP 10.0.0.1:54321->192.168.1.39:554 (ESTABLISHED)\n", ""
+                return 0, f"python3.11  75924 jill   10u  IPv6 0x1234      0t0 TCP 10.0.0.1:54321->{_TEST_FRONT_IP}:554 (ESTABLISHED)\n", ""
             return 1, "", ""
 
         mock_run.side_effect = fake_run
@@ -113,7 +118,7 @@ class TestReolinkCliPath:
             patch("infra.daily_status_report.REOLINK_CLI", cli_path),
             patch("infra.daily_status_report._get_shared_cam_password", return_value="testpass"),
             patch("infra.daily_status_report.CAMS", [
-                {"alias": "FRONT", "ip": "192.168.1.39", "label": "Front Door Outside", "model": "RLC-833A"},
+                {"alias": "FRONT", "ip": _TEST_FRONT_IP, "label": "Front Door Outside", "model": "RLC-833A"},
             ]),
             patch("infra.daily_status_report.subprocess.run", side_effect=fake_subprocess_run),
         ):
@@ -137,7 +142,7 @@ class TestReolinkCliPath:
             patch("infra.daily_status_report.REOLINK_CLI", missing_cli),
             patch("infra.daily_status_report._get_shared_cam_password", return_value="testpass"),
             patch("infra.daily_status_report.CAMS", [
-                {"alias": "FRONT", "ip": "192.168.1.39", "label": "Front Door Outside", "model": "RLC-833A"},
+                {"alias": "FRONT", "ip": _TEST_FRONT_IP, "label": "Front Door Outside", "model": "RLC-833A"},
             ]),
         ):
             results = get_per_cam_status()
@@ -160,7 +165,7 @@ class TestCamCssClass:
             "generated_at": "2026-10-12T08:00:00",
             "listener": {"pid": 75924, "uptime_s": 46800, "ports": {8090: True, 8091: True, 8092: True}, "all_ports_up": True},
             "cams": [
-                {"alias": "FRONT", "ip": "192.168.1.39", "label": "Front Door Outside", "model": "RLC-833A",
+                {"alias": "FRONT", "ip": _TEST_FRONT_IP, "label": "Front Door Outside", "model": "RLC-833A",
                  "rtsp_conns": 1, "cpu_pct": 32, "encode_main": "3840x2160@2fps H.265", "reachable": True},
             ],
             "webhooks_24h": {"FRONT": 5, "BACK": 2, "OFG": 1, "OFP": 0, "OFS": 0, "OBS": 0, "other": 1},
@@ -181,7 +186,7 @@ class TestCamCssClass:
             "generated_at": "2026-10-12T08:00:00",
             "listener": {"pid": 75924, "uptime_s": 46800, "ports": {8090: True, 8091: True, 8092: True}, "all_ports_up": True},
             "cams": [
-                {"alias": "FRONT", "ip": "192.168.1.39", "label": "Front Door Outside", "model": "RLC-833A",
+                {"alias": "FRONT", "ip": _TEST_FRONT_IP, "label": "Front Door Outside", "model": "RLC-833A",
                  "rtsp_conns": 0, "cpu_pct": 32, "encode_main": "3840x2160@2fps H.265", "reachable": True},
             ],
             "webhooks_24h": {"FRONT": 5, "BACK": 2, "OFG": 1, "OFP": 0, "OFS": 0, "OBS": 0, "other": 1},
@@ -200,7 +205,7 @@ class TestCamCssClass:
             "generated_at": "2026-10-12T08:00:00",
             "listener": {"pid": 75924, "uptime_s": 46800, "ports": {8090: True, 8091: True, 8092: True}, "all_ports_up": True},
             "cams": [
-                {"alias": "FRONT", "ip": "192.168.1.39", "label": "Front Door Outside", "model": "RLC-833A",
+                {"alias": "FRONT", "ip": _TEST_FRONT_IP, "label": "Front Door Outside", "model": "RLC-833A",
                  "rtsp_conns": 1, "cpu_pct": None, "encode_main": None, "reachable": False},
             ],
             "webhooks_24h": {"FRONT": 5, "BACK": 2, "OFG": 1, "OFP": 0, "OFS": 0, "OBS": 0, "other": 1},
