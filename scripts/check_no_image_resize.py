@@ -22,9 +22,10 @@ Exclusions:
 
 Known false positives (intentional resize/encode operations):
   - telegram_formatter/codec.py:86 — US-030a: img.resize() for JPEG downscale
-  - infra/quick_classifier.py:655 — YOLO letterbox PIL .resize() (input
-    padding to 640x640 multiples of 32 before YOLO inference; required by
-    the model, not a transport-time resize)
+  - infra/quick_classifier.py — _letterbox_640() YOLO letterbox PIL .resize()
+    (input padding to 640x640 multiples of 32 before YOLO inference; required
+    by the model, not a transport-time resize). Excluded by function name to
+    survive line drift.)
 
 Usage:
     python scripts/check_no_image_resize.py
@@ -73,11 +74,47 @@ _SKIP_PARTS: tuple[str, ...] = (
     "__pycache__",
 )
 
-# Known false positives: (relative_path, line_number) — intentional ops.
+# Known false positives.
+#
+# Line-number-based exclusions (fragile across edits — keep small):
 _KNOWN_FP: set[tuple[str, int]] = {
     ("telegram_formatter/codec.py", 86),  # US-030a: img.resize() for JPEG downscale
-    ("infra/quick_classifier.py", 655),  # YOLO letterbox: img.resize() into 640-multiple-32 input
 }
+
+# Function-name-based exclusions (durable across line drift):
+# Excludes every line INSIDE the named function (detected by a `def name(` line
+# preceding the match and the next top-level `def ` or end-of-file after it).
+_KNOWN_FP_BY_FUNCTION: set[tuple[str, str]] = {
+    # _letterbox_640() in quick_classifier.py: pads YOLO input to 640-multiples
+    # of 32 with a .resize() call. Required by the model architecture, not a
+    # transport-time resize.
+    ("infra/quick_classifier.py", "_letterbox_640"),
+}
+
+
+def _function_line_ranges(text: str) -> dict[str, list[tuple[int, int]]]:
+    """Return {function_name: [(start_line, end_line), ...]} for top-level defs.
+
+    Top-level = column 0 (no indentation). Inner defs (inside classes or
+    functions) are NOT tracked — the `_KNOWN_FP_BY_FUNCTION` set should
+    only reference top-level functions whose names are stable.
+    """
+    lines = text.splitlines()
+    starts: list[tuple[int, str]] = []
+    for i, line in enumerate(lines, start=1):
+        if line.startswith("def ") and "(" in line:
+            # extract name
+            name = line[4:line.index("(")].strip()
+            starts.append((i, name))
+    # find end of each function: next top-level def or EOF
+    ranges: dict[str, list[tuple[int, int]]] = {}
+    for idx, (start_line, name) in enumerate(starts):
+        if idx + 1 < len(starts):
+            end_line = starts[idx + 1][0] - 1
+        else:
+            end_line = len(lines)
+        ranges.setdefault(name, []).append((start_line, end_line))
+    return ranges
 
 
 def _should_skip_dir(dirpath: str) -> bool:
@@ -135,12 +172,25 @@ def scan_file(filepath: Path, repo_root: Path) -> list[str]:
                 continue
             active_lines.add(idx)
 
+    # Build function-line ranges for function-name exclusions.
+    func_ranges = _function_line_ranges(text) if active_only else {}
+    skip_ranges: list[tuple[int, int]] = []
+    for path, func_name in _KNOWN_FP_BY_FUNCTION:
+        if path == rel and func_name in func_ranges:
+            for start, end in func_ranges[func_name]:
+                skip_ranges.append((start, end))
+
+    def _in_skip_range(line_no: int) -> bool:
+        return any(start <= line_no <= end for start, end in skip_ranges)
+
     for line_no, line in enumerate(lines, start=1):
         if active_only and (line_no - 1) not in active_lines:
             continue
 
-        # Check known false positives.
+        # Check known false positives (line-number and function-name).
         if (rel, line_no) in _KNOWN_FP:
+            continue
+        if _in_skip_range(line_no):
             continue
 
         for pattern, pattern_name in _COMPILED:
