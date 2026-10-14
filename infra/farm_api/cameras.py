@@ -94,23 +94,22 @@ class CameraHealth:
 # Model lookup — derive from camera metadata if available
 # ---------------------------------------------------------------------------
 
-# Known model mapping by IP prefix (from camera-creds.env comments).
-# This is a best-effort mapping; the creds file does not carry a model field.
-_MODEL_BY_IP = {
-    "192.168.1.73": "Reolink RLC-510A",
-    "192.168.1.108": "Reolink RLC-510A",
-    "192.168.1.103": "Reolink RLC-510A",
-    "192.168.1.113": "Reolink RLC-510A",
+# Known model mapping by camera ID (alias). Keyed by alias, not IP,
+# so this file can be tracked in the public repo without leaking LAN
+# addresses. Unknown cams return "".
+_MODEL_BY_CAMERA_ID = {
+    "FRONT": "Reolink RLC-833A",
+    "BACK":  "Reolink RLC-833A",
+    "OFG":   "Reolink RLC-510A",
+    "OFP":   "Reolink RLC-510A",
+    "OFS":   "Reolink RLC-510A",
+    "OBS":   "Reolink RLC-510A",
 }
 
 
 def _camera_model(camera_id: str) -> str:
     """Return the model string for a camera, or empty string if unknown."""
-    cam = get_camera(camera_id)
-    if cam is None:
-        return ""
-    ip = cam.get("ip", "")
-    return _MODEL_BY_IP.get(ip, "")
+    return _MODEL_BY_CAMERA_ID.get(camera_id.upper(), "")
 
 
 # ---------------------------------------------------------------------------
