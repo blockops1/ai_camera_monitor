@@ -193,8 +193,9 @@ def run() -> dict:
     total_bytes = _total_bytes(frames_dir)
     over_high = total_bytes >= high_bytes
 
-    # Capture pre-eviction size for the threshold-crossed alert message
-    # (total_bytes gets recomputed after eviction at lines 205/215)
+    # Capture pre-eviction size for the threshold-crossed log line.
+    # total_bytes is reassigned post-cleanup further down, so we snapshot
+    # it here while it still holds the value that crossed HIGH.
     pre_eviction_bytes = total_bytes
 
     if over_high:
@@ -205,12 +206,15 @@ def run() -> dict:
             evicted = _evict_by_oldest(frames_dir, evict_budget)
             stats["freed_bytes"] += evicted
 
-        # Log still-over message (daemon.log only)
-        total_bytes = _total_bytes(frames_dir)
+        # Log still-over message (daemon.log only). First value is the
+        # pre-eviction total that crossed HIGH; second is the HIGH cap;
+        # third is the LOW target we evicted down to.
         log.warning(
             "cleanup: disk over HIGH threshold: %s GB (cap %s GB), "
             "evicting down to %s GB",
-            _human_gb(total_bytes), _human_gb(high_bytes), _human_gb(low_bytes),
+            _human_gb(pre_eviction_bytes),
+            _human_gb(high_bytes),
+            _human_gb(low_bytes),
         )
 
     # ------------------------------------------------------------------
