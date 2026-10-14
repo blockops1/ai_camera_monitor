@@ -16,7 +16,7 @@ import pytest
 # The scanner lives one directory up from tests/.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from check_no_jpeg import _JPEG_PATTERNS, _KNOWN_FP, _scan_file
+from check_no_jpeg import _JPEG_PATTERNS, _KNOWN_FP, _KNOWN_FP_BY_FUNCTION, _scan_file
 
 
 def _make_tmp_py(content: str, repo_root: Path) -> Path:
@@ -76,17 +76,21 @@ class TestScannerOnProductionTree:
         assert total > 0, "Expected at least one .py file in production dirs"
 
     def test_known_fp_excluded(self, repo_root: Path):
-        """Known false-positive lines must be excluded from the JPEG scanner.
+        """Known false-positive lines and functions must be excluded from the JPEG scanner.
 
-        Updated for v0.6.3 (2026-09-18): _sniff_mime moved to detect_mime_type(),
-        line numbers shifted to (40, 51).
+        Updated 2026-10-14: switched to a two-tier exclusion model.
+        Line-number-based _KNOWN_FP keeps stable entries only (V2-030
+        codec.py JPEG exception). All other exclusions (mime-fallback in
+        _b64, jpg-detector in _sniff_mime) live in _KNOWN_FP_BY_FUNCTION
+        and survive line drift across edits.
         """
         assert _KNOWN_FP == {
-            ("infra/vision_analyzer.py", 111),  # mime fallback, not JPEG producer
             ("telegram_formatter/codec.py", 93),  # V2-030 JPEG exception (codec encodes bytes)
             ("telegram_formatter/codec.py", 94),  # V2-030 JPEG exception (codec docstring)
-            ("telegram_formatter/dispatcher.py", 40),  # detect_mime_type docstring mentions .jpg
-            ("telegram_formatter/dispatcher.py", 51),  # detect_mime_type returns image/jpeg, .jpg
+        }
+        assert _KNOWN_FP_BY_FUNCTION == {
+            ("infra/vision_analyzer.py", "_b64"),         # mime fallback, not JPEG producer
+            ("telegram_formatter/dispatcher.py", "_sniff_mime"),  # JPEG byte-detector, not producer
         }
 
     def test_main_exits_zero(self, repo_root: Path):
