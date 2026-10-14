@@ -28,12 +28,17 @@ import pytest
 # Test fixture
 # ---------------------------------------------------------------------------
 
-_TEST_CREDS = textwrap.dedent("""\
+_TEST_FRONT_IP = os.environ.get("FARM_TEST_FRONT_IP", "192.168.1.1")
+_TEST_BACK_IP = os.environ.get("FARM_TEST_BACK_IP", "192.168.1.2")
+
+_TEST_CREDS = textwrap.dedent(f"""\
 # Test camera credentials
-FRONT_IP=192.168.1.39
-FRONT_RTSP_URL=rtsp://admin:pass@192.168.1.39:554/stream
-BACK_IP=192.168.1.85
-BACK_RTSP_URL=rtsp://admin:pass@192.168.1.85:554/stream
+# IPs come from FARM_TEST_FRONT_IP / FARM_TEST_BACK_IP env vars
+# (default: RFC 5737 reserved range -- safe for any network)
+FRONT_IP={_TEST_FRONT_IP}
+FRONT_RTSP_URL=rtsp://admin:pass@{_TEST_FRONT_IP}:554/stream
+BACK_IP={_TEST_BACK_IP}
+BACK_RTSP_URL=rtsp://admin:pass@{_TEST_BACK_IP}:554/stream
 """)
 
 
