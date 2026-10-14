@@ -43,7 +43,16 @@ data/tg_uploads/*
 !data/tg_uploads/.gitkeep
 data/debug/
 logs/*.log
+logs/*.log.*
 !logs/.gitkeep
+
+# Daily status HTML reports + manual diagnostic dumps (generated at runtime, not source)
+logs/daily-status/
+!logs/daily-status/.gitkeep
+
+# One-off screenshots / scorecards dropped in repo root during diagnostics
+/scorecard.png
+/*.scorecard.png
 
 # archives / copy-targets
 /public/
