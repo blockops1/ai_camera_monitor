@@ -64,16 +64,53 @@ DAEMON_LOG = PROJECT_ROOT / "logs" / "daemon.log"
 SAVE_DIR = PROJECT_ROOT / "logs" / "daily-status"
 FILE_PREFIX = "crestview-orchards-surveillance-status"
 
-# 6 cams — name, IP, listener cam-id, model. Order is operator's mental model:
-# interior first (FRONT/BACK), then exterior clockwise.
-CAMS: list[dict[str, str]] = [
-    {"alias": "FRONT",  "ip": "192.168.1.39",  "label": "Front Door Outside",  "model": "RLC-833A"},
-    {"alias": "BACK",   "ip": "192.168.1.85",  "label": "Back Door Inside",    "model": "RLC-833A"},
-    {"alias": "OFG",    "ip": "192.168.1.73",  "label": "Outside Front Garage","model": "RLC-510A"},
-    {"alias": "OFP",    "ip": "192.168.1.108", "label": "Outside Front Power", "model": "RLC-510A"},
-    {"alias": "OFS",    "ip": "192.168.1.103", "label": "Outside Front Solar", "model": "RLC-510A"},
-    {"alias": "OBS",    "ip": "192.168.1.113", "label": "Outside Back Solar",  "model": "RLC-510A"},
+# 6 cams — alias, env-file prefix, label, model. Order is operator's mental
+# model: interior first (FRONT/BACK), then exterior clockwise.
+#
+# IPs are NOT hardcoded here. They are resolved at runtime from
+# camera-creds.env via infra.camera_creds.get_all_cameras() so this file
+# can be tracked in the public repo without leaking LAN addresses.
+# Use get_cam_ip(alias) below to look up an IP at runtime.
+_CAM_ALIASES: list[dict[str, str]] = [
+    {"alias": "FRONT", "prefix": "front",                 "label": "Front Door Outside",  "model": "RLC-833A"},
+    {"alias": "BACK",  "prefix": "back",                  "label": "Back Door Inside",    "model": "RLC-833A"},
+    {"alias": "OFG",   "prefix": "outside_front_garage",  "label": "Outside Front Garage","model": "RLC-510A"},
+    {"alias": "OFP",   "prefix": "outside_front_power",   "label": "Outside Front Power", "model": "RLC-510A"},
+    {"alias": "OFS",   "prefix": "outside_front_solar",   "label": "Outside Front Solar", "model": "RLC-510A"},
+    {"alias": "OBS",   "prefix": "outside_back_solar",    "label": "Outside Back Solar",  "model": "RLC-510A"},
 ]
+
+
+def get_cam_ip(alias: str) -> str:
+    """Resolve a cam's IP from camera-creds.env at runtime.
+
+    Returns the placeholder [REDACTED-LAN-IP] if the cam is not in the
+    env file (e.g. fresh clone, missing creds). Callers should treat
+    that as "IP unknown" rather than crashing.
+    """
+    try:
+        from infra.camera_creds import get_all_cameras
+        all_cams = get_all_cameras()
+        # Find the prefix for this alias
+        prefix = next((c["prefix"] for c in _CAM_ALIASES if c["alias"] == alias), None)
+        if prefix and prefix in all_cams:
+            return all_cams[prefix].get("ip", "[REDACTED-LAN-IP]")
+    except Exception:
+        pass
+    return "[REDACTED-LAN-IP]"
+
+
+def CAMS() -> list[dict[str, str]]:
+    """Return the cam list with IPs resolved at runtime.
+
+    This is a function (not a constant) because IPs come from the env
+    file and must be read fresh each call. Callers that need a stable
+    snapshot should assign the result to a local variable.
+    """
+    return [
+        {**entry, "ip": get_cam_ip(entry["alias"])}
+        for entry in _CAM_ALIASES
+    ]
 
 # Listener listen ports
 LISTEN_PORTS = (8090, 8091, 8092)
@@ -171,10 +208,10 @@ def get_per_cam_status() -> list[dict[str, Any]]:
         ["lsof", "-nP", "-iTCP", "-sTCP:ESTABLISHED", "-a", "-p", _listener_pid_or_placeholder()],
         timeout=5,
     )
-    rtsp_counts: dict[str, int] = {c["alias"]: 0 for c in CAMS}
+    rtsp_counts: dict[str, int] = {c["alias"]: 0 for c in CAMS()}
     if rc == 0:
         for line in out.splitlines():
-            for cam in CAMS:
+            for cam in CAMS():
                 if cam["ip"] in line and ":554" in line:
                     rtsp_counts[cam["alias"]] += 1
                     break
@@ -182,7 +219,7 @@ def get_per_cam_status() -> list[dict[str, Any]]:
     # For CPU, use reolink-cli per cam. Use env-passed password from camera-creds.env
     # so we don't expose the password in argv. Skip if env not set (caller's problem).
     password = _get_shared_cam_password()
-    for cam in CAMS:
+    for cam in CAMS():
         info: dict[str, Any] = {
             "alias": cam["alias"],
             "ip": cam["ip"],
@@ -275,8 +312,8 @@ def get_webhook_activity_24h() -> dict[str, int]:
     if not log_lines:
         return {}
     cutoff = dt.datetime.now() - dt.timedelta(hours=24)
-    ip_to_alias = {c["ip"]: c["alias"] for c in CAMS}
-    counts: dict[str, int] = {c["alias"]: 0 for c in CAMS}
+    ip_to_alias = {c["ip"]: c["alias"] for c in CAMS()}
+    counts: dict[str, int] = {c["alias"]: 0 for c in CAMS()}
     counts["other"] = 0
     pat = re.compile(
         r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?(\d+\.\d+\.\d+\.\d+).*POST /alert"
@@ -521,7 +558,7 @@ def render_html(report: dict[str, Any]) -> str:
     {"".join(
         f'<div class="stat"><div class="label">{escape(c["alias"])}</div>'
         f'<div class="value">{webhooks.get(c["alias"], 0)}</div></div>'
-        for c in CAMS
+        for c in CAMS()
     )}
   </div>
   <p class="meta">Total: {webhook_total} POST /alert from cams.
