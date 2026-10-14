@@ -8,42 +8,42 @@
   "current_state": {
     "cameras": {
       "front": {
-        "ip": "192.168.1.39",
+        "ip": "[REDACTED-LAN-IP]",
         "model": "RLC-833A",
         "firmware": "v3.1.0.4972_2506051571",
         "max_main_resolution": "3840x2160",
         "current_main_resolution": "2304x1296"
       },
       "back": {
-        "ip": "192.168.1.85",
+        "ip": "[REDACTED-LAN-IP]",
         "model": "RLC-833A",
         "firmware": "v3.1.0.4972_2506051571",
         "max_main_resolution": "3840x2160",
         "current_main_resolution": "2304x1296"
       },
       "outside_front_garage": {
-        "ip": "192.168.1.73",
+        "ip": "[REDACTED-LAN-IP]",
         "model": "RLC-510A",
         "firmware": "v3.2.0.5180_2507241368",
         "max_main_resolution": "2560x1920",
         "current_main_resolution": "2304x1296"
       },
       "outside_front_power": {
-        "ip": "192.168.1.108",
+        "ip": "[REDACTED-LAN-IP]",
         "model": "RLC-510A",
         "firmware": "v3.2.0.5180_2507241368",
         "max_main_resolution": "2560x1920",
         "current_main_resolution": "2304x1296"
       },
       "outside_front_solar": {
-        "ip": "192.168.1.103",
+        "ip": "[REDACTED-LAN-IP]",
         "model": "RLC-510A",
         "firmware": "v3.2.0.5180_2507241368",
         "max_main_resolution": "2560x1920",
         "current_main_resolution": "2304x1296"
       },
       "outside_back_solar": {
-        "ip": "192.168.1.113",
+        "ip": "[REDACTED-LAN-IP]",
         "model": "RLC-510A",
         "firmware": "v3.2.0.5180_2507241368",
         "max_main_resolution": "2560x1920",
