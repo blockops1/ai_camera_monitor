@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>farm-surveillance-v2 — Per-Event Pipeline Data Flow (v0.7.0)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      background: #0d1117;
+      min-height: 100vh;
+      padding: 2rem 1.5rem 3rem;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .wrap { max-width: 1380px; margin: 0 auto; }
+    .hdr { margin-bottom: 1.75rem; }
+    .hdr h1 {
+      font-size: 1.35rem; font-weight: 700; color: #f0f6fc;
+      letter-spacing: -0.015em; margin-bottom: 0.35rem;
+    }
+    .hdr .sub { color: #8b949e; font-size: 0.85rem; margin-bottom: 0.25rem; }
+    .hdr .meta { color: #6e7681; font-size: 0.75rem; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .pulse-dot {
+      display: inline-block; width: 10px; height: 10px;
+      background: #58a6ff; border-radius: 50%; margin-right: 0.6rem;
+      vertical-align: middle; animation: pulse 2.4s infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+    .diagram-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 1.25rem;
+      margin-bottom: 2rem;
+    }
+    .diagram-card h2 {
+      font-size: 1rem; font-weight: 600; color: #f0f6fc;
+      margin-bottom: 0.15rem;
+    }
+    .diagram-card .caption {
+      color: #8b949e; font-size: 0.78rem;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      margin-bottom: 1rem;
+    }
+    .svg-wrap { width: 100%; }
+    .svg-wrap svg { width: 100%; height: auto; display: block; }
+
+    .legend-strip {
+      display: flex; flex-wrap: wrap; gap: 0.6rem 1.1rem;
+      margin-top: 0.85rem; padding-top: 0.85rem;
+      border-top: 1px solid #21262d;
+      font-size: 0.72rem; color: #8b949e;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    .legend-strip .sw {
+      display: inline-block; width: 12px; height: 12px;
+      border-radius: 3px; margin-right: 0.35rem;
+      vertical-align: middle; border: 1px solid currentColor;
+    }
+
+    .footer {
+      text-align: center; margin-top: 2rem;
+      color: #6e7681; font-size: 0.72rem;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hdr">
+    <h1><span class="pulse-dot"></span>farm-surveillance-v2 — Per-Event Pipeline Data Flow (v0.7.0)</h1>
+    <div class="sub">What data flows between stages, per webhook event  ·  complements docs/ARCHITECTURE-alert-pipeline-2026-09-27.md (detailed ASCII)</div>
+    <div class="meta">commit 60758052  ·  tag v0.7.0  ·  1 webhook → up to 3 Telegram messages  ·  1 vision-LLM call (VM1) + 1 vision-LLM call (VM2) per event</div>
+  </div>
+
+  <div class="diagram-card">
+    <h2>Single-event data flow (left → right)</h2>
+    <div class="caption">Frame data and structured attributes carried between stages  ·  arrow labels show what data is passed  ·  side data shown in dashed boxes</div>
+
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1500 1140" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+
+        <defs>
+          <marker id="arrow2" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#8b949e"/>
+          </marker>
+          <marker id="arrow2-tg" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#79c0ff"/>
+          </marker>
+          <marker id="arrow2-vision" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#7ee787"/>
+          </marker>
+          <marker id="arrow2-red" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#f97583"/>
+          </marker>
+
+          <pattern id="grid2" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1c2128" stroke-width="0.6"/>
+          </pattern>
+
+          <style><![CDATA[
+            .stage-title { fill: #f0f6fc; font-size: 12px; font-weight: 700; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+            .stage-sub   { fill: #8b949e; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .data-label  { fill: #c9d1d9; font-size: 9.5px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .data-key    { fill: #8b949e; font-size: 9px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .anno        { fill: #8b949e; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .small       { fill: #8b949e; font-size: 9px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .title       { fill: #f0f6fc; font-size: 13px; font-weight: 700; }
+            .edge2       { fill: none; stroke: #8b949e; stroke-width: 1.5; }
+            .edge2-tg    { fill: none; stroke: #79c0ff; stroke-width: 1.5; }
+            .edge2-vision { fill: none; stroke: #7ee787; stroke-width: 1.5; }
+            .edge2-sup   { fill: none; stroke: #f97583; stroke-width: 1.5; stroke-dasharray: 4,3; }
+            .edge2-side  { fill: none; stroke: #6e7681; stroke-width: 1; stroke-dasharray: 3,3; }
+          ]]></style>
+        </defs>
+
+        <rect width="1500" height="1140" fill="#0d1117"/>
+        <rect width="1500" height="1140" fill="url(#grid2)"/>
+
+        <!-- ============================================================== -->
+        <!-- Stage 0: Reolink camera (origin)                               -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="20" y="40" width="180" height="100" rx="6" fill="#161b22" stroke="#8b949e" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="110" y="62" class="title" text-anchor="middle">Reolink Cam</text>
+          <text x="110" y="80" class="anno" text-anchor="middle">motion detection</text>
+          <text x="110" y="96" class="anno" text-anchor="middle">on-device AI (v3.x)</text>
+          <text x="110" y="112" class="small" text-anchor="middle">POST /alert</text>
+          <text x="110" y="125" class="small" text-anchor="middle">{channel: N, ai: {type}} </text>
+        </g>
+
+        <line x1="200" y1="90" x2="240" y2="90" class="edge2" marker-end="url(#arrow2)"/>
+        <text x="205" y="84" class="data-label">webhook payload</text>
+
+        <!-- ============================================================== -->
+        <!-- Stage 1: webhook receiver (POST /alert)                        -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="240" y="50" width="180" height="80" rx="6" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="330" y="72" class="stage-title" text-anchor="middle">1. Webhook</text>
+          <text x="330" y="88" class="stage-sub" text-anchor="middle">listener/daemon.alert()</text>
+          <text x="330" y="103" class="data-label" text-anchor="middle">normalize + IP-validate</text>
+          <text x="330" y="118" class="data-key" text-anchor="middle">→ alert_id = uuid4()</text>
+        </g>
+
+        <line x1="420" y1="90" x2="460" y2="90" class="edge2" marker-end="url(#arrow2)"/>
+        <text x="424" y="84" class="data-label">alert_id, source_ip</text>
+
+        <!-- ============================================================== -->
+        <!-- Stage 2: ring buffer pull (4 frames)                           -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="460" y="50" width="180" height="80" rx="6" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="550" y="72" class="stage-title" text-anchor="middle">2. Frame Pull</text>
+          <text x="550" y="88" class="stage-sub" text-anchor="middle">infra/frame_capture</text>
+          <text x="550" y="103" class="data-label" text-anchor="middle">get_recent_frames(n=4)</text>
+          <text x="550" y="118" class="data-key" text-anchor="middle">4 × lossless PNG</text>
+        </g>
+
+        <!-- Side data: ring buffer (dashed) -->
+        <g>
+          <rect x="460" y="150" width="180" height="50" rx="4" fill="rgba(13,17,23,0.5)" stroke="#6e7681" stroke-width="1" stroke-dasharray="3,3"/>
+          <text x="550" y="170" class="anno" text-anchor="middle">Side: ring buffer</text>
+          <text x="550" y="184" class="small" text-anchor="middle">12 frames per cam (4 pre + 8 post)</text>
+        </g>
+        <line x1="550" y1="130" x2="550" y2="150" class="edge2-side"/>
+
+        <line x1="640" y1="90" x2="680" y2="90" class="edge2" marker-end="url(#arrow2)"/>
+        <text x="644" y="84" class="data-label">4 frames + alert_id</text>
+
+        <!-- ============================================================== -->
+        <!-- Stage 3: cooldown                                              -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="680" y="50" width="180" height="80" rx="6" fill="rgba(255,166,87,0.18)" stroke="#ffa657" stroke-width="1.5"/>
+          <text x="770" y="72" class="stage-title" text-anchor="middle">3. Cooldown</text>
+          <text x="770" y="88" class="stage-sub" text-anchor="middle">infra/pipeline_cooldown</text>
+          <text x="770" y="103" class="data-label" text-anchor="middle">should_suppress(cam, class)</text>
+          <text x="770" y="118" class="data-key" text-anchor="middle">per-(cam, class) window</text>
+        </g>
+
+        <!-- Suppress path (red dashed) -->
+        <line x1="770" y1="130" x2="770" y2="220" class="edge2-sup" marker-end="url(#arrow2-red)"/>
+        <text x="778" y="180" class="anno" fill="#f97583">suppressed → drop</text>
+
+        <line x1="860" y1="90" x2="900" y2="90" class="edge2" marker-end="url(#arrow2)"/>
+        <text x="864" y="84" class="data-label">cam_id, classification</text>
+
+        <!-- ============================================================== -->
+        <!-- Stage 4: YOLO motion gate                                      -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="900" y="50" width="180" height="80" rx="6" fill="rgba(126,231,135,0.22)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="990" y="72" class="stage-title" text-anchor="middle">4. YOLO Gate</text>
+          <text x="990" y="88" class="stage-sub" text-anchor="middle">infra/gate.run</text>
+          <text x="990" y="103" class="data-label" text-anchor="middle">diff(1,2) ∩ (2,3) → bbox</text>
+          <text x="990" y="118" class="data-key" text-anchor="middle">COCO classify per crop</text>
+        </g>
+
+        <line x1="1080" y1="90" x2="1120" y2="90" class="edge2" marker-end="url(#arrow2)"/>
+        <text x="1084" y="84" class="data-label">bboxes + COCO labels</text>
+
+        <!-- ============================================================== -->
+        <!-- Stage 5: VM1 verify_class (vision-LLM call)                    -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="1120" y="50" width="200" height="80" rx="6" fill="rgba(126,231,135,0.22)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="1220" y="72" class="stage-title" text-anchor="middle">5. VM1 verify_class</text>
+          <text x="1220" y="88" class="stage-sub" text-anchor="middle">infra/vision_analyzer</text>
+          <text x="1220" y="103" class="data-label" text-anchor="middle">Qwen3-VL :8080  ·  prompt: vm1</text>
+          <text x="1220" y="118" class="data-key" text-anchor="middle">{class, subclass, confidence}</text>
+        </g>
+
+        <!-- vision-LLM call -->
+        <line x1="1220" y1="42" x2="1220" y2="20" class="edge2-vision"/>
+        <line x1="1320" y1="20" x2="1320" y2="42" class="edge2-vision" marker-end="url(#arrow2-vision)"/>
+        <text x="1325" y="14" class="anno" fill="#7ee787">vision-LLM (verify + maybe discard)</text>
+
+        <line x1="1320" y1="90" x2="1360" y2="90" class="edge2" marker-end="url(#arrow2)"/>
+        <text x="1324" y="84" class="data-label">{class, subclass}</text>
+
+        <!-- ============================================================== -->
+        <!-- Stage 6: VM2 detail_class (vision-LLM call)                    -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="20" y="250" width="180" height="100" rx="6" fill="rgba(126,231,135,0.22)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="110" y="272" class="stage-title" text-anchor="middle">6. VM2 detail_class</text>
+          <text x="110" y="288" class="stage-sub" text-anchor="middle">vision_analyzer</text>
+          <text x="110" y="303" class="data-label" text-anchor="middle">→ Qwen3-VL :8080</text>
+          <text x="110" y="316" class="data-key" text-anchor="middle">color, body, make, model,</text>
+          <text x="110" y="328" class="data-key" text-anchor="middle">breed, count, face_visible,</text>
+          <text x="110" y="340" class="data-key" text-anchor="middle">subclass, notes</text>
+        </g>
+
+        <!-- arrow from VM1 to VM2 (drops down) -->
+        <line x1="1320" y1="130" x2="200" y2="250" class="edge2" marker-end="url(#arrow2)"/>
+        <text x="640" y="170" class="data-label">if VM1 passed → {class, frames} → VM2</text>
+
+        <line x1="200" y1="300" x2="240" y2="300" class="edge2" marker-end="url(#arrow2)"/>
+        <text x="204" y="294" class="data-label">structured attrs</text>
+
+        <!-- ============================================================== -->
+        <!-- Stage 7: matcher (animal / person / vehicle)                   -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="240" y="250" width="200" height="100" rx="6" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="340" y="272" class="stage-title" text-anchor="middle">7. Matcher</text>
+          <text x="340" y="288" class="stage-sub" text-anchor="middle">vehicle_matcher / animal_matcher /</text>
+          <text x="340" y="302" class="stage-sub" text-anchor="middle">person_matcher</text>
+          <text x="340" y="318" class="data-label" text-anchor="middle">Tier-2 cosine (vm2 + thumbnail embedding)</text>
+          <text x="340" y="332" class="data-key" text-anchor="middle">data/known/{class}/&lt;id&gt;/</text>
+        </g>
+
+        <line x1="440" y1="300" x2="480" y2="300" class="edge2" marker-end="url(#arrow2)"/>
+        <text x="444" y="294" class="data-label">{match_id, similarity} | null</text>
+
+        <!-- ============================================================== -->
+        <!-- Stage 8: crop selector + alert artifacts                       -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="480" y="250" width="200" height="100" rx="6" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="580" y="272" class="stage-title" text-anchor="middle">8. Crop + Artifacts</text>
+          <text x="580" y="288" class="stage-sub" text-anchor="middle">infra/alert_artifacts</text>
+          <text x="580" y="303" class="data-label" text-anchor="middle">bbox + mult32 padding</text>
+          <text x="580" y="318" class="data-key" text-anchor="middle">data/frames/&lt;cam&gt;/&lt;alert_id&gt;/</text>
+          <text x="580" y="332" class="data-key" text-anchor="middle">frame_001..004 · crop_001..002</text>
+        </g>
+
+        <line x1="680" y1="300" x2="720" y2="300" class="edge2" marker-end="url(#arrow2)"/>
+        <text x="684" y="294" class="data-label">artifact paths + bbox</text>
+
+        <!-- ============================================================== -->
+        <!-- Stage 9: Telegram formatters (3 messages)                      -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="720" y="220" width="200" height="160" rx="6" fill="rgba(121,192,255,0.22)" stroke="#79c0ff" stroke-width="1.5"/>
+          <text x="820" y="242" class="stage-title" text-anchor="middle">9. Telegram Formatter</text>
+          <text x="820" y="258" class="stage-sub" text-anchor="middle">telegram_formatter/</text>
+
+          <!-- tg1 -->
+          <rect x="740" y="270" width="160" height="28" rx="3" fill="rgba(121,192,255,0.10)" stroke="#79c0ff" stroke-width="1"/>
+          <text x="820" y="288" class="data-label" text-anchor="middle">tg1 · alert (wide frame)</text>
+
+          <!-- tg2 -->
+          <rect x="740" y="304" width="160" height="28" rx="3" fill="rgba(121,192,255,0.10)" stroke="#79c0ff" stroke-width="1"/>
+          <text x="820" y="322" class="data-label" text-anchor="middle">tg2 · detail (cropped subject)</text>
+
+          <!-- tg3 -->
+          <rect x="740" y="338" width="160" height="28" rx="3" fill="rgba(121,192,255,0.10)" stroke="#79c0ff" stroke-width="1"/>
+          <text x="820" y="356" class="data-label" text-anchor="middle">tg3 · match (if recognized)</text>
+        </g>
+
+        <line x1="920" y1="260" x2="950" y2="260" class="edge2-tg" marker-end="url(#arrow2-tg)"/>
+        <line x1="920" y1="294" x2="950" y2="294" class="edge2-tg" marker-end="url(#arrow2-tg)"/>
+        <line x1="920" y1="328" x2="950" y2="328" class="edge2-tg" marker-end="url(#arrow2-tg)"/>
+        <text x="924" y="254" class="data-label" fill="#79c0ff">msg1</text>
+        <text x="924" y="288" class="data-label" fill="#79c0ff">msg2</text>
+        <text x="924" y="322" class="data-label" fill="#79c0ff">msg3</text>
+
+        <!-- ============================================================== -->
+        <!-- Stage 10: Telegram transport                                   -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="950" y="250" width="180" height="100" rx="6" fill="rgba(121,192,255,0.22)" stroke="#79c0ff" stroke-width="1.5"/>
+          <text x="1040" y="272" class="stage-title" text-anchor="middle">10. TG Transport</text>
+          <text x="1040" y="288" class="stage-sub" text-anchor="middle">listener/_send_telegram</text>
+          <text x="1040" y="303" class="data-label" text-anchor="middle">Bot.send_message / send_photo</text>
+          <text x="1040" y="318" class="data-key" text-anchor="middle">rate-limit guard (FARMSURV_TG_</text>
+          <text x="1040" y="332" class="data-key" text-anchor="middle">RATE_LIMIT_PER_MIN=30)</text>
+        </g>
+
+        <line x1="1130" y1="300" x2="1180" y2="300" class="edge2-tg" marker-end="url(#arrow2-tg)"/>
+        <text x="1134" y="294" class="data-label" fill="#79c0ff">3 × HTTPS POST</text>
+
+        <!-- External: Telegram -->
+        <g>
+          <rect x="1180" y="260" width="180" height="80" rx="6" fill="#161b22" stroke="#79c0ff" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="1270" y="282" class="title" text-anchor="middle">Telegram Bot API</text>
+          <text x="1270" y="300" class="anno" text-anchor="middle">api.telegram.org</text>
+          <text x="1270" y="316" class="small" text-anchor="middle">→ operator's home chat</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- Side data: enrolled identities storage                         -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="240" y="380" width="200" height="60" rx="4" fill="rgba(13,17,23,0.5)" stroke="#6e7681" stroke-width="1" stroke-dasharray="3,3"/>
+          <text x="340" y="400" class="anno" text-anchor="middle">Side: enrolled identities</text>
+          <text x="340" y="416" class="small" text-anchor="middle">data/known/{people,vehicles,animals}/</text>
+          <text x="340" y="428" class="small" text-anchor="middle">embeds + thumbs + last_seen</text>
+        </g>
+        <line x1="340" y1="350" x2="340" y2="380" class="edge2-side"/>
+
+        <!-- Side data: crop artifacts (read by Telegram formatter) -->
+        <g>
+          <rect x="480" y="380" width="200" height="60" rx="4" fill="rgba(13,17,23,0.5)" stroke="#6e7681" stroke-width="1" stroke-dasharray="3,3"/>
+          <text x="580" y="400" class="anno" text-anchor="middle">Side: alert artifacts</text>
+          <text x="580" y="416" class="small" text-anchor="middle">data/frames/&lt;cam&gt;/&lt;alert_id&gt;/</text>
+          <text x="580" y="428" class="small" text-anchor="middle">read by tg1, tg2, tg3</text>
+        </g>
+        <line x1="580" y1="350" x2="580" y2="380" class="edge2-side"/>
+        <line x1="580" y1="410" x2="820" y2="410" class="edge2-side"/>
+        <line x1="820" y1="410" x2="820" y2="380" class="edge2-side"/>
+
+        <!-- ============================================================== -->
+        <!-- Data tables: what each stage returns                            -->
+        <!-- ============================================================== -->
+
+        <text x="20" y="490" class="title">Data structures carried between stages</text>
+
+        <!-- Row 1: 3 boxes for stage 5/6/7 outputs -->
+        <g>
+          <rect x="20" y="510" width="350" height="120" rx="4" fill="rgba(126,231,135,0.10)" stroke="#7ee787" stroke-width="1"/>
+          <text x="195" y="530" class="stage-title" text-anchor="middle">VM1 output (after stage 5)</text>
+          <text x="40" y="552" class="data-key" font-size="10">class:        "vehicle" | "person" | "animal" | "unsure"</text>
+          <text x="40" y="568" class="data-key" font-size="10">subclass:     "SUV" | "sedan" | "truck" | "cat" | "dog" | ...</text>
+          <text x="40" y="584" class="data-key" font-size="10">confidence:   "definite" | "probable" | "unsure"</text>
+          <text x="40" y="600" class="data-key" font-size="10">notes:        short free-text rationale</text>
+        </g>
+
+        <g>
+          <rect x="390" y="510" width="350" height="120" rx="4" fill="rgba(126,231,135,0.10)" stroke="#7ee787" stroke-width="1"/>
+          <text x="565" y="530" class="stage-title" text-anchor="middle">VM2 output (after stage 6)</text>
+          <text x="410" y="552" class="data-key" font-size="10">color:        "dark gray" | "white" | ...</text>
+          <text x="410" y="568" class="data-key" font-size="10">body:         "sedan" | "pickup" | "small dog" | ...</text>
+          <text x="410" y="584" class="data-key" font-size="10">make_model:   "Ford F-150" | "Toyota Camry" | ...</text>
+          <text x="410" y="600" class="data-key" font-size="10">count:        1, face_visible: true|false, breed, subclass, notes</text>
+        </g>
+
+        <g>
+          <rect x="760" y="510" width="350" height="120" rx="4" fill="rgba(210,168,255,0.10)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="935" y="530" class="stage-title" text-anchor="middle">Matcher output (after stage 7)</text>
+          <text x="780" y="552" class="data-key" font-size="10">match_id:     "veh_001" | "anim_jeremiah" | null</text>
+          <text x="780" y="568" class="data-key" font-size="10">match_type:   "known" | "unknown"</text>
+          <text x="780" y="584" class="data-key" font-size="10">similarity:   0.0–1.0 (Tier-2 cosine)</text>
+          <text x="780" y="600" class="data-key" font-size="10">last_seen:    ISO 8601 (only on known match)</text>
+        </g>
+
+        <!-- Row 2: full alert object assembled by stage 9 -->
+        <g>
+          <rect x="20" y="650" width="1090" height="170" rx="4" fill="rgba(121,192,255,0.10)" stroke="#79c0ff" stroke-width="1"/>
+          <text x="565" y="670" class="stage-title" text-anchor="middle">Final alert object (after stage 9, fed to 3 Telegram messages)</text>
+
+          <text x="40" y="694" class="data-key" font-size="10">alert_id:</text>
+          <text x="200" y="694" class="data-label" font-size="10">uuid4</text>
+          <text x="40" y="710" class="data-key" font-size="10">camera_id:</text>
+          <text x="200" y="710" class="data-label" font-size="10">"FRONT" | "BACK" | "OFG" | ...</text>
+          <text x="40" y="726" class="data-key" font-size="10">timestamp:</text>
+          <text x="200" y="726" class="data-label" font-size="10">ISO 8601 (UTC)</text>
+          <text x="40" y="742" class="data-key" font-size="10">classification:</text>
+          <text x="200" y="742" class="data-label" font-size="10">"vehicle" | "person" | "animal"</text>
+          <text x="40" y="758" class="data-key" font-size="10">vm1_result / vm2_result:</text>
+          <text x="200" y="758" class="data-label" font-size="10">{class, subclass, confidence, color, body, make_model, count, face_visible, notes}</text>
+          <text x="40" y="774" class="data-key" font-size="10">match_result:</text>
+          <text x="200" y="774" class="data-label" font-size="10">{match_id, match_type, similarity, last_seen} | null</text>
+          <text x="40" y="790" class="data-key" font-size="10">artifacts:</text>
+          <text x="200" y="790" class="data-label" font-size="10">{frame_001..004, crop_001..002} (paths under data/frames/&lt;cam&gt;/&lt;alert_id&gt;/)</text>
+          <text x="40" y="806" class="data-key" font-size="10">cooldown_status:</text>
+          <text x="200" y="806" class="data-label" font-size="10">"ok" | "suppressed" | "dropped"</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- Bottom: timing + counts                                        -->
+        <!-- ============================================================== -->
+
+        <text x="20" y="860" class="title">Per-event timing (median, single-threaded pipeline)</text>
+
+        <g>
+          <rect x="20" y="880" width="180" height="80" rx="4" fill="rgba(88,166,255,0.10)" stroke="#58a6ff" stroke-width="1"/>
+          <text x="110" y="900" class="stage-sub" text-anchor="middle">Webhook → first TG msg</text>
+          <text x="110" y="920" class="stage-title" text-anchor="middle">~ 3.5–6 s</text>
+          <text x="110" y="938" class="small" text-anchor="middle">(includes 2 vision-LLM calls)</text>
+        </g>
+
+        <g>
+          <rect x="220" y="880" width="180" height="80" rx="4" fill="rgba(126,231,135,0.10)" stroke="#7ee787" stroke-width="1"/>
+          <text x="310" y="900" class="stage-sub" text-anchor="middle">VM1 call latency</text>
+          <text x="310" y="920" class="stage-title" text-anchor="middle">~ 1.0–1.8 s</text>
+          <text x="310" y="938" class="small" text-anchor="middle">(Qwen3-VL-8B @ 6 fps)</text>
+        </g>
+
+        <g>
+          <rect x="420" y="880" width="180" height="80" rx="4" fill="rgba(126,231,135,0.10)" stroke="#7ee787" stroke-width="1"/>
+          <text x="510" y="900" class="stage-sub" text-anchor="middle">VM2 call latency</text>
+          <text x="510" y="920" class="stage-title" text-anchor="middle">~ 1.0–1.8 s</text>
+          <text x="510" y="938" class="small" text-anchor="middle">(Qwen3-VL-8B @ 6 fps)</text>
+        </g>
+
+        <g>
+          <rect x="620" y="880" width="180" height="80" rx="4" fill="rgba(210,168,255,0.10)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="710" y="900" class="stage-sub" text-anchor="middle">Matcher latency (Tier-2)</text>
+          <text x="710" y="920" class="stage-title" text-anchor="middle">~ 0.1–0.4 s</text>
+          <text x="710" y="938" class="small" text-anchor="middle">(cosine, ~50–500 known)</text>
+        </g>
+
+        <g>
+          <rect x="820" y="880" width="180" height="80" rx="4" fill="rgba(121,192,255,0.10)" stroke="#79c0ff" stroke-width="1"/>
+          <text x="910" y="900" class="stage-sub" text-anchor="middle">3 × Telegram send</text>
+          <text x="910" y="920" class="stage-title" text-anchor="middle">~ 0.3–0.6 s</text>
+          <text x="910" y="938" class="small" text-anchor="middle">(rate-limited @ 30/min)</text>
+        </g>
+
+        <g>
+          <rect x="1020" y="880" width="180" height="80" rx="4" fill="rgba(255,166,87,0.10)" stroke="#ffa657" stroke-width="1"/>
+          <text x="1110" y="900" class="stage-sub" text-anchor="middle">Total per event</text>
+          <text x="1110" y="920" class="stage-title" text-anchor="middle">~ 3.5–6 s</text>
+          <text x="1110" y="938" class="small" text-anchor="middle">single-threaded</text>
+        </g>
+
+        <!-- Bottom: data cardinality -->
+        <text x="20" y="990" class="title">Data volume per event (typical)</text>
+        <g>
+          <text x="20" y="1014" class="data-label">Frames read from ring:    4 (lossless PNG, 2–4 MB each)</text>
+          <text x="20" y="1032" class="data-label">Vision-LLM tokens:        ~600 prompt + ~200 output per call × 2 calls</text>
+          <text x="20" y="1050" class="data-label">Match embeddings compared:  50–500 (cosine, in-memory)</text>
+          <text x="20" y="1068" class="data-label">Telegram API calls:        3 (1× send_message wide + 2× send_photo crop)</text>
+          <text x="20" y="1086" class="data-label">Alert artifacts written:   4 ring frames + 2 crops + 1 composite → data/frames/&lt;cam&gt;/&lt;alert_id&gt;/</text>
+        </g>
+
+        <!-- ===== Legend ===== -->
+        <g transform="translate(720, 1108)">
+          <text x="0" y="0" class="label">Legend</text>
+          <g transform="translate(0,12)">
+            <rect x="0" y="0" width="14" height="10" rx="2" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1"/>
+            <text x="22" y="9" class="small">webhook / pipeline</text>
+            <rect x="160" y="0" width="14" height="10" rx="2" fill="rgba(126,231,135,0.22)" stroke="#7ee787" stroke-width="1"/>
+            <text x="182" y="9" class="small">vision / AI</text>
+            <rect x="280" y="0" width="14" height="10" rx="2" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+            <text x="302" y="9" class="small">matchers / frame I/O</text>
+            <rect x="450" y="0" width="14" height="10" rx="2" fill="rgba(255,166,87,0.18)" stroke="#ffa657" stroke-width="1"/>
+            <text x="472" y="9" class="small">cooldown / suppress</text>
+            <rect x="600" y="0" width="14" height="10" rx="2" fill="rgba(121,192,255,0.22)" stroke="#79c0ff" stroke-width="1"/>
+            <text x="622" y="9" class="small">telegram</text>
+            <rect x="710" y="0" width="14" height="10" rx="2" fill="#161b22" stroke="#6e7681" stroke-width="1" stroke-dasharray="3,2"/>
+            <text x="732" y="9" class="small">external / side data</text>
+          </g>
+        </g>
+
+      </svg>
+    </div>
+
+    <div class="legend-strip">
+      <span><span class="sw" style="color:#58a6ff"></span>webhook / pipeline</span>
+      <span><span class="sw" style="color:#7ee787"></span>vision / AI</span>
+      <span><span class="sw" style="color:#d2a8ff"></span>matchers / frame I/O</span>
+      <span><span class="sw" style="color:#ffa657"></span>cooldown / suppress</span>
+      <span><span class="sw" style="color:#79c0ff"></span>telegram</span>
+      <span><span class="sw" style="color:#6e7681"></span>external / side data</span>
+    </div>
+  </div>
+
+  <div class="footer">
+    farm-surveillance-v2  ·  v0.7.0  ·  per-event data flow  ·  complements docs/ARCHITECTURE-alert-pipeline-2026-09-27.md
+  </div>
+</div>
+</body>
+</html>

@@ -87,3 +87,6 @@ data/events/*/
 # Backup files (created by orchestrator env file edits, not source)
 *.bak
 *.bak.*
+
+# Local render-test PNGs (Chrome headless scratch)
+docs/architecture/_*.png

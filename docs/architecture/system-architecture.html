@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>farm-surveillance-v2 — System Architecture (v0.7.0)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      background: #0d1117;
+      min-height: 100vh;
+      padding: 2rem 1.5rem 3rem;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .wrap { max-width: 1380px; margin: 0 auto; }
+    .hdr { margin-bottom: 1.75rem; }
+    .hdr h1 {
+      font-size: 1.35rem; font-weight: 700; color: #f0f6fc;
+      letter-spacing: -0.015em; margin-bottom: 0.35rem;
+    }
+    .hdr .sub { color: #8b949e; font-size: 0.85rem; margin-bottom: 0.25rem; }
+    .hdr .meta { color: #6e7681; font-size: 0.75rem; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .pulse-dot {
+      display: inline-block; width: 10px; height: 10px;
+      background: #58a6ff; border-radius: 50%; margin-right: 0.6rem;
+      vertical-align: middle; animation: pulse 2.4s infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+    .diagram-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 1.25rem;
+      margin-bottom: 2rem;
+    }
+    .diagram-card h2 {
+      font-size: 1rem; font-weight: 600; color: #f0f6fc;
+      margin-bottom: 0.15rem;
+    }
+    .diagram-card .caption {
+      color: #8b949e; font-size: 0.78rem;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      margin-bottom: 1rem;
+    }
+    .svg-wrap { width: 100%; }
+    .svg-wrap svg { width: 100%; height: auto; display: block; }
+
+    .legend-strip {
+      display: flex; flex-wrap: wrap; gap: 0.6rem 1.1rem;
+      margin-top: 0.85rem; padding-top: 0.85rem;
+      border-top: 1px solid #21262d;
+      font-size: 0.72rem; color: #8b949e;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    .legend-strip .sw {
+      display: inline-block; width: 12px; height: 12px;
+      border-radius: 3px; margin-right: 0.35rem;
+      vertical-align: middle; border: 1px solid currentColor;
+    }
+
+    .footer {
+      text-align: center; margin-top: 2rem;
+      color: #6e7681; font-size: 0.72rem;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hdr">
+    <h1><span class="pulse-dot"></span>farm-surveillance-v2 — System Architecture (v0.7.0)</h1>
+    <div class="sub">Single-process daemon · 3 listening ports · webhook → vision pipeline → Telegram · 12 read-only API/MCP surfaces</div>
+    <div class="meta">commit 60758052  ·  tag v0.7.0  ·  LaunchAgent com.farm.surveillance.v2.plist  ·  KeepAlive=true</div>
+  </div>
+
+  <!-- ====================================================== -->
+  <!-- DIAGRAM 1: SYSTEM ARCHITECTURE OVERVIEW                 -->
+  <!-- ====================================================== -->
+  <div class="diagram-card">
+    <h2>System Architecture — External actors, the daemon, and side surfaces</h2>
+    <div class="caption">v0.7.0  ·  All boxes inside the central dashed rectangle are one Python process (listener/daemon.py)  ·  arrows show data flow direction</div>
+
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1320 1240" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+
+        <defs>
+          <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#8b949e"/>
+          </marker>
+          <marker id="arrow-tg" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#79c0ff"/>
+          </marker>
+          <marker id="arrow-vision" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#7ee787"/>
+          </marker>
+          <marker id="arrow-priv" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#f97583"/>
+          </marker>
+
+          <pattern id="grid1" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1c2128" stroke-width="0.6"/>
+          </pattern>
+
+          <style><![CDATA[
+            .label  { fill: #f0f6fc; font-size: 12px; font-weight: 600; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+            .sub    { fill: #8b949e; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .file   { fill: #6e7681; font-size: 9.5px; font-style: italic; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .anno   { fill: #8b949e; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .small  { fill: #8b949e; font-size: 9px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .title  { fill: #f0f6fc; font-size: 13px; font-weight: 700; }
+            .edge   { fill: none; stroke: #8b949e; stroke-width: 1.5; }
+            .edge-tg  { fill: none; stroke: #79c0ff; stroke-width: 1.5; }
+            .edge-vision  { fill: none; stroke: #7ee787; stroke-width: 1.5; }
+            .edge-priv  { fill: none; stroke: #f97583; stroke-width: 1.5; stroke-dasharray: 4,3; }
+          ]]></style>
+        </defs>
+
+        <rect width="1320" height="1240" fill="#0d1117"/>
+        <rect width="1320" height="1240" fill="url(#grid1)"/>
+
+        <!-- ============================================================== -->
+        <!-- Top row: external actors (orange = external)                   -->
+        <!-- ============================================================== -->
+
+        <!-- Reolink cams (LAN) -->
+        <g>
+          <rect x="60" y="40" width="220" height="74" rx="6" fill="#161b22" stroke="#8b949e" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="170" y="62" class="title" text-anchor="middle">Reolink Cams (LAN)</text>
+          <text x="170" y="78" class="anno" text-anchor="middle">5 cameras</text>
+          <text x="170" y="91" class="small" text-anchor="middle">192.168.1.0/24 (RFC 1918)</text>
+          <text x="170" y="104" class="small" text-anchor="middle">POST /alert on motion</text>
+        </g>
+
+        <!-- Qwen3-VL (same Mac mini, separate process) -->
+        <g>
+          <rect x="540" y="40" width="240" height="74" rx="6" fill="#161b22" stroke="#7ee787" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="660" y="62" class="title" text-anchor="middle">Qwen3-VL-8B</text>
+          <text x="660" y="78" class="anno" text-anchor="middle">llama-server :8080</text>
+          <text x="660" y="91" class="small" text-anchor="middle">localhost only (127.0.0.1)</text>
+          <text x="660" y="104" class="small" text-anchor="middle">vision-LLM via HTTP</text>
+        </g>
+
+        <!-- Telegram bot API (internet) -->
+        <g>
+          <rect x="1040" y="40" width="220" height="74" rx="6" fill="#161b22" stroke="#79c0ff" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="1150" y="62" class="title" text-anchor="middle">Telegram Bot API</text>
+          <text x="1150" y="78" class="anno" text-anchor="middle">api.telegram.org</text>
+          <text x="1150" y="91" class="small" text-anchor="middle">bot token in telegram-creds.env</text>
+          <text x="1150" y="104" class="small" text-anchor="middle">3 msgs / event (tg1, tg2, tg3)</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- Middle: the Mac mini daemon (the big dashed rectangle)         -->
+        <!-- ============================================================== -->
+
+        <rect x="40" y="160" width="1240" height="780" rx="10" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="8,4"/>
+        <text x="60" y="184" class="title" fill="#58a6ff">Mac mini — farm-surveillance-v2 daemon (single Python process)</text>
+        <text x="60" y="200" class="anno">listener/daemon.py  ·  launchd KeepAlive  ·  3 listening ports (one process, 3 socket bindings)</text>
+
+        <!-- 3 listening ports (along top of the daemon box) -->
+        <g>
+          <rect x="80" y="220" width="220" height="40" rx="4" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="190" y="236" class="label" text-anchor="middle">:8090 webhook</text>
+          <text x="190" y="252" class="small" text-anchor="middle">LAN only (0.0.0.0:8090)</text>
+
+          <rect x="540" y="220" width="240" height="40" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="660" y="236" class="label" text-anchor="middle">:8091 MCP</text>
+          <text x="660" y="252" class="small" text-anchor="middle">Tailscale (100.64.0.10)</text>
+
+          <rect x="1040" y="220" width="220" height="40" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="1150" y="236" class="label" text-anchor="middle">:8092 HTTP API</text>
+          <text x="1150" y="252" class="small" text-anchor="middle">Tailscale (100.64.0.10)</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- Inside the daemon: the alert pipeline (left) and side surfaces  -->
+        <!-- ============================================================== -->
+
+        <!-- PIPELINE (left side, vertical chain) -->
+        <g>
+          <rect x="60" y="290" width="540" height="610" rx="8" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="80" y="312" class="label" fill="#f0f6fc">Alert Pipeline (linear, sync)</text>
+          <text x="80" y="328" class="anno">listener/pipeline.py  ·  11 stages  ·  single-threaded</text>
+
+          <!-- Stage 1: webhook receiver -->
+          <rect x="100" y="350" width="460" height="46" rx="4" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="330" y="370" class="label" text-anchor="middle">1. Webhook receiver (POST /alert)</text>
+          <text x="330" y="386" class="anno" text-anchor="middle">normalize + IP-validate → alert_id</text>
+
+          <line x1="330" y1="396" x2="330" y2="412" class="edge" marker-end="url(#arrow)"/>
+
+          <!-- Stage 2: ring buffer pull -->
+          <rect x="100" y="414" width="460" height="46" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="330" y="434" class="label" text-anchor="middle">2. Ring buffer pull (4 frames)</text>
+          <text x="330" y="450" class="anno" text-anchor="middle">infra/frame_capture · 12-frame ring per cam</text>
+
+          <line x1="330" y1="460" x2="330" y2="476" class="edge" marker-end="url(#arrow)"/>
+
+          <!-- Stage 3: cooldown -->
+          <rect x="100" y="478" width="460" height="46" rx="4" fill="rgba(255,166,87,0.18)" stroke="#ffa657" stroke-width="1.5"/>
+          <text x="330" y="498" class="label" text-anchor="middle">3. Cooldown check (per-(cam, class))</text>
+          <text x="330" y="514" class="anno" text-anchor="middle">should_suppress → drop or continue</text>
+
+          <line x1="330" y1="524" x2="330" y2="540" class="edge" marker-end="url(#arrow)"/>
+
+          <!-- Stage 4: YOLO gate -->
+          <rect x="100" y="542" width="460" height="46" rx="4" fill="rgba(126,231,135,0.22)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="330" y="562" class="label" text-anchor="middle">4. YOLO motion gate (COCO)</text>
+          <text x="330" y="578" class="anno" text-anchor="middle">infra/gate.run · diff → bbox → COCO</text>
+
+          <line x1="330" y1="588" x2="330" y2="604" class="edge" marker-end="url(#arrow)"/>
+
+          <!-- Stage 5: VM1 vision-LLM (verify_class) -->
+          <rect x="100" y="606" width="460" height="46" rx="4" fill="rgba(126,231,135,0.22)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="330" y="626" class="label" text-anchor="middle">5. Vision-LLM (VM1 verify_class)</text>
+          <text x="330" y="642" class="anno" text-anchor="middle">→ Qwen3-VL :8080 → {class, subclass}</text>
+
+          <line x1="330" y1="652" x2="330" y2="668" class="edge" marker-end="url(#arrow)"/>
+
+          <!-- Stage 6: VM2 vision-LLM (detail_class) -->
+          <rect x="100" y="670" width="460" height="46" rx="4" fill="rgba(126,231,135,0.22)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="330" y="690" class="label" text-anchor="middle">6. Vision-LLM (VM2 detail_class)</text>
+          <text x="330" y="706" class="anno" text-anchor="middle">color, body, make/model, breed, count</text>
+
+          <line x1="330" y1="716" x2="330" y2="732" class="edge" marker-end="url(#arrow)"/>
+
+          <!-- Stage 7: matchers -->
+          <rect x="100" y="734" width="460" height="46" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="330" y="754" class="label" text-anchor="middle">7. Matcher (Tier-2 cosine)</text>
+          <text x="330" y="770" class="anno" text-anchor="middle">vehicle / animal / person → data/known/</text>
+
+          <line x1="330" y1="780" x2="330" y2="796" class="edge" marker-end="url(#arrow)"/>
+
+          <!-- Stage 8: Telegram formatters (3 messages) -->
+          <rect x="100" y="798" width="460" height="46" rx="4" fill="rgba(121,192,255,0.22)" stroke="#79c0ff" stroke-width="1.5"/>
+          <text x="330" y="818" class="label" text-anchor="middle">8. Telegram formatter (tg1, tg2, tg3)</text>
+          <text x="330" y="834" class="anno" text-anchor="middle">telegram_formatter/ · alert · detail · match</text>
+
+          <line x1="330" y1="844" x2="330" y2="864" class="edge-tg" marker-end="url(#arrow-tg)"/>
+
+          <!-- Stage 9: Telegram transport -->
+          <rect x="100" y="866" width="460" height="34" rx="4" fill="rgba(121,192,255,0.22)" stroke="#79c0ff" stroke-width="1.5"/>
+          <text x="330" y="882" class="label" text-anchor="middle">9. Telegram transport (send_message / send_photo)</text>
+        </g>
+
+        <!-- SIDE SURFACES (right side) -->
+        <g>
+          <rect x="640" y="290" width="620" height="610" rx="8" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="660" y="312" class="label" fill="#f0f6fc">Side Surfaces (read-only, do not affect pipeline)</text>
+          <text x="660" y="328" class="anno">5 surfaces  ·  all read paths  ·  all bound Tailscale-only by default</text>
+
+          <!-- MCP server -->
+          <rect x="680" y="350" width="560" height="50" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="700" y="372" class="label">MCP Server (18 read-only tools)</text>
+          <text x="700" y="388" class="anno">infra/mcp_server.py · :8091 Tailscale · bearer auth</text>
+
+          <!-- API server -->
+          <rect x="680" y="412" width="560" height="50" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="700" y="434" class="label">HTTP API Server (17 GETs + /healthz)</text>
+          <text x="700" y="450" class="anno">infra/api_server.py · :8092 Tailscale · mirrors MCP</text>
+
+          <!-- Daily status report -->
+          <rect x="680" y="474" width="560" height="50" rx="4" fill="rgba(255,166,87,0.18)" stroke="#ffa657" stroke-width="1.5"/>
+          <text x="700" y="496" class="label">Daily Status Report (cron 08:00)</text>
+          <text x="700" y="512" class="anno">infra/daily_status_report.py · HTML → TG document</text>
+
+          <!-- Health watchdog -->
+          <rect x="680" y="536" width="560" height="50" rx="4" fill="rgba(255,166,87,0.18)" stroke="#ffa657" stroke-width="1.5"/>
+          <text x="700" y="558" class="label">Health Watchdog (silent-when-OK)</text>
+          <text x="700" y="574" class="anno">bin/health_watchdog.sh · liveness + disk + cadence</text>
+
+          <!-- Privacy guard hook -->
+          <rect x="680" y="598" width="560" height="50" rx="4" fill="rgba(249,117,131,0.18)" stroke="#f97583" stroke-width="1.5"/>
+          <text x="700" y="620" class="label">Privacy Guard (pre-push gate)</text>
+          <text x="700" y="636" class="anno">make check-privacy · 4 scanners + cred-guard</text>
+
+          <!-- Cooldown / suppression runtime surfaces -->
+          <rect x="680" y="660" width="560" height="50" rx="4" fill="rgba(126,231,135,0.18)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="700" y="682" class="label">Per-cam tunables (read by gate, cooldown, vision)</text>
+          <text x="700" y="698" class="anno">config/motion_gate_thresholds.json · camera_recipes.toml</text>
+
+          <!-- Known identities storage -->
+          <rect x="680" y="722" width="560" height="50" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="700" y="744" class="label">Enrolled identities (matched against VM2)</text>
+          <text x="700" y="760" class="anno">data/known/{people,vehicles,animals}/ · enroll via scripts/</text>
+
+          <!-- Frame artifact retention -->
+          <rect x="680" y="784" width="560" height="50" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="700" y="806" class="label">Frame + crop artifacts (per alert)</text>
+          <text x="700" y="822" class="anno">data/frames/&lt;cam&gt;/&lt;alert_id&gt;/ · retention-capped</text>
+
+          <!-- Heartbeat / logs -->
+          <rect x="680" y="846" width="560" height="42" rx="4" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="700" y="866" class="label">Heartbeat + logs</text>
+          <text x="700" y="880" class="anno">logs/daemon.log  ·  /api/v1/listener/status  ·  last_webhook_at, alerts_per_min, uptime_seconds</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- External arrows                                                 -->
+        <!-- ============================================================== -->
+
+        <!-- Reolink cams → :8090 -->
+        <line x1="170" y1="114" x2="170" y2="220" class="edge" marker-end="url(#arrow)"/>
+        <text x="178" y="170" class="anno">POST /alert</text>
+
+        <!-- :8090 → webhook receiver (top of pipeline) -->
+        <line x1="190" y1="260" x2="190" y2="350" class="edge" marker-end="url(#arrow)"/>
+
+        <!-- VM1 + VM2 → Qwen3-VL (out-and-back) -->
+        <line x1="560" y1="628" x2="40" y2="200" class="edge-vision"/>
+        <line x1="40" y1="200" x2="660" y2="78" class="edge-vision"/>
+        <line x1="660" y1="78" x2="660" y2="42" class="edge-vision"/>
+        <line x1="560" y1="690" x2="660" y2="78" class="edge-vision" marker-end="url(#arrow-vision)"/>
+        <text x="20" y="170" class="anno" fill="#7ee787">vision-LLM call (verify + detail)</text>
+
+        <!-- Telegram formatter → Bot API -->
+        <line x1="330" y1="884" x2="1150" y2="114" class="edge-tg" marker-end="url(#arrow-tg)"/>
+        <text x="730" y="500" class="anno" fill="#79c0ff">3 × send_message / send_photo (tg1, tg2, tg3)</text>
+
+        <!-- ============================================================== -->
+        <!-- Bottom: filesystem + config (storage)                           -->
+        <!-- ============================================================== -->
+
+        <rect x="40" y="970" width="1240" height="180" rx="8" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+        <text x="60" y="992" class="label" fill="#f0f6fc">Filesystem &amp; config (gitignored where applicable)</text>
+        <text x="60" y="1008" class="anno">All file reads are private to the daemon process  ·  no public exposure of paths</text>
+
+        <!-- storage row -->
+        <g>
+          <rect x="60" y="1024" width="280" height="46" rx="4" fill="rgba(195,250,232,0.12)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="200" y="1044" class="label" text-anchor="middle">data/frames/&lt;cam&gt;/&lt;alert_id&gt;/</text>
+          <text x="200" y="1060" class="anno" text-anchor="middle">ring buffer + crops (lossless PNG)</text>
+
+          <rect x="360" y="1024" width="280" height="46" rx="4" fill="rgba(195,250,232,0.12)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="500" y="1044" class="label" text-anchor="middle">data/known/{people,vehicles,animals}/</text>
+          <text x="500" y="1060" class="anno" text-anchor="middle">enrolled identities (embeddings + thumbs)</text>
+
+          <rect x="660" y="1024" width="280" height="46" rx="4" fill="rgba(195,250,232,0.12)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="800" y="1044" class="label" text-anchor="middle">logs/daemon.log + daily-status/</text>
+          <text x="800" y="1060" class="anno" text-anchor="middle">heartbeat + per-day HTML reports</text>
+
+          <rect x="960" y="1024" width="300" height="46" rx="4" fill="rgba(195,250,232,0.12)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="1110" y="1044" class="label" text-anchor="middle">config/{motion_gate, camera_recipes}</text>
+          <text x="1110" y="1060" class="anno" text-anchor="middle">thresholds, vision prompts, recipe</text>
+        </g>
+
+        <!-- credentials row (red-dashed — never committed) -->
+        <g>
+          <rect x="60" y="1080" width="380" height="46" rx="4" fill="rgba(249,117,131,0.10)" stroke="#f97583" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="250" y="1100" class="label" text-anchor="middle">camera-creds.env  (gitignored, mode 600)</text>
+          <text x="250" y="1116" class="anno" text-anchor="middle">per-cam IP / HTTP user+pass / RTSP user+pass+url</text>
+
+          <rect x="460" y="1080" width="280" height="46" rx="4" fill="rgba(249,117,131,0.10)" stroke="#f97583" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="600" y="1100" class="label" text-anchor="middle">telegram-creds.env</text>
+          <text x="600" y="1116" class="anno" text-anchor="middle">bot token + home chat_id</text>
+
+          <rect x="760" y="1080" width="240" height="46" rx="4" fill="rgba(249,117,131,0.10)" stroke="#f97583" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="880" y="1100" class="label" text-anchor="middle">llm-creds.env</text>
+          <text x="880" y="1116" class="anno" text-anchor="middle">vision-LLM endpoint + auth</text>
+
+          <rect x="1020" y="1080" width="240" height="46" rx="4" fill="rgba(249,117,131,0.10)" stroke="#f97583" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="1140" y="1100" class="label" text-anchor="middle">.env (runtime flags)</text>
+          <text x="1140" y="1116" class="anno" text-anchor="middle">FARMSURV_*_TOKEN + bind config</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- Bottom: privacy boundary annotation                             -->
+        <!-- ============================================================== -->
+
+        <text x="40" y="1180" class="anno" fill="#f97583">PRIVACY BOUNDARY</text>
+        <text x="170" y="1180" class="anno">:8090 is on the LAN (192.168.1.0/24). :8091/:8092 are Tailscale-only (100.64.0.0/10). Production cam creds never touch Tailscale-bound processes. camera-creds.env is mode 600 and gitignored.</text>
+
+        <!-- ===== Legend ===== -->
+        <g transform="translate(40, 1200)">
+          <text x="0" y="0" class="label">Legend</text>
+          <g transform="translate(0,12)">
+            <rect x="0" y="0" width="14" height="10" rx="2" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1"/>
+            <text x="22" y="9" class="small">webhook / pipeline</text>
+            <rect x="160" y="0" width="14" height="10" rx="2" fill="rgba(126,231,135,0.22)" stroke="#7ee787" stroke-width="1"/>
+            <text x="182" y="9" class="small">vision / AI</text>
+            <rect x="290" y="0" width="14" height="10" rx="2" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+            <text x="312" y="9" class="small">read surface / matchers / frame I/O</text>
+            <rect x="560" y="0" width="14" height="10" rx="2" fill="rgba(255,166,87,0.18)" stroke="#ffa657" stroke-width="1"/>
+            <text x="582" y="9" class="small">cooldown / cron / watchdog</text>
+            <rect x="780" y="0" width="14" height="10" rx="2" fill="rgba(121,192,255,0.22)" stroke="#79c0ff" stroke-width="1"/>
+            <text x="802" y="9" class="small">telegram</text>
+            <rect x="900" y="0" width="14" height="10" rx="2" fill="rgba(195,250,232,0.18)" stroke="#7ee787" stroke-width="1"/>
+            <text x="922" y="9" class="small">storage / data on disk</text>
+            <rect x="1080" y="0" width="14" height="10" rx="2" fill="rgba(249,117,131,0.18)" stroke="#f97583" stroke-width="1"/>
+            <text x="1102" y="9" class="small">credentials (gitignored)</text>
+          </g>
+        </g>
+
+      </svg>
+    </div>
+
+    <div class="legend-strip">
+      <span><span class="sw" style="color:#58a6ff"></span>webhook / pipeline entry</span>
+      <span><span class="sw" style="color:#7ee787"></span>vision / AI / storage</span>
+      <span><span class="sw" style="color:#d2a8ff"></span>read surface / matchers / frame I/O</span>
+      <span><span class="sw" style="color:#ffa657"></span>cooldown / cron / watchdog</span>
+      <span><span class="sw" style="color:#79c0ff"></span>telegram transport</span>
+      <span><span class="sw" style="color:#f97583"></span>credentials (gitignored)</span>
+    </div>
+  </div>
+
+  <div class="footer">
+    farm-surveillance-v2  ·  v0.7.0  ·  ~/farm-surveillance-v2  ·  single-process daemon, 3 listening ports
+  </div>
+</div>
+</body>
+</html>

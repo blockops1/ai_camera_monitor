@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>farm-surveillance-v2 — Deployment Topology (v0.7.0)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      background: #0d1117;
+      min-height: 100vh;
+      padding: 2rem 1.5rem 3rem;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .wrap { max-width: 1380px; margin: 0 auto; }
+    .hdr { margin-bottom: 1.75rem; }
+    .hdr h1 {
+      font-size: 1.35rem; font-weight: 700; color: #f0f6fc;
+      letter-spacing: -0.015em; margin-bottom: 0.35rem;
+    }
+    .hdr .sub { color: #8b949e; font-size: 0.85rem; margin-bottom: 0.25rem; }
+    .hdr .meta { color: #6e7681; font-size: 0.75rem; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .pulse-dot {
+      display: inline-block; width: 10px; height: 10px;
+      background: #58a6ff; border-radius: 50%; margin-right: 0.6rem;
+      vertical-align: middle; animation: pulse 2.4s infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+    .diagram-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 1.25rem;
+      margin-bottom: 2rem;
+    }
+    .diagram-card h2 {
+      font-size: 1rem; font-weight: 600; color: #f0f6fc;
+      margin-bottom: 0.15rem;
+    }
+    .diagram-card .caption {
+      color: #8b949e; font-size: 0.78rem;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      margin-bottom: 1rem;
+    }
+    .svg-wrap { width: 100%; }
+    .svg-wrap svg { width: 100%; height: auto; display: block; }
+
+    .legend-strip {
+      display: flex; flex-wrap: wrap; gap: 0.6rem 1.1rem;
+      margin-top: 0.85rem; padding-top: 0.85rem;
+      border-top: 1px solid #21262d;
+      font-size: 0.72rem; color: #8b949e;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    .legend-strip .sw {
+      display: inline-block; width: 12px; height: 12px;
+      border-radius: 3px; margin-right: 0.35rem;
+      vertical-align: middle; border: 1px solid currentColor;
+    }
+
+    .footer {
+      text-align: center; margin-top: 2rem;
+      color: #6e7681; font-size: 0.72rem;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hdr">
+    <h1><span class="pulse-dot"></span>farm-surveillance-v2 — Deployment Topology (v0.7.0)</h1>
+    <div class="sub">Network zones + process topology + privacy boundaries  ·  one Mac mini, 4 zones, no cross-zone leaks</div>
+    <div class="meta">commit 60758052  ·  tag v0.7.0  ·  :8090 LAN-only  ·  :8091/:8092 Tailscale-only  ·  Qwen3-VL localhost-only</div>
+  </div>
+
+  <div class="diagram-card">
+    <h2>Network + process topology</h2>
+    <div class="caption">Three network zones (LAN, Tailscale, Internet)  ·  Mac mini runs 3 processes (daemon, MCP, Qwen3-VL — 2 of which are Tailscale-bound)  ·  private LAN IPs shown as &lt;CAM_IP&gt; placeholders</div>
+
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1320 1240" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+
+        <defs>
+          <marker id="arrow4" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#8b949e"/>
+          </marker>
+          <marker id="arrow4-tg" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#79c0ff"/>
+          </marker>
+          <marker id="arrow4-vision" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#7ee787"/>
+          </marker>
+          <marker id="arrow4-blocked" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#f97583"/>
+          </marker>
+
+          <pattern id="grid4" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1c2128" stroke-width="0.6"/>
+          </pattern>
+
+          <style><![CDATA[
+            .label  { fill: #f0f6fc; font-size: 12px; font-weight: 600; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+            .sub    { fill: #8b949e; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .anno   { fill: #8b949e; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .small  { fill: #8b949e; font-size: 9px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .title  { fill: #f0f6fc; font-size: 13px; font-weight: 700; }
+            .zone   { fill: #f0f6fc; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
+            .edge4         { fill: none; stroke: #8b949e; stroke-width: 1.5; }
+            .edge4-tg      { fill: none; stroke: #79c0ff; stroke-width: 1.5; }
+            .edge4-vision  { fill: none; stroke: #7ee787; stroke-width: 1.5; }
+            .edge4-blocked { fill: none; stroke: #f97583; stroke-width: 1.5; stroke-dasharray: 5,4; }
+            .edge4-tailnet { fill: none; stroke: #d2a8ff; stroke-width: 1.5; }
+          ]]></style>
+        </defs>
+
+        <rect width="1320" height="1240" fill="#0d1117"/>
+        <rect width="1320" height="1240" fill="url(#grid4)"/>
+
+        <!-- ============================================================== -->
+        <!-- ZONE 1: LAN (192.168.1.0/24)                                    -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="20" y="40" width="600" height="380" rx="10" fill="rgba(88,166,255,0.04)" stroke="#58a6ff" stroke-width="2"/>
+          <text x="40" y="64" class="zone" fill="#58a6ff">ZONE 1 · LAN  192.168.1.0/24</text>
+          <text x="40" y="80" class="anno">Reolink cameras + Mac mini :8090 webhook endpoint  ·  no public exposure</text>
+
+          <!-- Cams row -->
+          <text x="40" y="110" class="label" fill="#f0f6fc">Reolink Cameras (5)</text>
+          <text x="40" y="124" class="anno">production IPs redacted to placeholders  ·  real IPs in camera-creds.env</text>
+
+          <rect x="40" y="140" width="180" height="46" rx="4" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="130" y="160" class="label" text-anchor="middle">FRONT (door cam)</text>
+          <text x="130" y="176" class="anno" text-anchor="middle">192.168.1.&lt;FRONT_IP&gt;</text>
+
+          <rect x="240" y="140" width="180" height="46" rx="4" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="330" y="160" class="label" text-anchor="middle">BACK (yard cam)</text>
+          <text x="330" y="176" class="anno" text-anchor="middle">192.168.1.&lt;BACK_IP&gt;</text>
+
+          <rect x="40" y="200" width="180" height="46" rx="4" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="130" y="220" class="label" text-anchor="middle">OFG (orchard cam)</text>
+          <text x="130" y="236" class="anno" text-anchor="middle">192.168.1.&lt;OFG_IP&gt;</text>
+
+          <rect x="240" y="200" width="180" height="46" rx="4" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="330" y="220" class="label" text-anchor="middle">OFP / OFS</text>
+          <text x="330" y="236" class="anno" text-anchor="middle">192.168.1.&lt;OF?_IP&gt;</text>
+
+          <rect x="440" y="170" width="160" height="46" rx="4" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="520" y="190" class="label" text-anchor="middle">OBS (barn)</text>
+          <text x="520" y="206" class="anno" text-anchor="middle">192.168.1.&lt;OBS_IP&gt;</text>
+
+          <!-- arrow to Mac mini -->
+          <line x1="320" y1="246" x2="320" y2="300" class="edge4" marker-end="url(#arrow4)"/>
+          <text x="328" y="276" class="anno">POST /alert (webhook)</text>
+
+          <!-- Mac mini LAN interface -->
+          <rect x="40" y="304" width="560" height="100" rx="6" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="2"/>
+          <text x="60" y="326" class="label" fill="#58a6ff">Mac mini — :8090 webhook endpoint (LAN-only)</text>
+          <text x="60" y="343" class="anno">listener/daemon.py  ·  bound to 192.168.1.&lt;MAC_LAN_IP&gt;:8090  (or 0.0.0.0:8090)</text>
+          <text x="60" y="358" class="anno">IP-validated: only Reolink cam IPs in camera-creds.env can POST</text>
+          <text x="60" y="373" class="anno">rate-limited per source IP  ·  payload normalized to {camera_id, ai.type, frames, ts}</text>
+          <text x="60" y="388" class="anno" fill="#f97583">NOT exposed to Tailscale  ·  NOT exposed to internet</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- ZONE 2: TAILSCALE (100.64.0.0/10)                                -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="660" y="40" width="640" height="380" rx="10" fill="rgba(210,168,255,0.04)" stroke="#d2a8ff" stroke-width="2"/>
+          <text x="680" y="64" class="zone" fill="#d2a8ff">ZONE 2 · TAILSCALE  100.64.0.0/10</text>
+          <text x="680" y="80" class="anno">Mac mini exposes MCP + API on Tailscale-only  ·  operator's devices + scripts on the tailnet</text>
+
+          <!-- Mac mini Tailscale side -->
+          <rect x="680" y="100" width="600" height="160" rx="6" fill="rgba(210,168,255,0.10)" stroke="#d2a8ff" stroke-width="2"/>
+          <text x="700" y="122" class="label" fill="#d2a8ff">Mac mini — Tailscale interface (100.64.0.10)</text>
+          <text x="700" y="138" class="anno">bound to 100.64.0.10:8091 (MCP) + 100.64.0.10:8092 (API)</text>
+          <text x="700" y="153" class="anno">bearer token auth (FARMSURV_MCP_TOKEN, FARMSURV_API_TOKEN)</text>
+
+          <rect x="700" y="166" width="280" height="36" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="840" y="183" class="label" text-anchor="middle">:8091 MCP</text>
+          <text x="840" y="196" class="anno" text-anchor="middle">18 read-only tools</text>
+
+          <rect x="1000" y="166" width="260" height="36" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="1130" y="183" class="label" text-anchor="middle">:8092 HTTP API</text>
+          <text x="1130" y="196" class="anno" text-anchor="middle">17 GETs + /healthz</text>
+
+          <text x="700" y="222" class="anno" fill="#7ee787">read-only by design — write tools (camera config, recipe apply) not exposed here</text>
+          <text x="700" y="238" class="anno" fill="#f97583">cam IPs auto-redacted to [REDACTED-LAN-IP] in any string field of API responses</text>
+          <text x="700" y="254" class="anno" fill="#f97583">camera-creds.env never read by these processes — only listener/daemon.py reads them</text>
+
+          <!-- Operator's devices -->
+          <text x="680" y="290" class="label" fill="#f0f6fc">Operator's devices on Tailscale</text>
+
+          <rect x="680" y="300" width="180" height="50" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="770" y="320" class="label" text-anchor="middle">Operator's laptop</text>
+          <text x="770" y="336" class="anno" text-anchor="middle">Hermes client / curl / n8n</text>
+
+          <rect x="880" y="300" width="180" height="50" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="970" y="320" class="label" text-anchor="middle">Operator's phone</text>
+          <text x="970" y="336" class="anno" text-anchor="middle">Telegram app (Home chat)</text>
+
+          <rect x="1080" y="300" width="200" height="50" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
+          <text x="1180" y="320" class="label" text-anchor="middle">Other Tailscale nodes</text>
+          <text x="1180" y="336" class="anno" text-anchor="middle">homelab services, scripts</text>
+
+          <line x1="770" y1="300" x2="800" y2="184" class="edge4-tailnet" marker-end="url(#arrow4)"/>
+          <line x1="970" y1="300" x2="1100" y2="184" class="edge4-tailnet" marker-end="url(#arrow4)"/>
+          <line x1="1180" y1="300" x2="1130" y2="184" class="edge4-tailnet" marker-end="url(#arrow4)"/>
+          <text x="780" y="240" class="anno" fill="#d2a8ff">Tailscale (encrypted WireGuard)</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- ZONE 3: INTERNET                                                -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="20" y="450" width="600" height="200" rx="10" fill="rgba(121,192,255,0.04)" stroke="#79c0ff" stroke-width="2"/>
+          <text x="40" y="474" class="zone" fill="#79c0ff">ZONE 3 · INTERNET</text>
+          <text x="40" y="490" class="anno">Only Telegram bot API traffic leaves the Mac mini  ·  no other outbound network</text>
+
+          <rect x="40" y="510" width="280" height="60" rx="6" fill="#161b22" stroke="#79c0ff" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="180" y="532" class="title" text-anchor="middle">Telegram Bot API</text>
+          <text x="180" y="548" class="anno" text-anchor="middle">api.telegram.org</text>
+          <text x="180" y="562" class="small" text-anchor="middle">outbound only (HTTPS POST)</text>
+
+          <rect x="340" y="510" width="260" height="60" rx="6" fill="#161b22" stroke="#6e7681" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="470" y="532" class="title" text-anchor="middle">Reolink cloud</text>
+          <text x="470" y="548" class="anno" text-anchor="middle" fill="#f97583">NOT USED (no dependency)</text>
+          <text x="470" y="562" class="small" text-anchor="middle">cams talk to Mac mini directly</text>
+
+          <text x="40" y="600" class="anno">outbound from Mac mini:</text>
+          <text x="40" y="615" class="anno" fill="#79c0ff">→ api.telegram.org (HTTPS, 3 calls/event: send_message × N, send_photo × N)</text>
+          <text x="40" y="630" class="anno" fill="#7ee787">→ 127.0.0.1:8080 (Qwen3-VL, in-process; not external)</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- ZONE 4: PROCESS BOUNDARY inside the Mac mini                   -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="660" y="450" width="640" height="200" rx="10" fill="rgba(126,231,135,0.04)" stroke="#7ee787" stroke-width="2"/>
+          <text x="680" y="474" class="zone" fill="#7ee787">ZONE 4 · Mac mini process topology</text>
+          <text x="680" y="490" class="anno">Same machine, 3 processes  ·  localhost-only between them  ·  no external network for vision</text>
+
+          <rect x="680" y="510" width="180" height="80" rx="6" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="770" y="532" class="title" text-anchor="middle">listener/daemon.py</text>
+          <text x="770" y="548" class="anno" text-anchor="middle">PID 45500</text>
+          <text x="770" y="562" class="anno" text-anchor="middle">:8090 webhook + :8091 MCP + :8092 API</text>
+          <text x="770" y="576" class="small" text-anchor="middle">reads camera-creds.env + .env</text>
+
+          <rect x="880" y="510" width="180" height="80" rx="6" fill="rgba(126,231,135,0.18)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="970" y="532" class="title" text-anchor="middle">llama-server (Qwen3-VL-8B)</text>
+          <text x="970" y="548" class="anno" text-anchor="middle">PID 85673</text>
+          <text x="970" y="562" class="anno" text-anchor="middle">:8080 (localhost only)</text>
+          <text x="970" y="576" class="small" text-anchor="middle">llm-creds.env (auth)</text>
+
+          <rect x="1080" y="510" width="200" height="80" rx="6" fill="rgba(126,231,135,0.10)" stroke="#7ee787" stroke-width="1.5"/>
+          <text x="1180" y="532" class="title" text-anchor="middle">llama-server (Qwen3.6-35B)</text>
+          <text x="1180" y="548" class="anno" text-anchor="middle">PID 32569</text>
+          <text x="1180" y="562" class="anno" text-anchor="middle">:8093 (localhost only)</text>
+          <text x="1180" y="576" class="small" text-anchor="middle">used by backtests, not alerts</text>
+
+          <line x1="860" y1="550" x2="880" y2="550" class="edge4-vision" marker-end="url(#arrow4-vision)"/>
+          <text x="864" y="544" class="anno" fill="#7ee787">vm1+vm2 calls</text>
+
+          <text x="680" y="612" class="anno" fill="#f97583">localhost-only — these ports never bind to LAN or Tailscale interfaces</text>
+          <text x="680" y="628" class="anno" fill="#f97583">if Qwen3-VL is offline, alerts gracefully degrade (record error in daemon.log)</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- PRIVACY BOUNDARY callouts (the big red boxes)                   -->
+        <!-- ============================================================== -->
+
+        <g>
+          <rect x="20" y="690" width="600" height="180" rx="8" fill="rgba(249,117,131,0.06)" stroke="#f97583" stroke-width="2" stroke-dasharray="6,4"/>
+          <text x="40" y="712" class="zone" fill="#f97583">PRIVACY BOUNDARY 1</text>
+          <text x="40" y="728" class="anno">LAN is NOT exposed to Tailscale or Internet</text>
+          <text x="40" y="745" class="anno">→ Reolink cams → :8090 only  (192.168.1.0/24)</text>
+          <text x="40" y="760" class="anno">→ :8090 bound to LAN interface OR 0.0.0.0 (operator's choice)</text>
+          <text x="40" y="775" class="anno">→ :8090 has NO Tailscale bind  ·  :8090 has NO public bind</text>
+          <text x="40" y="790" class="anno">→ no port forward, no ngrok, no cloud relay</text>
+          <text x="40" y="805" class="anno" fill="#f97583">→ firewall on Mac mini is a defense-in-depth backstop</text>
+          <text x="40" y="820" class="anno" fill="#f97583">→ production cam creds (camera-creds.env) ONLY read by listener/daemon.py</text>
+          <text x="40" y="835" class="anno" fill="#f97583">→ Tailscale processes (MCP, API) never see camera-creds.env content</text>
+        </g>
+
+        <g>
+          <rect x="660" y="690" width="640" height="180" rx="8" fill="rgba(249,117,131,0.06)" stroke="#f97583" stroke-width="2" stroke-dasharray="6,4"/>
+          <text x="680" y="712" class="zone" fill="#f97583">PRIVACY BOUNDARY 2</text>
+          <text x="680" y="728" class="anno">Tailscale processes redact LAN IPs in responses</text>
+          <text x="680" y="745" class="anno">→ infra/farm_api/cameras._redact_ip() — every string field scanned</text>
+          <text x="680" y="760" class="anno">→ 192.168.x.x in CameraInfo, CameraHealth, etc. → [REDACTED-LAN-IP]</text>
+          <text x="680" y="775" class="anno">→ bearer token (FARMSURV_*_TOKEN) required for every /api/* and /mcp call</text>
+          <text x="680" y="790" class="anno">→ constant-time comparison (no timing oracle)</text>
+          <text x="680" y="805" class="anno" fill="#f97583">→ Tailscale-only bind (FARMSURV_*_BIND=tailnet-only) — refuses to bind all-interface</text>
+          <text x="680" y="820" class="anno" fill="#f97583">→ start-up abort if token missing/short  ·  process exits 1 with stderr message</text>
+          <text x="680" y="835" class="anno" fill="#f97583">→ no write tools exposed — read-only by design</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- INTER-ZONE arrows (what crosses each boundary)                  -->
+        <!-- ============================================================== -->
+
+        <!-- ZONE 1 → ZONE 4 (LAN webhook hits daemon in zone 4) -->
+        <line x1="320" y1="404" x2="770" y2="510" class="edge4" marker-end="url(#arrow4)"/>
+        <text x="430" y="450" class="anno">webhook ingress</text>
+
+        <!-- ZONE 4 → ZONE 3 (daemon → Telegram API) -->
+        <line x1="680" y1="540" x2="320" y2="540" class="edge4-tg" marker-end="url(#arrow4-tg)"/>
+        <text x="430" y="534" class="anno" fill="#79c0ff">Telegram HTTPS POST (tg1, tg2, tg3)</text>
+
+        <!-- ZONE 2 → ZONE 4 (Tailscale client → daemon) -->
+        <line x1="980" y1="260" x2="860" y2="510" class="edge4-tailnet" marker-end="url(#arrow4)"/>
+        <text x="940" y="370" class="anno" fill="#d2a8ff">Tailscale ingress (MCP / API requests)</text>
+
+        <!-- ZONE 4 internal: daemon → Qwen3-VL -->
+        <line x1="770" y1="550" x2="880" y2="550" class="edge4-vision" marker-end="url(#arrow4-vision)"/>
+
+        <!-- ============================================================== -->
+        <!-- BLOCKED arrows (red dashed)                                     -->
+        <!-- ============================================================== -->
+
+        <!-- Reolink cloud → cams (not used) -->
+        <line x1="470" y1="510" x2="320" y2="186" class="edge4-blocked" marker-end="url(#arrow4-blocked)"/>
+        <text x="400" y="350" class="anno" fill="#f97583">NOT USED — Reolink cloud never involved</text>
+
+        <!-- Tailscale process trying to read camera-creds.env (would be blocked) -->
+        <line x1="970" y1="510" x2="970" y2="404" class="edge4-blocked"/>
+        <line x1="970" y1="404" x2="770" y2="404" class="edge4-blocked"/>
+        <text x="800" y="396" class="anno" fill="#f97583">camera-creds.env is mode 600, only listener/daemon.py reads it</text>
+
+        <!-- ============================================================== -->
+        <!-- BOTTOM: process list + cross-zone protocol summary             -->
+        <!-- ============================================================== -->
+
+        <text x="20" y="900" class="title">Cross-zone traffic summary</text>
+
+        <g>
+          <rect x="20" y="920" width="1260" height="170" rx="6" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+
+          <text x="40" y="942" class="label">From</text>
+          <text x="220" y="942" class="label">To</text>
+          <text x="380" y="942" class="label">Protocol</text>
+          <text x="580" y="942" class="label">What</text>
+          <text x="980" y="942" class="label">Auth</text>
+
+          <line x1="20" y1="950" x2="1280" y2="950" stroke="#30363d" stroke-width="1"/>
+
+          <text x="40" y="966" class="anno">Reolink cam (LAN)</text>
+          <text x="220" y="966" class="anno">:8090 (Mac mini LAN)</text>
+          <text x="380" y="966" class="anno">HTTP POST</text>
+          <text x="580" y="966" class="anno">/alert webhook payload</text>
+          <text x="980" y="966" class="anno">IP-validate (camera-creds.env)</text>
+
+          <text x="40" y="984" class="anno">listener/daemon (localhost)</text>
+          <text x="220" y="984" class="anno">llama-server :8080</text>
+          <text x="380" y="984" class="anno">HTTP POST</text>
+          <text x="580" y="984" class="anno">/completion (vm1, vm2 prompts)</text>
+          <text x="980" y="984" class="anno">llm-creds.env bearer / no auth (localhost)</text>
+
+          <text x="40" y="1002" class="anno">listener/daemon (Mac mini)</text>
+          <text x="220" y="1002" class="anno">api.telegram.org</text>
+          <text x="380" y="1002" class="anno">HTTPS POST</text>
+          <text x="580" y="1002" class="anno">/bot&lt;TOKEN&gt;/sendMessage, /sendPhoto</text>
+          <text x="980" y="1002" class="anno">telegram-creds.env bot token</text>
+
+          <text x="40" y="1020" class="anno">Operator (Tailscale)</text>
+          <text x="220" y="1020" class="anno">:8091 / :8092 (Mac mini TS)</text>
+          <text x="380" y="1020" class="anno">HTTPS POST + SSE</text>
+          <text x="580" y="1020" class="anno">/mcp (JSON-RPC) or /api/v1/* (GET)</text>
+          <text x="980" y="1020" class="anno">FARMSURV_MCP_TOKEN / FARMSURV_API_TOKEN</text>
+
+          <text x="40" y="1038" class="anno">Operator's phone (any IP)</text>
+          <text x="220" y="1038" class="anno">api.telegram.org</text>
+          <text x="380" y="1038" class="anno">HTTPS GET (long-poll)</text>
+          <text x="580" y="1038" class="anno">/getUpdates (TG keeps this on phone)</text>
+          <text x="980" y="1038" class="anno">TG account login</text>
+
+          <text x="40" y="1056" class="anno" fill="#f97583">— (blocked)</text>
+          <text x="220" y="1056" class="anno" fill="#f97583">Reolink cloud</text>
+          <text x="380" y="1056" class="anno" fill="#f97583">—</text>
+          <text x="580" y="1056" class="anno" fill="#f97583">no traffic — we don't depend on Reolink cloud</text>
+          <text x="980" y="1056" class="anno" fill="#f97583">—</text>
+
+          <text x="40" y="1074" class="anno" fill="#f97583">— (blocked)</text>
+          <text x="220" y="1074" class="anno" fill="#f97583">External internet (besides TG)</text>
+          <text x="380" y="1074" class="anno" fill="#f97583">—</text>
+          <text x="580" y="1074" class="anno" fill="#f97583">daemon makes no other outbound calls</text>
+          <text x="980" y="1074" class="anno" fill="#f97583">—</text>
+        </g>
+
+        <text x="20" y="1110" class="title">Filesystem layout on the Mac mini</text>
+
+        <g>
+          <text x="20" y="1132" class="anno">~/farm-surveillance-v2/                  (repo root, 240 commits since v0.6.3)</text>
+          <text x="20" y="1150" class="anno">├── listener/ infra/ vehicle_matcher/ animal_matcher/ person_matcher/ telegram_formatter/</text>
+          <text x="20" y="1168" class="anno">├── scripts/  bin/  config/  docs/  tests/</text>
+          <text x="20" y="1186" class="anno">├── *.env.example  (templates, committed)</text>
+          <text x="20" y="1204" class="anno">└── .env  camera-creds.env  telegram-creds.env  llm-creds.env   (mode 600, gitignored, NEVER committed)</text>
+        </g>
+
+        <text x="680" y="1110" class="title">Hostnames (operator's actual box)</text>
+        <g>
+          <text x="680" y="1132" class="anno">Mac mini Tailscale IP:    100.64.0.10</text>
+          <text x="680" y="1150" class="anno">Mac mini LAN IP:          192.168.1.&lt;MAC_LAN_IP&gt;  (interface, not 0.0.0.0)</text>
+          <text x="680" y="1168" class="anno">Mac mini localhost:       127.0.0.1 (Qwen3-VL binds here)</text>
+          <text x="680" y="1186" class="anno">launchd agent:            com.farm.surveillance.v2</text>
+          <text x="680" y="1204" class="anno">launchd plist:            ~/Library/LaunchAgents/com.farm.surveillance.v2.plist</text>
+        </g>
+
+        <!-- ===== Legend ===== -->
+        <g transform="translate(20, 1220)">
+          <text x="0" y="0" class="label">Legend</text>
+          <g transform="translate(0,12)">
+            <rect x="0" y="0" width="14" height="10" rx="2" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1"/>
+            <text x="22" y="9" class="small">LAN (192.168.1.0/24)</text>
+            <rect x="180" y="0" width="14" height="10" rx="2" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+            <text x="202" y="9" class="small">Tailscale (100.64.0.0/10)</text>
+            <rect x="400" y="0" width="14" height="10" rx="2" fill="rgba(121,192,255,0.18)" stroke="#79c0ff" stroke-width="1"/>
+            <text x="422" y="9" class="small">Internet (Telegram only)</text>
+            <rect x="640" y="0" width="14" height="10" rx="2" fill="rgba(126,231,135,0.18)" stroke="#7ee787" stroke-width="1"/>
+            <text x="662" y="9" class="small">Mac mini process (localhost)</text>
+            <rect x="880" y="0" width="14" height="10" rx="2" fill="rgba(249,117,131,0.18)" stroke="#f97583" stroke-width="1"/>
+            <text x="902" y="9" class="small">privacy boundary / blocked</text>
+          </g>
+        </g>
+
+      </svg>
+    </div>
+
+    <div class="legend-strip">
+      <span><span class="sw" style="color:#58a6ff"></span>LAN (192.168.1.0/24)</span>
+      <span><span class="sw" style="color:#d2a8ff"></span>Tailscale (100.64.0.0/10)</span>
+      <span><span class="sw" style="color:#79c0ff"></span>Internet (Telegram only)</span>
+      <span><span class="sw" style="color:#7ee787"></span>Mac mini process (localhost)</span>
+      <span><span class="sw" style="color:#f97583"></span>privacy boundary / blocked</span>
+    </div>
+  </div>
+
+  <div class="footer">
+    farm-surveillance-v2  ·  v0.7.0  ·  deployment topology  ·  production cam IPs redacted to &lt;CAM_IP&gt; placeholders  ·  no secrets in this file
+  </div>
+</div>
+</body>
+</html>
