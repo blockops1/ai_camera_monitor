@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>farm-surveillance-v2 — Module / Component Map (v0.7.0)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      background: #0d1117;
+      min-height: 100vh;
+      padding: 2rem 1.5rem 3rem;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .wrap { max-width: 1480px; margin: 0 auto; }
+    .hdr { margin-bottom: 1.75rem; }
+    .hdr h1 {
+      font-size: 1.35rem; font-weight: 700; color: #f0f6fc;
+      letter-spacing: -0.015em; margin-bottom: 0.35rem;
+    }
+    .hdr .sub { color: #8b949e; font-size: 0.85rem; margin-bottom: 0.25rem; }
+    .hdr .meta { color: #6e7681; font-size: 0.75rem; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .pulse-dot {
+      display: inline-block; width: 10px; height: 10px;
+      background: #58a6ff; border-radius: 50%; margin-right: 0.6rem;
+      vertical-align: middle; animation: pulse 2.4s infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+    .diagram-card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 1.25rem;
+      margin-bottom: 2rem;
+    }
+    .diagram-card h2 {
+      font-size: 1rem; font-weight: 600; color: #f0f6fc;
+      margin-bottom: 0.15rem;
+    }
+    .diagram-card .caption {
+      color: #8b949e; font-size: 0.78rem;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      margin-bottom: 1rem;
+    }
+    .svg-wrap { width: 100%; }
+    .svg-wrap svg { width: 100%; height: auto; display: block; }
+
+    .legend-strip {
+      display: flex; flex-wrap: wrap; gap: 0.6rem 1.1rem;
+      margin-top: 0.85rem; padding-top: 0.85rem;
+      border-top: 1px solid #21262d;
+      font-size: 0.72rem; color: #8b949e;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    .legend-strip .sw {
+      display: inline-block; width: 12px; height: 12px;
+      border-radius: 3px; margin-right: 0.35rem;
+      vertical-align: middle; border: 1px solid currentColor;
+    }
+
+    .footer {
+      text-align: center; margin-top: 2rem;
+      color: #6e7681; font-size: 0.72rem;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hdr">
+    <h1><span class="pulse-dot"></span>farm-surveillance-v2 — Module / Component Map (v0.7.0)</h1>
+    <div class="sub">Top-down view by package  ·  arrows show primary import direction  ·  dashed boxes = package boundary</div>
+    <div class="meta">commit 60758052  ·  tag v0.7.0  ·  8 top-level packages  ·  ~40 modules in infra/  ·  bin/ + scripts/ for ops</div>
+  </div>
+
+  <div class="diagram-card">
+    <h2>Package layout — what calls what</h2>
+    <div class="caption">Each package is a dashed rectangle. Modules inside are the .py files. Arrows show "A imports B" (caller → callee).</div>
+
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1440 1380" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+
+        <defs>
+          <marker id="arrow3" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+            <polygon points="0 0, 8 3, 0 6" fill="#6e7681"/>
+          </marker>
+          <pattern id="grid3" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1c2128" stroke-width="0.6"/>
+          </pattern>
+
+          <style><![CDATA[
+            .pkg-label  { fill: #f0f6fc; font-size: 13px; font-weight: 700; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+            .pkg-sub    { fill: #8b949e; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .mod-name   { fill: #f0f6fc; font-size: 10px; font-weight: 600; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .mod-sub    { fill: #8b949e; font-size: 8.5px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .anno       { fill: #8b949e; font-size: 9.5px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .small      { fill: #8b949e; font-size: 8.5px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+            .edge3      { fill: none; stroke: #6e7681; stroke-width: 1; }
+          ]]></style>
+        </defs>
+
+        <rect width="1440" height="1380" fill="#0d1117"/>
+        <rect width="1440" height="1380" fill="url(#grid3)"/>
+
+        <!-- ============================================================== -->
+        <!-- BOTTOM-LEFT: bin/  (operator scripts + plists)                  -->
+        <!-- ============================================================== -->
+        <g>
+          <rect x="20" y="1080" width="280" height="180" rx="8" fill="rgba(255,166,87,0.06)" stroke="#ffa657" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="40" y="1102" class="pkg-label" fill="#ffa657">bin/</text>
+          <text x="40" y="1118" class="pkg-sub">shell + plist templates</text>
+
+          <rect x="40" y="1132" width="240" height="24" rx="3" fill="rgba(255,166,87,0.10)" stroke="#ffa657" stroke-width="1"/>
+          <text x="160" y="1148" class="mod-name" text-anchor="middle">health_watchdog.sh</text>
+
+          <rect x="40" y="1162" width="240" height="24" rx="3" fill="rgba(255,166,87,0.10)" stroke="#ffa657" stroke-width="1"/>
+          <text x="160" y="1178" class="mod-name" text-anchor="middle">com.farm.surveillance.v2.plist</text>
+
+          <rect x="40" y="1192" width="240" height="24" rx="3" fill="rgba(255,166,87,0.10)" stroke="#ffa657" stroke-width="1"/>
+          <text x="160" y="1208" class="mod-name" text-anchor="middle">com.farm.surveillance.v2.smoke.plist</text>
+
+          <rect x="40" y="1222" width="240" height="24" rx="3" fill="rgba(255,166,87,0.10)" stroke="#ffa657" stroke-width="1"/>
+          <text x="160" y="1238" class="mod-name" text-anchor="middle">mcp_live_smoke.sh · api_live_smoke.sh</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- BOTTOM-CENTER: scripts/  (operator scripts + scanners)         -->
+        <!-- ============================================================== -->
+        <g>
+          <rect x="320" y="1080" width="420" height="180" rx="8" fill="rgba(255,166,87,0.06)" stroke="#ffa657" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="340" y="1102" class="pkg-label" fill="#ffa657">scripts/</text>
+          <text x="340" y="1118" class="pkg-sub">operator + scanner scripts</text>
+
+          <rect x="340" y="1132" width="180" height="24" rx="3" fill="rgba(255,166,87,0.10)" stroke="#ffa657" stroke-width="1"/>
+          <text x="430" y="1148" class="mod-name" text-anchor="middle">check_no_private_data.py</text>
+
+          <rect x="530" y="1132" width="180" height="24" rx="3" fill="rgba(255,166,87,0.10)" stroke="#ffa657" stroke-width="1"/>
+          <text x="620" y="1148" class="mod-name" text-anchor="middle">check_no_jpeg.py</text>
+
+          <rect x="340" y="1162" width="180" height="24" rx="3" fill="rgba(255,166,87,0.10)" stroke="#ffa657" stroke-width="1"/>
+          <text x="430" y="1178" class="mod-name" text-anchor="middle">check_no_image_resize.py</text>
+
+          <rect x="530" y="1162" width="180" height="24" rx="3" fill="rgba(255,166,87,0.10)" stroke="#ffa657" stroke-width="1"/>
+          <text x="620" y="1178" class="mod-name" text-anchor="middle">check_no_orphan_modules.py</text>
+
+          <rect x="340" y="1192" width="370" height="24" rx="3" fill="rgba(255,166,87,0.10)" stroke="#ffa657" stroke-width="1"/>
+          <text x="525" y="1208" class="mod-name" text-anchor="middle">enroll_person.py · enroll_animal.py</text>
+
+          <rect x="340" y="1222" width="370" height="24" rx="3" fill="rgba(255,166,87,0.10)" stroke="#ffa657" stroke-width="1"/>
+          <text x="525" y="1238" class="mod-name" text-anchor="middle">watchdog_restart.py · backtests/</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- LEFT: listener/  (the entry point + pipeline + health)         -->
+        <!-- ============================================================== -->
+        <g>
+          <rect x="20" y="20" width="240" height="380" rx="8" fill="rgba(88,166,255,0.06)" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="40" y="42" class="pkg-label" fill="#58a6ff">listener/</text>
+          <text x="40" y="58" class="pkg-sub">the daemon process</text>
+
+          <rect x="40" y="74" width="200" height="42" rx="3" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="140" y="91" class="mod-name" text-anchor="middle">daemon.py</text>
+          <text x="140" y="105" class="mod-sub" text-anchor="middle">launchd entry, :8090 route</text>
+
+          <rect x="40" y="124" width="200" height="42" rx="3" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="140" y="141" class="mod-name" text-anchor="middle">pipeline.py</text>
+          <text x="140" y="155" class="mod-sub" text-anchor="middle">11-stage alert pipeline</text>
+
+          <rect x="40" y="174" width="200" height="42" rx="3" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="140" y="191" class="mod-name" text-anchor="middle">health.py</text>
+          <text x="140" y="205" class="mod-sub" text-anchor="middle">uptime, ports, alerts/min</text>
+
+          <rect x="40" y="224" width="200" height="42" rx="3" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="140" y="241" class="mod-name" text-anchor="middle">webhook.py</text>
+          <text x="140" y="255" class="mod-sub" text-anchor="middle">payload normalize, IP check</text>
+
+          <rect x="40" y="274" width="200" height="42" rx="3" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="140" y="291" class="mod-name" text-anchor="middle">history.py</text>
+          <text x="140" y="305" class="mod-sub" text-anchor="middle">recent events (RAM ring)</text>
+
+          <rect x="40" y="324" width="200" height="42" rx="3" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1.5"/>
+          <text x="140" y="341" class="mod-name" text-anchor="middle">listener.py</text>
+          <text x="140" y="355" class="mod-sub" text-anchor="middle">_send_telegram helper</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- CENTER-LEFT: infra/  (the big one, ~40 modules)                -->
+        <!-- ============================================================== -->
+        <g>
+          <rect x="280" y="20" width="500" height="700" rx="8" fill="rgba(210,168,255,0.04)" stroke="#d2a8ff" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="300" y="42" class="pkg-label" fill="#d2a8ff">infra/</text>
+          <text x="300" y="58" class="pkg-sub">shared library (~40 modules)</text>
+
+          <!-- Row 1: gate, frame_capture, cooldown -->
+          <rect x="300" y="74" width="220" height="38" rx="3" fill="rgba(126,231,135,0.18)" stroke="#7ee787" stroke-width="1"/>
+          <text x="410" y="90" class="mod-name" text-anchor="middle">gate.py</text>
+          <text x="410" y="104" class="mod-sub" text-anchor="middle">YOLO motion + COCO classify</text>
+
+          <rect x="540" y="74" width="220" height="38" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="650" y="90" class="mod-name" text-anchor="middle">frame_capture.py</text>
+          <text x="650" y="104" class="mod-sub" text-anchor="middle">RTSP ring buffer (12 frames)</text>
+
+          <!-- Row 2: cooldown, alert_artifacts, vision_analyzer -->
+          <rect x="300" y="120" width="220" height="38" rx="3" fill="rgba(255,166,87,0.18)" stroke="#ffa657" stroke-width="1"/>
+          <text x="410" y="136" class="mod-name" text-anchor="middle">pipeline_cooldown.py</text>
+          <text x="410" y="150" class="mod-sub" text-anchor="middle">per-(cam, class) windows</text>
+
+          <rect x="540" y="120" width="220" height="38" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="650" y="136" class="mod-name" text-anchor="middle">alert_artifacts.py</text>
+          <text x="650" y="150" class="mod-sub" text-anchor="middle">crop + mult32 + composite</text>
+
+          <!-- Row 3: vision_analyzer, animal_embedder, person_embedder -->
+          <rect x="300" y="166" width="220" height="38" rx="3" fill="rgba(126,231,135,0.18)" stroke="#7ee787" stroke-width="1"/>
+          <text x="410" y="182" class="mod-name" text-anchor="middle">vision_analyzer.py</text>
+          <text x="410" y="196" class="mod-sub" text-anchor="middle">Qwen3-VL client (vm1, vm2)</text>
+
+          <rect x="540" y="166" width="220" height="38" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="650" y="182" class="mod-name" text-anchor="middle">animal_embedder.py</text>
+          <text x="650" y="196" class="mod-sub" text-anchor="middle">OSNet body+face embeds</text>
+
+          <!-- Row 4: animal_embedder 2, person_embedder -->
+          <rect x="300" y="212" width="220" height="38" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="410" y="228" class="mod-name" text-anchor="middle">person_embedder.py</text>
+          <text x="410" y="242" class="mod-sub" text-anchor="middle">OSNet body+face embeds</text>
+
+          <rect x="540" y="212" width="220" height="38" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="650" y="228" class="mod-name" text-anchor="middle">telegram_alerts.py</text>
+          <text x="650" y="242" class="mod-sub" text-anchor="middle">rate-limit guard (30/min)</text>
+
+          <!-- Row 5: api server, mcp server, daily_status_report -->
+          <rect x="300" y="258" width="220" height="38" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="410" y="274" class="mod-name" text-anchor="middle">api_server.py</text>
+          <text x="410" y="288" class="mod-sub" text-anchor="middle">:8092 Tailscale, 17 GETs</text>
+
+          <rect x="540" y="258" width="220" height="38" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="650" y="274" class="mod-name" text-anchor="middle">mcp_server.py</text>
+          <text x="650" y="288" class="mod-sub" text-anchor="middle">:8091 Tailscale, 18 tools</text>
+
+          <rect x="300" y="304" width="220" height="38" rx="3" fill="rgba(255,166,87,0.18)" stroke="#ffa657" stroke-width="1"/>
+          <text x="410" y="320" class="mod-name" text-anchor="middle">daily_status_report.py</text>
+          <text x="410" y="334" class="mod-sub" text-anchor="middle">HTML report → TG doc</text>
+
+          <rect x="540" y="304" width="220" height="38" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="650" y="320" class="mod-name" text-anchor="middle">camera_creds.py</text>
+          <text x="650" y="334" class="mod-sub" text-anchor="middle">resolves cam IPs at runtime</text>
+
+          <rect x="300" y="350" width="220" height="38" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="410" y="366" class="mod-name" text-anchor="middle">net_bind.py</text>
+          <text x="410" y="380" class="mod-sub" text-anchor="middle">tailnet vs all bind</text>
+
+          <rect x="540" y="350" width="220" height="38" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="650" y="366" class="mod-name" text-anchor="middle">cleanup.py</text>
+          <text x="650" y="380" class="mod-sub" text-anchor="middle">data/frames retention</text>
+
+          <!-- farm_api/ sub-package -->
+          <rect x="300" y="402" width="460" height="280" rx="6" fill="rgba(13,17,23,0.5)" stroke="#d2a8ff" stroke-width="1" stroke-dasharray="3,3"/>
+          <text x="320" y="424" class="pkg-label" fill="#d2a8ff" font-size="11">infra/farm_api/</text>
+          <text x="320" y="438" class="pkg-sub" font-size="9">read-only API modules (typed Python contract)</text>
+
+          <rect x="320" y="450" width="200" height="28" rx="3" fill="rgba(210,168,255,0.10)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="420" y="468" class="mod-name" text-anchor="middle">cameras.py</text>
+
+          <rect x="540" y="450" width="200" height="28" rx="3" fill="rgba(210,168,255,0.10)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="640" y="468" class="mod-name" text-anchor="middle">events.py</text>
+
+          <rect x="320" y="486" width="200" height="28" rx="3" fill="rgba(210,168,255,0.10)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="420" y="504" class="mod-name" text-anchor="middle">listener.py (status)</text>
+
+          <rect x="540" y="486" width="200" height="28" rx="3" fill="rgba(210,168,255,0.10)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="640" y="504" class="mod-name" text-anchor="middle">gate.py (config)</text>
+
+          <rect x="320" y="522" width="200" height="28" rx="3" fill="rgba(210,168,255,0.10)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="420" y="540" class="mod-name" text-anchor="middle">identities.py</text>
+
+          <rect x="540" y="522" width="200" height="28" rx="3" fill="rgba(210,168,255,0.10)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="640" y="540" class="mod-name" text-anchor="middle">vision.py · telegram.py</text>
+
+          <rect x="320" y="558" width="200" height="28" rx="3" fill="rgba(210,168,255,0.10)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="420" y="576" class="mod-name" text-anchor="middle">cooldowns.py</text>
+
+          <rect x="540" y="558" width="200" height="28" rx="3" fill="rgba(210,168,255,0.10)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="640" y="576" class="mod-name" text-anchor="middle">config.py</text>
+
+          <text x="320" y="610" class="anno">used by: api_server + mcp_server  ·  read-only by design</text>
+          <text x="320" y="624" class="anno">typed Python dataclasses (no dict soup)</text>
+          <text x="320" y="638" class="anno">_redact_ip() → 192.168.x.x → [REDACTED-LAN-IP]</text>
+          <text x="320" y="652" class="anno">CameraHealth, EventRecord, GateConfig, etc.</text>
+
+          <!-- bottom row of infra -->
+          <rect x="300" y="694" width="220" height="20" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="0.8"/>
+          <text x="410" y="708" class="small" text-anchor="middle">+ ~15 more (schemas, utils, prompts)</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- CENTER-RIGHT: matchers (vehicle, animal, person)               -->
+        <!-- ============================================================== -->
+        <g>
+          <rect x="800" y="20" width="200" height="200" rx="8" fill="rgba(210,168,255,0.06)" stroke="#d2a8ff" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="820" y="42" class="pkg-label" fill="#d2a8ff">vehicle_matcher/</text>
+          <text x="820" y="58" class="pkg-sub">re-ID for vehicles</text>
+
+          <rect x="820" y="74" width="160" height="28" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="900" y="92" class="mod-name" text-anchor="middle">match.py</text>
+
+          <rect x="820" y="108" width="160" height="28" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="900" y="126" class="mod-name" text-anchor="middle">storage.py</text>
+
+          <rect x="820" y="142" width="160" height="28" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="900" y="160" class="mod-name" text-anchor="middle">embedder.py</text>
+
+          <rect x="820" y="180" width="160" height="22" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="0.8"/>
+          <text x="900" y="194" class="small" text-anchor="middle">data/known/vehicles/</text>
+        </g>
+
+        <g>
+          <rect x="1020" y="20" width="200" height="200" rx="8" fill="rgba(210,168,255,0.06)" stroke="#d2a8ff" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="1040" y="42" class="pkg-label" fill="#d2a8ff">animal_matcher/</text>
+          <text x="1040" y="58" class="pkg-sub">re-ID for animals</text>
+
+          <rect x="1040" y="74" width="160" height="28" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="1120" y="92" class="mod-name" text-anchor="middle">match.py</text>
+
+          <rect x="1040" y="108" width="160" height="28" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="1120" y="126" class="mod-name" text-anchor="middle">storage.py</text>
+
+          <rect x="1040" y="142" width="160" height="28" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="1120" y="160" class="mod-name" text-anchor="middle">embedder.py</text>
+
+          <rect x="1040" y="180" width="160" height="22" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="0.8"/>
+          <text x="1120" y="194" class="small" text-anchor="middle">data/known/animals/</text>
+        </g>
+
+        <g>
+          <rect x="1240" y="20" width="180" height="200" rx="8" fill="rgba(210,168,255,0.06)" stroke="#d2a8ff" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="1260" y="42" class="pkg-label" fill="#d2a8ff">person_matcher/</text>
+          <text x="1260" y="58" class="pkg-sub">re-ID (scaffolding)</text>
+
+          <rect x="1260" y="74" width="140" height="28" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="1330" y="92" class="mod-name" text-anchor="middle">match.py</text>
+
+          <rect x="1260" y="108" width="140" height="28" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="1330" y="126" class="mod-name" text-anchor="middle">storage.py</text>
+
+          <rect x="1260" y="142" width="140" height="28" rx="3" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="1330" y="160" class="mod-name" text-anchor="middle">embedder.py</text>
+
+          <rect x="1260" y="180" width="140" height="22" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="0.8"/>
+          <text x="1330" y="194" class="small" text-anchor="middle">data/known/people/</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- RIGHT: telegram_formatter/                                     -->
+        <!-- ============================================================== -->
+        <g>
+          <rect x="800" y="240" width="620" height="120" rx="8" fill="rgba(121,192,255,0.06)" stroke="#79c0ff" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="820" y="262" class="pkg-label" fill="#79c0ff">telegram_formatter/</text>
+          <text x="820" y="278" class="pkg-sub">3-stage output formatter (alert / detail / match)</text>
+
+          <rect x="820" y="290" width="180" height="40" rx="3" fill="rgba(121,192,255,0.18)" stroke="#79c0ff" stroke-width="1.5"/>
+          <text x="910" y="307" class="mod-name" text-anchor="middle">alert.py</text>
+          <text x="910" y="322" class="mod-sub" text-anchor="middle">tg1 · wide frame + motion box</text>
+
+          <rect x="1020" y="290" width="180" height="40" rx="3" fill="rgba(121,192,255,0.18)" stroke="#79c0ff" stroke-width="1.5"/>
+          <text x="1110" y="307" class="mod-name" text-anchor="middle">detail.py</text>
+          <text x="1110" y="322" class="mod-sub" text-anchor="middle">tg2 · cropped subject + attrs</text>
+
+          <rect x="1220" y="290" width="180" height="40" rx="3" fill="rgba(121,192,255,0.18)" stroke="#79c0ff" stroke-width="1.5"/>
+          <text x="1310" y="307" class="mod-name" text-anchor="middle">match_alert.py</text>
+          <text x="1310" y="322" class="mod-sub" text-anchor="middle">tg3 · recognized subject</text>
+
+          <rect x="820" y="334" width="580" height="20" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="0.8"/>
+          <text x="1110" y="348" class="small" text-anchor="middle">+ codec.py (TG markup helpers) · dispatcher.py (class → stage routing)</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- RIGHT-MIDDLE: tests/  (top-of-tree test runner)                -->
+        <!-- ============================================================== -->
+        <g>
+          <rect x="800" y="380" width="620" height="160" rx="8" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="820" y="402" class="pkg-label" fill="#c9d1d9">tests/</text>
+          <text x="820" y="418" class="pkg-sub">pytest test suite (env-var-driven fixtures since 2026-10-14)</text>
+
+          <rect x="820" y="432" width="180" height="28" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="910" y="450" class="mod-name" text-anchor="middle">test_farm_api_cameras_e2e.py</text>
+
+          <rect x="1020" y="432" width="180" height="28" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="1110" y="450" class="mod-name" text-anchor="middle">test_farm_api_live_snapshot.py</text>
+
+          <rect x="1220" y="432" width="180" height="28" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="1310" y="450" class="mod-name" text-anchor="middle">test_check_no_private_data.py</text>
+
+          <rect x="820" y="468" width="180" height="28" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="910" y="486" class="mod-name" text-anchor="middle">test_daily_status_report.py</text>
+
+          <rect x="1020" y="468" width="180" height="28" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="1110" y="486" class="mod-name" text-anchor="middle">test_check_no_jpeg.py</text>
+
+          <rect x="1220" y="468" width="180" height="28" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="1310" y="486" class="mod-name" text-anchor="middle">test_check_no_image_resize.py</text>
+
+          <rect x="820" y="504" width="580" height="20" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="0.8"/>
+          <text x="1110" y="518" class="small" text-anchor="middle">+ ~30 more (gate, pipeline, matchers, MCP, API, scanners)</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- BOTTOM-RIGHT: config/  (per-cam tunables)                      -->
+        <!-- ============================================================== -->
+        <g>
+          <rect x="800" y="560" width="620" height="120" rx="8" fill="rgba(255,166,87,0.06)" stroke="#ffa657" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="820" y="582" class="pkg-label" fill="#ffa657">config/</text>
+          <text x="820" y="598" class="pkg-sub">per-camera tunables (read by gate, cooldown, vision)</text>
+
+          <rect x="820" y="610" width="290" height="40" rx="3" fill="rgba(255,166,87,0.18)" stroke="#ffa657" stroke-width="1.5"/>
+          <text x="965" y="627" class="mod-name" text-anchor="middle">motion_gate_thresholds.json</text>
+          <text x="965" y="642" class="mod-sub" text-anchor="middle">per-cam confidence floors + subjects</text>
+
+          <rect x="1130" y="610" width="270" height="40" rx="3" fill="rgba(255,166,87,0.18)" stroke="#ffa657" stroke-width="1.5"/>
+          <text x="1265" y="627" class="mod-name" text-anchor="middle">camera_recipes.toml</text>
+          <text x="1265" y="642" class="mod-sub" text-anchor="middle">vision prompts, re-ID threshold</text>
+
+          <rect x="820" y="654" width="580" height="20" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="0.8"/>
+          <text x="1110" y="668" class="small" text-anchor="middle">+ *.env.example templates (camera, telegram, llm)</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- BOTTOM-CENTER (under infra): docs/  (PRDs + this dir)          -->
+        <!-- ============================================================== -->
+        <g>
+          <rect x="280" y="740" width="500" height="320" rx="8" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="300" y="762" class="pkg-label" fill="#c9d1d9">docs/</text>
+          <text x="300" y="778" class="pkg-sub">PRDs + architecture diagrams (this file lives here)</text>
+
+          <rect x="300" y="794" width="220" height="28" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="410" y="812" class="mod-name" text-anchor="middle">API.md · MCP-API.md</text>
+
+          <rect x="540" y="794" width="220" height="28" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="650" y="812" class="mod-name" text-anchor="middle">MANUAL.md</text>
+
+          <rect x="300" y="830" width="220" height="28" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="410" y="848" class="mod-name" text-anchor="middle">ARCHITECTURE-V2-CURRENT.html</text>
+
+          <rect x="540" y="830" width="220" height="28" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="650" y="848" class="mod-name" text-anchor="middle">LOGIC-FLOW-DIAGRAM.html</text>
+
+          <rect x="300" y="866" width="220" height="28" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="410" y="884" class="mod-name" text-anchor="middle">ARCHITECTURE-alert-pipeline-2026-09-27.md</text>
+
+          <rect x="540" y="866" width="220" height="28" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="650" y="884" class="mod-name" text-anchor="middle">DEAD-CODE-AUDIT-2026-09-09.md</text>
+
+          <rect x="300" y="902" width="460" height="20" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="0.8"/>
+          <text x="530" y="916" class="small" text-anchor="middle">+ ~100 PHASE-V2-*.json PRDs (one per phase)</text>
+
+          <text x="300" y="950" class="pkg-label" fill="#7ee787" font-size="11">docs/architecture/  (this directory)</text>
+
+          <rect x="300" y="958" width="460" height="28" rx="3" fill="rgba(126,231,135,0.10)" stroke="#7ee787" stroke-width="1"/>
+          <text x="530" y="976" class="mod-name" text-anchor="middle">system-architecture.html  (this file's siblings)</text>
+
+          <rect x="300" y="994" width="220" height="28" rx="3" fill="rgba(126,231,135,0.10)" stroke="#7ee787" stroke-width="1"/>
+          <text x="410" y="1012" class="mod-name" text-anchor="middle">pipeline-data-flow.html</text>
+
+          <rect x="540" y="994" width="220" height="28" rx="3" fill="rgba(126,231,135,0.10)" stroke="#7ee787" stroke-width="1"/>
+          <text x="650" y="1012" class="mod-name" text-anchor="middle">deployment-topology.html</text>
+
+          <rect x="300" y="1030" width="460" height="20" rx="3" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="0.8"/>
+          <text x="530" y="1044" class="small" text-anchor="middle">module-component-map.html  (this file)</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- BOTTOM-LEFT: data/ + logs/                                     -->
+        <!-- ============================================================== -->
+        <g>
+          <rect x="800" y="700" width="620" height="100" rx="8" fill="rgba(195,250,232,0.06)" stroke="#7ee787" stroke-width="1.5" stroke-dasharray="6,4"/>
+          <text x="820" y="722" class="pkg-label" fill="#7ee787">data/  ·  logs/</text>
+          <text x="820" y="738" class="pkg-sub">runtime state on disk (gitignored)</text>
+
+          <rect x="820" y="750" width="180" height="36" rx="3" fill="rgba(195,250,232,0.10)" stroke="#7ee787" stroke-width="1"/>
+          <text x="910" y="767" class="mod-name" text-anchor="middle">data/frames/&lt;cam&gt;/</text>
+          <text x="910" y="780" class="mod-sub" text-anchor="middle">ring + crops</text>
+
+          <rect x="1020" y="750" width="180" height="36" rx="3" fill="rgba(195,250,232,0.10)" stroke="#7ee787" stroke-width="1"/>
+          <text x="1110" y="767" class="mod-name" text-anchor="middle">data/known/&lt;class&gt;/</text>
+          <text x="1110" y="780" class="mod-sub" text-anchor="middle">enrolled identities</text>
+
+          <rect x="1220" y="750" width="180" height="36" rx="3" fill="rgba(195,250,232,0.10)" stroke="#7ee787" stroke-width="1"/>
+          <text x="1310" y="767" class="mod-name" text-anchor="middle">logs/daemon.log</text>
+          <text x="1310" y="780" class="mod-sub" text-anchor="middle">+ daily-status/</text>
+        </g>
+
+        <!-- ============================================================== -->
+        <!-- ARROWS: primary import direction                                -->
+        <!-- ============================================================== -->
+
+        <!-- listener/ → infra/ (daemon imports infra) -->
+        <line x1="260" y1="120" x2="280" y2="200" class="edge3" marker-end="url(#arrow3)"/>
+        <text x="270" y="170" class="small">imports</text>
+
+        <!-- listener/ → telegram_formatter/ -->
+        <line x1="260" y1="350" x2="800" y2="280" class="edge3" marker-end="url(#arrow3)"/>
+        <text x="490" y="310" class="small">imports</text>
+
+        <!-- infra/ → matchers (used by infra/vision_analyzer via dispatcher) -->
+        <line x1="780" y1="190" x2="800" y2="130" class="edge3" marker-end="url(#arrow3)"/>
+
+        <!-- infra/ → telegram_formatter (vision_analyzer writes alert through formatters) -->
+        <line x1="780" y1="240" x2="800" y2="270" class="edge3" marker-end="url(#arrow3)"/>
+
+        <!-- infra/farm_api/ ← api_server + mcp_server (both share the typed contract) -->
+        <line x1="520" y1="500" x2="410" y2="280" class="edge3" marker-end="url(#arrow3)" stroke="#d2a8ff"/>
+        <line x1="650" y1="500" x2="650" y2="300" class="edge3" marker-end="url(#arrow3)" stroke="#d2a8ff"/>
+        <text x="540" y="380" class="small" fill="#d2a8ff">shared typed contract</text>
+
+        <!-- bin/health_watchdog.sh → infra (calls GET endpoints) -->
+        <line x1="160" y1="1080" x2="160" y2="420" class="edge3" marker-end="url(#arrow3)" stroke-dasharray="3,2"/>
+        <text x="100" y="800" class="small">curl /healthz</text>
+
+        <!-- bin/ → listener/ -->
+        <line x1="180" y1="1080" x2="180" y2="420" class="edge3" marker-end="url(#arrow3)" stroke-dasharray="3,2"/>
+
+        <!-- scripts/scanners → infra (some call into infra for tests) -->
+        <line x1="430" y1="1080" x2="430" y2="400" class="edge3" marker-end="url(#arrow3)" stroke-dasharray="3,2"/>
+
+        <!-- scripts/enroll_* → matchers -->
+        <line x1="620" y1="1080" x2="900" y2="220" class="edge3" marker-end="url(#arrow3)" stroke-dasharray="3,2"/>
+
+        <!-- tests/ → infra/ + listener/ + matchers (everything) -->
+        <line x1="1110" y1="380" x2="650" y2="220" class="edge3" marker-end="url(#arrow3)" stroke-dasharray="3,2"/>
+
+        <!-- config/ → infra/ -->
+        <line x1="965" y1="610" x2="650" y2="400" class="edge3" marker-end="url(#arrow3)" stroke-dasharray="3,2"/>
+
+        <!-- ============================================================== -->
+        <!-- BOTTOM: legend + key                                            -->
+        <!-- ============================================================== -->
+
+        <g transform="translate(280, 1290)">
+          <text x="0" y="0" class="pkg-label">Key</text>
+
+          <rect x="0" y="14" width="14" height="10" rx="2" fill="rgba(88,166,255,0.18)" stroke="#58a6ff" stroke-width="1"/>
+          <text x="22" y="23" class="small">listener/ (the daemon)</text>
+
+          <rect x="180" y="14" width="14" height="10" rx="2" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="202" y="23" class="small">infra/ (shared library)</text>
+
+          <rect x="380" y="14" width="14" height="10" rx="2" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1"/>
+          <text x="402" y="23" class="small">matcher packages</text>
+
+          <rect x="540" y="14" width="14" height="10" rx="2" fill="rgba(121,192,255,0.18)" stroke="#79c0ff" stroke-width="1"/>
+          <text x="562" y="23" class="small">telegram_formatter/</text>
+
+          <rect x="720" y="14" width="14" height="10" rx="2" fill="rgba(255,166,87,0.18)" stroke="#ffa657" stroke-width="1"/>
+          <text x="742" y="23" class="small">bin/ + scripts/ + config/</text>
+
+          <rect x="0" y="38" width="14" height="10" rx="2" fill="rgba(126,231,135,0.18)" stroke="#7ee787" stroke-width="1"/>
+          <text x="22" y="47" class="small">data/ + logs/ (gitignored)</text>
+
+          <rect x="200" y="38" width="14" height="10" rx="2" fill="rgba(13,17,23,0.5)" stroke="#30363d" stroke-width="1"/>
+          <text x="222" y="47" class="small">tests/ + docs/ (text-only)</text>
+
+          <line x1="420" y1="43" x2="450" y2="43" class="edge3" marker-end="url(#arrow3)"/>
+          <text x="456" y="47" class="small">imports (caller → callee)</text>
+
+          <line x1="620" y1="43" x2="650" y2="43" class="edge3" marker-end="url(#arrow3)" stroke-dasharray="3,2"/>
+          <text x="656" y="47" class="small">test / scan / enroll (one-off)</text>
+        </g>
+
+        <text x="280" y="1180" class="anno" fill="#58a6ff">Note: all paths are package-relative from repo root (~/farm-surveillance-v2). The daemon process is single — it loads all of listener/ + infra/ + the matchers + telegram_formatter/ at boot.</text>
+        <text x="280" y="1196" class="anno" fill="#d2a8ff">infra/farm_api/ is the typed Python contract shared by api_server + mcp_server. They are the SAME read path; clients can pick JSON-RPC (MCP) or HTTP (API).</text>
+        <text x="280" y="1212" class="anno" fill="#7ee787">data/ + logs/ are on disk only — gitignored, never committed. camera-creds.env + .env are mode 600.</text>
+
+      </svg>
+    </div>
+
+    <div class="legend-strip">
+      <span><span class="sw" style="color:#58a6ff"></span>listener/ (the daemon)</span>
+      <span><span class="sw" style="color:#d2a8ff"></span>infra/ + matchers</span>
+      <span><span class="sw" style="color:#79c0ff"></span>telegram_formatter/</span>
+      <span><span class="sw" style="color:#ffa657"></span>bin/ + scripts/ + config/</span>
+      <span><span class="sw" style="color:#7ee787"></span>data/ + logs/ (gitignored)</span>
+      <span><span class="sw" style="color:#6e7681"></span>tests/ + docs/ (text-only)</span>
+    </div>
+  </div>
+
+  <div class="footer">
+    farm-surveillance-v2  ·  v0.7.0  ·  module / component map  ·  pairs with system-architecture.html + pipeline-data-flow.html + deployment-topology.html
+  </div>
+</div>
+</body>
+</html>
