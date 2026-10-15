@@ -79,10 +79,21 @@ yolo*.pt
 # git worktrees (moved to ~/archive/v2-worktrees-YYYY-MM-DD when done)
 .worktrees/
 
+# Operator's local hermes scratch cache (skill bodies, kanban bodies, scratch
+# notes). Lives at ./.hermes/ on the operator's machine and is purely
+# runtime state — never source.
+.hermes/
+
 # Runtime telemetry + push log (US-XXX housekeeping)
 data/gate_drops.jsonl
 scripts/push*.log
 scripts/push_log.txt
+
+# Operator's forgejo recovery mirror push script — operator-internal workflow
+# that documents the forgejo mirror path. Not appropriate for the public
+# GitHub repo. The script itself stays in the working tree for local use;
+# it's just untracked so it doesn't ship to the public mirror.
+scripts/push_to_forgejo.sh
 
 # Per-event runtime output directories (one UUID per alert, written by listener/daemon.py)
 data/events/*/
