@@ -186,3 +186,152 @@ class TestScannerWhitelist:
         assert "docs/PRIVACY.md" not in result.stdout, (
             "PRIVACY.md is flagged — whitelist is broken."
         )
+
+
+class TestRuntimeDataPathCheck:
+    """Scanner exits 1 when a tracked runtime-data path is committed.
+
+    This guards the same class of leak that shipped as the v0.7.0
+    security-review findings: paths the .gitignore treats as runtime-only
+    (per-event output, enrollment data, ML weights, etc.) that got
+    committed before the .gitignore rule was added and stayed tracked
+    forever.
+    """
+
+    @pytest.fixture()
+    def injected_runtime_path_tree(self, tmp_path: Path) -> Path:
+        """Copy the repo root, init git, commit a fake per-event JSON."""
+        repo = tmp_path / "repo"
+        shutil.copytree(ROOT, repo, symlinks=True,
+                        ignore=shutil.ignore_patterns(
+                            ".git", "__pycache__", ".venv",
+                            ".pytest_cache", ".mypy_cache",
+                            ".ruff_cache", ".desloppify", ".qa",
+                            ".worktrees",
+                            "data",
+                            "logs",
+                            "models",
+                            "*.env",
+                        ))
+        subprocess.run(
+            ["git", "init"], cwd=str(repo), capture_output=True, check=True
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=str(repo), capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=str(repo), capture_output=True, check=True,
+        )
+        # Build a minimal per-event record whose path matches the
+        # data/events/*/event.json glob. The content itself doesn't
+        # have to be sensitive for the path-level check to fire.
+        event_dir = repo / "data" / "events" / "test-uuid-12345"
+        event_dir.mkdir(parents=True, exist_ok=True)
+        (event_dir / "event.json").write_text(
+            '{"alert_id": "test-uuid-12345", "camera_id": "OUTSIDE_TEST", '
+            '"t_start_ms": 0, "t_end_ms": 0}\n'
+        )
+        # Add the file explicitly so it gets committed. Use `git add -f`
+        # to force-add the file even though the .gitignore rule blocks
+        # it — this is exactly the scenario the scanner is meant to
+        # catch (a path the .gitignore treats as runtime-only, but which
+        # someone has force-added to the index).
+        subprocess.run(
+            ["git", "add", "-f", str(event_dir / "event.json")],
+            cwd=str(repo), capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "inject-event"],
+            cwd=str(repo), capture_output=True, check=True,
+        )
+        return repo
+
+    def test_tracked_event_json_flagged(self, injected_runtime_path_tree: Path):
+        """A committed data/events/*/event.json triggers exit 1."""
+        result = subprocess.run(
+            [sys.executable, str(SCANNER)],
+            capture_output=True,
+            text=True,
+            cwd=str(injected_runtime_path_tree),
+            check=False,
+        )
+        assert result.returncode == 1, (
+            f"Expected exit 1 on tracked runtime data, got {result.returncode}."
+            f"\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert "data/events/test-uuid-12345/event.json" in result.stdout, (
+            f"Expected the injected event.json path in output, got:\n"
+            f"{result.stdout}"
+        )
+        assert "tracked runtime data" in result.stdout, (
+            "Output should identify this as the runtime-data category."
+        )
+
+    def test_known_animals_dir_flagged(self, tmp_path: Path):
+        """A committed data/known/animals/known_animals.json triggers exit 1."""
+        repo = tmp_path / "repo"
+        shutil.copytree(ROOT, repo, symlinks=True,
+                        ignore=shutil.ignore_patterns(
+                            ".git", "__pycache__", ".venv",
+                            ".pytest_cache", ".mypy_cache",
+                            ".ruff_cache", ".desloppify", ".qa",
+                            ".worktrees", "data", "logs", "models",
+                            "*.env",
+                        ))
+        subprocess.run(
+            ["git", "init"], cwd=str(repo), capture_output=True, check=True
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=str(repo), capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=str(repo), capture_output=True, check=True,
+        )
+        animals_dir = repo / "data" / "known" / "animals"
+        animals_dir.mkdir(parents=True, exist_ok=True)
+        (animals_dir / "known_animals.json").write_text("[]\n")
+        # Force-add because the .gitignore rules block this path —
+        # the whole point of the test is that someone bypassed the rule.
+        subprocess.run(
+            ["git", "add", "-f", str(animals_dir / "known_animals.json")],
+            cwd=str(repo), capture_output=True, check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "inject-known-animals"],
+            cwd=str(repo), capture_output=True, check=True,
+        )
+        result = subprocess.run(
+            [sys.executable, str(SCANNER)],
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+            check=False,
+        )
+        assert result.returncode == 1, (
+            f"Expected exit 1 on tracked known_animals.json, got "
+            f"{result.returncode}.\nstdout: {result.stdout}"
+        )
+        assert "data/known/animals/known_animals.json" in result.stdout
+
+    def test_clean_tree_does_not_flag_legit_paths(self):
+        """The scanner on the current repo doesn't flag the README or
+        source files — sanity check that the new glob list doesn't
+        over-match."""
+        result = subprocess.run(
+            [sys.executable, str(SCANNER)],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+            check=False,
+        )
+        # If we got here from the prior test, the scanner may have
+        # flagged things. Run the clean-tree test and check that
+        # README.md is not flagged.
+        assert "README.md" not in result.stdout, (
+            "Scanner flagged README.md — over-matching.\n"
+            f"Output: {result.stdout}"
+        )

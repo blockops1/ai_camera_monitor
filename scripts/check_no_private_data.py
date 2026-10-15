@@ -8,6 +8,10 @@ Scan categories (see docs/PRIVACY.md for conventions):
   2. Telegram chat identifier digits (TELEGRAM_HOME_CHAT_ID value).
   3. Operator personal-handle strings (first-name forms used as a handle).
   4. Helper personal-handle strings (third-party helpers' names).
+  5. Tracked runtime data paths — any tracked file under a path the
+     .gitignore rules treat as runtime-only. Catches the case where a
+     file was committed BEFORE the .gitignore rule was added; without
+     this check, such files stay tracked forever.
 
 Operator and helper handle patterns are loaded at runtime from a private
 JSON config file (`data/private_identifiers.json`). This keeps the scanner
@@ -74,6 +78,49 @@ CHAT_ID_PATTERN: str = ""  # filled at runtime from env
 #   }
 OPERATOR_HANDLES: list[str] = []
 HELPER_HANDLES: list[str] = []
+
+# Category 5: Tracked runtime data paths.
+#
+# These are paths the .gitignore treats as runtime-only output, enrollment
+# data, or pre-deployment snapshots. The .gitignore rule is necessary but
+# not sufficient — a file committed BEFORE the rule was added stays in the
+# tracked tree forever unless someone runs `git rm --cached` and rewrites
+# history. This category catches that class of leak.
+#
+# Each entry is a (glob_pattern, label) pair matched against the path of
+# each tracked file relative to repo root. Use gitignore-style globs.
+# Rationale per entry is in docs/PRIVACY.md.
+RUNTIME_DATA_PATTERNS: list[tuple[str, str]] = [
+    # Per-alert runtime output (one UUID dir per alert, written by listener/daemon.py).
+    # Contains camera alias + absolute paths + msec timestamps.
+    ("data/events/*/event.json", "per-alert event record"),
+    # Hand-labeled bounding boxes keyed by alert UUID.
+    ("data/frames/**/ground_truth.json", "frame ground-truth labels"),
+    # Pre-deployment device snapshots (Reolink GetDevInfo dump).
+    ("data/us-*snapshot*.json", "pre-deployment device snapshot"),
+    # Backtest artifacts (large PNG composites with operator property imagery).
+    ("data/backtest/**", "backtest artifact"),
+    # Enrollment data — known_people.json and embeddings.npz are
+    # separately listed in .gitignore for the people dir; the animal
+    # dir is gitignored wholesale.
+    ("data/known/people/known_people.json", "enrolled person manifest"),
+    ("data/known/people/embeddings.npz", "enrolled person embeddings"),
+    ("data/known/animals/**", "enrolled animal data"),
+    # Operator's private identifier config (real first names).
+    ("data/private_identifiers.json", "operator private identifier config"),
+    # ML weights — release via artifacts, not source.
+    ("models/*.onnx", "ONNX model weight file"),
+    ("models/*.pt", "PyTorch model weight file"),
+    ("models/*.weights", "darknet model weight file"),
+    # Push log typo variants. .gitignore now covers scripts/push*.log;
+    # this catches any variant (scripts/push.log, push_log.txt, etc.)
+    # that snuck in before the rule was added. NOTE: only the LOG
+    # files are leaks — the SCRIPT that pushes to the operator's
+    # recovery mirror is tracked on purpose under
+    # scripts/push_to_forgejo.sh, hence the *.log / *.txt suffixes.
+    ("scripts/push*.log", "forgejo push log"),
+    ("scripts/push*.txt", "forgejo push log"),
+]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -246,6 +293,26 @@ def main() -> int:
 
     # Scan
     leaks: list[str] = []
+
+    # Category 5: tracked runtime-data paths. This is a path-level check
+    # against the git-tracked file list — it doesn't read file contents.
+    # It catches files that were committed BEFORE the .gitignore rule
+    # was added; without this check, such files stay tracked forever.
+    for filepath in files_to_check:
+        try:
+            rel = Path(filepath).relative_to(repo_root)
+            rel_str = str(rel)
+        except ValueError:
+            continue
+        for glob_pattern, label in RUNTIME_DATA_PATTERNS:
+            if Path(rel_str).match(glob_pattern):
+                leaks.append(
+                    f"{rel_str}:1 [tracked runtime data: {label}] "
+                    f"matched pattern '{glob_pattern}' — run "
+                    f"`git rm --cached {rel_str}` and amend the rule in .gitignore"
+                )
+                break  # one match per file is enough
+
     for filepath in files_to_check:
         if _should_exclude(filepath, repo_root):
             continue
