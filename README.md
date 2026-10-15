@@ -382,8 +382,7 @@ each independently testable.
 ## Privacy guard (v0.7.0)
 
 The public github release ships 4 pre-push scanners that run on every
-push to the github remote (the forgejo mirror is allowed full creds;
-the hook short-circuits for it). All 4 must exit 0 for the push to
+push to the github remote. All 4 must exit 0 for the push to
 succeed.
 
 | Scanner | Catches | File |
@@ -587,17 +586,6 @@ Pre-push before opening a PR:
 ```bash
 make check-privacy   # 4 scanners + cred-guard
 ```
-
-## Forgejo recovery mirror
-
-The Forgejo mirror at `deruyter:3000/jill/farm-surveillance-v2` is a
-backup boundary. After every merge to `main`, a `.git/hooks/post-merge`
-hook fires `scripts/push_to_forgejo.sh` automatically. The hook is a
-no-op when no forgejo remote exists and always exits 0 — push failure
-never rolls back a successful merge. Results log to `scripts/push_log.txt`.
-
-Do NOT call `scripts/push_to_forgejo.sh` manually after merging; the
-post-merge hook handles it.
 
 ## License
 

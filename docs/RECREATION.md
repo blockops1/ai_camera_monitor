@@ -29,7 +29,7 @@ A from-nothing build (started 2026-09-06) of a clean, lean surveillance alert pi
 ## 2. Repository layout
 
 ```
-~/farm-surveillance-v2/                # v2 build root (PUBLIC FORGEJO: deruyter:3000/jill/farm-surveillance-v2)
+~/farm-surveillance-v2/                # v2 build root (public mirror at github.com/blockoperations/farm-surveillance-v2)
 ├── .git/                              # main branch, local + remote mirror
 ├── .gitignore                         # excludes .env, __pycache__, *.pyc, .venv/, data/frames/
 ├── .env.example                       # copy → .env, fill in Telegram + LLM credentials
