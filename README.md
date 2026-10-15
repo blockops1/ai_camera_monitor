@@ -87,6 +87,12 @@ Built for Reolink IP cameras; runs as a single Python daemon under
   (`FARM_TEST_FRONT_IP` / `FARM_TEST_BACK_IP`) with RFC 1918 placeholder
   defaults, never hardcode production cam IPs. See the "Development"
   section.
+- **4 architecture diagrams** — `docs/architecture/` ships hand-authored
+  SVG-in-dark-HTML files for system architecture, per-event pipeline
+  data flow, module/component map, and deployment topology. Open
+  directly in any browser; no build step. Replaces the inline ASCII
+  diagram that used to live in this README's "Architecture overview"
+  section.
 
 Run `git log v0.6.3..v0.7.0 --oneline` for the full commit list.
 
@@ -150,54 +156,45 @@ Telegram format and alert wording are documented in
 
 ## Architecture overview
 
+The full v0.7.0 architecture is documented as four hand-authored SVG-in-dark-HTML diagrams
+in [`docs/architecture/`](docs/architecture/). Each can be opened directly in any browser
+(no build step, no JS, no external assets).
+
+| Diagram | What's in it |
+|---|---|
+| [`system-architecture.html`](docs/architecture/system-architecture.html) | External actors (Reolink cams, Qwen3-VL, Telegram, MCP/API clients) → Mac mini daemon (3 ports) → 9-stage alert pipeline + 8 side surfaces + 4 filesystem rows + 4 credential boxes |
+| [`pipeline-data-flow.html`](docs/architecture/pipeline-data-flow.html) | Per-event data path: webhook → ring buffer pull → cooldown → YOLO gate → VM1 verify_class → VM2 detail_class → matchers → Telegram formatter → transport |
+| [`module-component-map.html`](docs/architecture/module-component-map.html) | Package layout (`infra/`, `listener/`, `vehicle_matcher/`, `animal_matcher/`, `person_matcher/`, `telegram_formatter/`) with import-direction arrows |
+| [`deployment-topology.html`](docs/architecture/deployment-topology.html) | 4 zones: LAN cams (192.168.1.0/24) → Reolink gateway → Tailscale (100.64.0.0/10) → Mac mini daemon, with cross-zone traffic summary and privacy-boundary callouts |
+
+Quick mental model:
+
 ```
-                 ┌──────────────┐
-Reolink cam ────▶│  /alert      │
-                 │  :8090       │  IP-validated
-                 │              │  rate-limited
-                 └──────┬───────┘
-                        │ webhook
-                        ▼
-            ┌────────────────────┐
-            │ listener/daemon.py │
-            │  + pipeline.py     │
-            │  + health.py       │
-            └─┬──────────┬───────┘
-              │          │
-   ring buffer│          │cooldown
-              ▼          ▼
-        ┌──────────┐  ┌─────────────┐
-        │ gate.py  │  │ pipeline_   │
-        │ (YOLO)   │  │  cooldown.py│
-        └────┬─────┘  └─────────────┘
-             │
-             ▼
-        ┌──────────────────┐
-        │ vision_analyzer  │  Qwen3-VL
-        │ (Qwen3-VL :8080) │  :8080
-        └────────┬─────────┘
-                 │
-                 ▼
-        ┌──────────────────┐
-        │ vision schema v2 │  color, body,
-        │ + matchers       │  make/model, breed,
-        │ (animal/person/  │  count, face-visible,
-        │  vehicle)        │  subclass, notes
-        └────────┬─────────┘
-                 │
-                 ▼
-        ┌──────────────────┐
-        │ telegram_        │  3 messages:
-        │  formatter       │  alert, detail,
-        │ (Telegram bot)   │  optional match
-        └──────────────────┘
+Reolink cam ─▶ /alert :8090 (LAN only, IP-validated)
+                       │
+                       ▼
+        listener/daemon.py  (single Python process, 3 socket bindings)
+              ├── :8090 webhook (LAN, alerts in)
+              ├── :8091 MCP server (Tailscale, 18 read-only tools)
+              └── :8092 HTTP API  (Tailscale, 17 GETs + /healthz)
+                       │
+                       ▼
+   9-stage alert pipeline  (linear, single-threaded, sync)
+     1. webhook receiver → 2. ring pull → 3. cooldown
+     4. YOLO gate → 5. vision-LLM verify → 6. vision-LLM detail
+     7. matcher (vehicle / animal / person, Tier-2 cosine)
+     8. Telegram formatter (tg1, tg2, tg3) → 9. transport
+```
 
 Side surfaces (read-only, do not affect pipeline):
-  infra/mcp_server.py  ─▶ 18 MCP tools at :8091 (Tailscale)
-  infra/api_server.py  ─▶ /api/v1/* at :8092 (Tailscale)
-  infra/daily_status_report.py  ─▶ HTML once/day, posted to TG
-  bin/health_watchdog.sh  ─▶ liveness + disk + webhook-rate check
-```
+
+- `infra/mcp_server.py` — 18 MCP tools at `:8091` (Tailscale)
+- `infra/api_server.py` — `/api/v1/*` at `:8092` (Tailscale)
+- `infra/daily_status_report.py` — HTML once/day, posted to TG
+- `bin/health_watchdog.sh` — liveness + disk + webhook-rate check
+
+For ASCII-only fallback see [`docs/ARCHITECTURE-alert-pipeline-2026-09-27.md`](docs/ARCHITECTURE-alert-pipeline-2026-09-27.md)
+(stage-by-stage prose).
 
 ## Reolink camera setup
 
