@@ -38,6 +38,7 @@ htmlcov/
 
 # alerts / frames / logs
 data/frames/*
+data/frames/**/ground_truth.json
 !data/frames/.gitkeep
 data/tg_uploads/*
 !data/tg_uploads/.gitkeep
@@ -63,6 +64,7 @@ logs/daily-status/
 /models/
 *.pt
 *.onnx
+yolov8n.onnx
 yolov8n_static_640.onnx
 *.weights
 yolo*.pt
@@ -79,10 +81,17 @@ yolo*.pt
 
 # Runtime telemetry + push log (US-XXX housekeeping)
 data/gate_drops.jsonl
+scripts/push*.log
 scripts/push_log.txt
 
 # Per-event runtime output directories (one UUID per alert, written by listener/daemon.py)
 data/events/*/
+
+# Pre-deployment device snapshots (Reolink GetDevInfo dump — firmware + hardware IDs)
+data/us-*snapshot*.json
+
+# Backtest artifacts (large PNG composites with operator property imagery)
+/data/backtest/
 
 # Backup files (created by orchestrator env file edits, not source)
 *.bak
