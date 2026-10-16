@@ -43,6 +43,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from infra.paths import DATA_DIR
+
 import numpy as np
 
 from infra.paths import ANIMAL_KNOWN_FILE, PERSON_KNOWN_FILE, VEHICLE_KNOWN_FILE
@@ -138,6 +140,41 @@ def _now_iso() -> str:
     """Return the current UTC time as an ISO-8601 string."""
     from datetime import UTC, datetime
     return datetime.now(UTC).isoformat()
+
+
+def _validate_image_path(image_path: str, allowed_root: Path | None = None) -> Path:
+    """Resolve *image_path* under *allowed_root* and verify containment.
+
+    The caller may pass any path (absolute, relative, symlinked, or
+    ``../``-escaped).  We resolve symlinks first, then check the resolved
+    path is inside *allowed_root* (also resolved).
+
+    Args:
+        image_path: The raw path supplied by the caller.
+        allowed_root: The chroot boundary.  Defaults to *DATA_DIR* from
+            *infra.paths*.
+
+    Returns:
+        The resolved (canonical) *Path*.
+
+    Raises:
+        PermissionError: when the resolved path is outside *allowed_root*.
+    """
+    if allowed_root is None:
+        allowed_root = Path(DATA_DIR)
+
+    resolved = Path(image_path).resolve()
+    root_resolved = allowed_root.resolve()
+
+    try:
+        resolved.relative_to(root_resolved)
+    except ValueError:
+        raise PermissionError(
+            f"image path escapes the data directory: {image_path} "
+            f"(resolved: {resolved}, allowed root: {root_resolved})"
+        )
+
+    return resolved
 
 
 def _extract_person(entry: dict[str, Any]) -> PersonIdentity:
@@ -327,6 +364,7 @@ def enroll_known_person(
     person_id: str,
     identity_markers: list[str] | None = None,
     image_paths: list[str] | None = None,
+    allowed_root: Path | None = None,
 ) -> dict[str, Any]:
     """Enroll a known person.
 
@@ -337,12 +375,16 @@ def enroll_known_person(
         person_id: Unique identifier string.
         identity_markers: List of identity marker tokens for matching.
         image_paths: List of local image file paths to embed.
+        allowed_root: Chroot boundary for image paths. Defaults to
+            *DATA_DIR* from *infra.paths*.  Tests may override via
+            this parameter instead of monkey-patching module globals.
 
     Returns:
         The registry entry dict that was appended.
 
     Raises:
         ValueError: if person_id is already enrolled or an image path is missing.
+        PermissionError: if an image path escapes the chroot boundary.
     """
     identity_markers = identity_markers or []
     image_paths = image_paths or []
@@ -359,12 +401,15 @@ def enroll_known_person(
             f"Existing entry: {next(e for e in registry if e['id'] == person_id)['label']}"
         )
 
-    # 3. Embed images
+    # 3. Validate and embed images — chroot under DATA_DIR
+    if allowed_root is None:
+        allowed_root = Path(DATA_DIR)
     per_image_vectors: dict[str, np.ndarray] = {}
+    validated_paths: list[str] = []
     for img_path in image_paths:
-        if not os.path.isfile(img_path):
-            raise ValueError(f"image path not found: {img_path}")
-        vec, key = _embed_person_image(img_path, person_id)
+        resolved = _validate_image_path(img_path, allowed_root=allowed_root)
+        validated_paths.append(str(resolved))
+        vec, key = _embed_person_image(str(resolved), person_id)
         per_image_vectors[key] = vec
 
     # 4. Compute per-person average embedding
@@ -386,7 +431,7 @@ def enroll_known_person(
         "label": name,
         "identity_markers": sorted(set(identity_markers)),
         "first_enrolled_iso": datetime.now(UTC).isoformat(),
-        "sample_image_paths": [os.path.abspath(p) for p in image_paths],
+        "sample_image_paths": validated_paths,
     }
     registry.append(entry)
     _save_people_registry(registry)
