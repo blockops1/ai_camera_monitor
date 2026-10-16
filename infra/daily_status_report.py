@@ -197,24 +197,218 @@ def _read_log_tail(path: Path, max_lines: int = 50000) -> list[str]:
         return []
 
 
-def get_per_cam_status() -> list[dict[str, Any]]:
-    """For each cam, return RTSP connection count and (if reachable) CPU% via reolink-cli.
+# ---------------------------------------------------------------------------
+# 24-hour history parsing functions.
+# ---------------------------------------------------------------------------
 
-    Uses reolink-cli directly (not the listener). Skips cams that fail fast.
+# Mapping from short alias to camera_health ID.
+_ALIAS_TO_HEALTH_ID: dict[str, str] = {
+    "FRONT": "FRONT",
+    "BACK": "BACK",
+    "OFG": "OUTSIDE_FRONT_GARAGE",
+    "OFP": "OUTSIDE_FRONT_POWER",
+    "OFS": "OUTSIDE_FRONT_SOLAR",
+    "OBS": "OUTSIDE_BACK_SOLAR",
+}
+
+
+def _cut_lines(lines: list[str], hours: int = 24) -> list[str]:
+    """Return lines whose timestamp is within the last *hours* hours."""
+    cutoff = dt.datetime.now() - dt.timedelta(hours=hours)
+    out: list[str] = []
+    for line in lines:
+        m = re.match(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+        if not m:
+            continue
+        try:
+            ts = dt.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+        if ts >= cutoff:
+            out.append(line)
+    return out
+
+
+def get_per_cam_24h(path: Path = DAEMON_LOG, hours: int = 24) -> dict[str, dict[str, Any]]:
+    """Parse camera_health lines for the last *hours* hours.
+
+    Returns:
+        {alias: {uptime_pct: float, reconnects: int, frames_processed: int}}
+        uptime_pct is 0.0-100.0 based on healthy=True fraction.
+    """
+    lines = _cut_lines(_read_log_tail(path), hours)
+    # Per-health-id tracking.
+    healthy: dict[str, int] = {}
+    total: dict[str, int] = {}
+    frames: dict[str, int] = {}
+    reconnects_sum: dict[str, int] = {}
+
+    for line in lines:
+        m = re.search(
+            r"camera_health:\s+id=(\S+)\s+"
+            r"healthy=(\S+)\s+"
+            r"secs_since_last_frame=\S+\s+"
+            r"frames=(\d+)\s+"
+            r"reconnects=(\d+)",
+            line,
+        )
+        if not m:
+            continue
+        hid = m.group(1)
+        h_val = m.group(2) == "True"
+        fr = int(m.group(3))
+        rc = int(m.group(4))
+
+        total[hid] = total.get(hid, 0) + 1
+        healthy[hid] = healthy.get(hid, 0) + (1 if h_val else 0)
+        frames[hid] = fr  # latest snapshot
+        # reconnects is cumulative; delta from last known.
+        prev = reconnects_sum.get(hid, 0)
+        reconnects_sum[hid] = prev + max(0, rc - prev) if prev != 0 else rc
+
+    result: dict[str, dict[str, Any]] = {}
+    for short_alias, health_id in _ALIAS_TO_HEALTH_ID.items():
+        t = total.get(health_id, 0)
+        h = healthy.get(health_id, 0)
+        result[short_alias] = {
+            "uptime_pct": round(h / t * 100, 1) if t else 0.0,
+            "reconnects": reconnects_sum.get(health_id, 0),
+            "frames_processed": frames.get(health_id, 0),
+        }
+    return result
+
+
+def get_vision_24h(path: Path = DAEMON_LOG) -> dict[str, int]:
+    """Count successful and failed vision_analyzer calls in the last 24h.
+
+    Returns:
+        {"ok": int, "timeout": int}
+    """
+    lines = _cut_lines(_read_log_tail(path))
+    ok = 0
+    timeout = 0
+    for line in lines:
+        if "httpcore" in line and ("ReadTimeout" in line or "timeout" in line.lower()):
+            timeout += 1
+        if "HTTP/1." in line and " 200 OK" in line and "vision_analyzer" not in line:
+            # Could be vision healthz or other; be conservative.
+            pass
+    # Count explicit vision_analyzer success lines (200 OK from llama-server).
+    for line in lines:
+        if "vision_analyzer" in line and "200 OK" in line:
+            ok += 1
+        elif "vision_analyzer" in line and "timeout" in line.lower():
+            timeout += 1
+    # Also count httpcore timeout frames from tracebacks.
+    for line in lines:
+        if "httpcore" in line and "timeout" in line.lower():
+            timeout += 1
+    return {"ok": ok, "timeout": timeout}
+
+
+def get_telegram_24h(path: Path = DAEMON_LOG) -> dict[str, int]:
+    """Count telegram send successes and errors in the last 24h.
+
+    Returns:
+        {"success": int, "error": int}
+    """
+    lines = _cut_lines(_read_log_tail(path))
+    success = 0
+    error = 0
+    for line in lines:
+        if "api.telegram.org" in line and "200 OK" in line:
+            success += 1
+        if "telegram" in line.lower() and " ERROR " in line:
+            error += 1
+    return {"success": success, "error": error}
+
+
+def get_error_breakdown_24h(path: Path = DAEMON_LOG) -> dict[str, int]:
+    """Categorize tracebacks by exception class in the last 24h.
+
+    Returns:
+        {ExceptionClassName: count}
+    """
+    lines = _cut_lines(_read_log_tail(path))
+    counts: dict[str, int] = {}
+    for line in lines:
+        # Match lines like "ClassName: message" or "raise ClassName"
+        m = re.search(r"(\w+Error(?:\.\w+Error)*):", line)
+        if not m:
+            m = re.search(r"(?:^|\s)(\w+Error(?:\.\w+Error)*)(?:\s+raised|$)", line.strip())
+        if not m:
+            # Fallback: look for "raise ClassName"
+            m = re.search(r"raise\s+(\w+Error|\w+Exception)", line)
+        if m:
+            exc = m.group(1)
+            counts[exc] = counts.get(exc, 0) + 1
+    return counts
+
+
+def get_listener_restart_count_24h(path: Path = DAEMON_LOG) -> int:
+    """Count listener bootstrap/restart events in the last 24h.
+
+    Returns count of lines matching 'listener: bootstrap' or 'bootstrap'
+    markers in daemon.log.
+    """
+    lines = _cut_lines(_read_log_tail(path))
+    count = 0
+    for line in lines:
+        if "bootstrap" in line.lower():
+            count += 1
+    return count
+
+
+def _cam_connections_from_heartbeat() -> dict[str, int]:
+    """Return per-cam connection counts from the latest heartbeat lines.
+
+    Reads the most recent camera_health entries (every 10 min) and counts
+    how many healthy=True entries each cam has.  A cam with at least one
+    healthy=True heartbeat in the last few windows is considered connected.
+    Uses heartbeat data (not lsof) so it survives listener mid-restart
+    gaps where lsof returns zero ESTABLISHED connections.
+
+    Returns: {alias: connection_count}
+    """
+    lines = _read_log_tail(DAEMON_LOG, max_lines=200)  # last 200 lines covers ~33 min
+    counts: dict[str, int] = {c["alias"]: 0 for c in CAMS()}
+    # Walk backwards from latest; stop once we've seen all 6 cams.
+    seen: set[str] = set()
+    for line in reversed(lines):
+        m = re.search(
+            r"camera_health:\s+id=(\S+)\s+healthy=(\S+)",
+            line,
+        )
+        if not m:
+            continue
+        hid = m.group(1)
+        healthy = m.group(2) == "True"
+        # Map health ID -> short alias
+        alias = None
+        for sa, hi in _ALIAS_TO_HEALTH_ID.items():
+            if hi == hid:
+                alias = sa
+                break
+        if not alias or alias in seen:
+            continue
+        if healthy:
+            counts[alias] += 1
+        seen.add(alias)
+        if len(seen) >= 6:
+            break
+    return counts
+
+
+def get_per_cam_status() -> list[dict[str, Any]]:
+    """For each cam, return connection count and (if reachable) CPU% via reolink-cli.
+
+    Uses heartbeat data (not lsof) for connection counts so the report
+    survives listener mid-restart gaps where lsof returns zero ESTABLISHED
+    connections.  CPU/encode come from reolink-cli.  Skips cams that fail fast.
     """
     cam_results: list[dict[str, Any]] = []
-    # Check RTSP ESTABLISHED counts from listener in one lsof call
-    rc, out, _ = _run(
-        ["lsof", "-nP", "-iTCP", "-sTCP:ESTABLISHED", "-a", "-p", _listener_pid_or_placeholder()],
-        timeout=5,
-    )
-    rtsp_counts: dict[str, int] = {c["alias"]: 0 for c in CAMS()}
-    if rc == 0:
-        for line in out.splitlines():
-            for cam in CAMS():
-                if cam["ip"] in line and ":554" in line:
-                    rtsp_counts[cam["alias"]] += 1
-                    break
+    # Get connection counts from heartbeat data
+    rtsp_counts = _cam_connections_from_heartbeat()
 
     # For CPU, use reolink-cli per cam. Use env-passed password from camera-creds.env
     # so we don't expose the password in argv. Skip if env not set (caller's problem).
@@ -382,7 +576,8 @@ def build_report(now: dt.datetime | None = None) -> dict[str, Any]:
         now: Override the current time (for deterministic tests). Defaults to now().
 
     Returns:
-        dict with keys: generated_at, listener, cams, webhooks_24h, errors_24h, disk.
+        dict with keys: generated_at, listener, cams, webhooks_24h, errors_24h,
+        disk, history_24h (per_cam, vision, telegram, errors, restarts).
     """
     now = now or dt.datetime.now()
     return {
@@ -392,6 +587,13 @@ def build_report(now: dt.datetime | None = None) -> dict[str, Any]:
         "webhooks_24h": get_webhook_activity_24h(),
         "errors_24h": get_error_count_24h(),
         "disk": get_disk_usage(),
+        "history_24h": {
+            "per_cam": get_per_cam_24h(),
+            "vision": get_vision_24h(),
+            "telegram": get_telegram_24h(),
+            "errors": get_error_breakdown_24h(),
+            "restarts": get_listener_restart_count_24h(),
+        },
     }
 
 
@@ -433,6 +635,12 @@ def render_html(report: dict[str, Any]) -> str:
     errors = report["errors_24h"]
     disk = report["disk"]
     gen = report["generated_at"]
+    h24 = report.get("history_24h", {})
+    per_cam = h24.get("per_cam", {})
+    vision = h24.get("vision", {})
+    telegram = h24.get("telegram", {})
+    error_breakdown = h24.get("errors", {})
+    restarts = h24.get("restarts", 0)
 
     # Listener summary
     pid = listener.get("pid")
@@ -444,7 +652,7 @@ def render_html(report: dict[str, Any]) -> str:
     )
     listener_class = "section section-ok" if listener.get("all_ports_up") and pid else "section section-bad"
 
-    # Per-cam table rows
+    # Per-cam table rows (current state)
     cam_rows = []
     for c in cams:
         cpu = c.get("cpu_pct")
@@ -463,6 +671,29 @@ def render_html(report: dict[str, Any]) -> str:
             f"<td><code>{escape(encode_str)}</code></td>"
             f"</tr>"
         )
+
+    # Last-24h per-cam table rows
+    cam_rows_24h = []
+    for alias in ["FRONT", "BACK", "OFG", "OFP", "OFS", "OBS"]:
+        d = per_cam.get(alias, {})
+        uptime = d.get("uptime_pct", 0.0)
+        reconnects = d.get("reconnects", 0)
+        frames = d.get("frames_processed", 0)
+        uptime_class = "cam-ok" if uptime >= 95 else ("cam-warn" if uptime >= 80 else "cam-crit")
+        cam_rows_24h.append(
+            f'<tr class="{uptime_class}">'
+            f"<td>{escape(alias)}</td>"
+            f"<td class='num'>{uptime}%</td>"
+            f"<td class='num'>{reconnects}</td>"
+            f"<td class='num'>{frames:,}</td>"
+            f"</tr>"
+        )
+
+    # Error breakdown rows
+    error_rows = "".join(
+        f"<tr><td>{escape(exc)}</td><td class='num'>{cnt}</td></tr>"
+        for exc, cnt in sorted(error_breakdown.items(), key=lambda x: -x[1])
+    )
 
     # Webhook totals
     webhook_total = sum(v for k, v in webhooks.items() if k != "other")
@@ -489,6 +720,7 @@ def render_html(report: dict[str, Any]) -> str:
   }}
   h1 {{ border-bottom: 2px solid #2e7d32; padding-bottom: 0.3em; }}
   h2 {{ margin-top: 2em; color: #2e7d32; }}
+  h3 {{ margin-top: 1.5em; color: #333; font-size: 1.1em; }}
   .meta {{ color: #666; font-size: 0.9em; }}
   .section {{
     border-left: 4px solid #2e7d32; background: #fff; padding: 1em 1.5em;
@@ -523,6 +755,15 @@ def render_html(report: dict[str, Any]) -> str:
                   font-variant-numeric: tabular-nums; }}
   .stat.bad .value {{ color: #c62828; }}
   .stat.good .value {{ color: #2e7d32; }}
+  .mini-grid {{
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.75em; margin: 1em 0;
+  }}
+  .mini-stat {{ background: #fff; padding: 0.75em; border-radius: 4px;
+                text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }}
+  .mini-stat .label {{ color: #888; font-size: 0.8em; text-transform: uppercase; }}
+  .mini-stat .value {{ font-size: 1.3em; font-weight: 600; margin-top: 0.2em;
+                       font-variant-numeric: tabular-nums; color: #333; }}
   footer {{ margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd;
             color: #888; font-size: 0.85em; }}
 </style>
@@ -531,7 +772,37 @@ def render_html(report: dict[str, Any]) -> str:
   <h1>Crestview Orchards — Daily Surveillance Status</h1>
   <p class="meta">Generated {escape(gen)} — automated daily report from farm-surveillance-v2</p>
 
-  <h2>Listener</h2>
+  <h2>Last 24 hours</h2>
+  <div class="section">
+    <h3>Per-cam health</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Alias</th><th>Uptime</th><th>Reconnects</th><th>Frames processed</th>
+        </tr>
+      </thead>
+      <tbody>
+        {"".join(cam_rows_24h)}
+      </tbody>
+    </table>
+    <h3>Listener restarts</h3>
+    <p><strong>{restarts}</strong> bootstrap event(s) in the last 24h.</p>
+    <h3>Vision analyzer</h3>
+    <div class="mini-grid">
+      <div class="mini-stat"><div class="label">OK calls</div><div class="value">{vision.get("ok", 0)}</div></div>
+      <div class="mini-stat"><div class="label">Timeouts</div><div class="value">{vision.get("timeout", 0)}</div></div>
+    </div>
+    <h3>Telegram sends</h3>
+    <div class="mini-grid">
+      <div class="mini-stat"><div class="label">Success</div><div class="value">{telegram.get("success", 0)}</div></div>
+      <div class="mini-stat"><div class="label">Errors</div><div class="value">{telegram.get("error", 0)}</div></div>
+    </div>
+    <h3>Error breakdown</h3>
+    {f'<table><thead><tr><th>Exception</th><th>Count</th></tr></thead><tbody>{error_rows}</tbody></table>' if error_rows else "<p>No errors in the last 24h.</p>"}
+  </div>
+
+  <h2>Current state</h2>
+  <h3>Listener</h3>
   <div class="{listener_class}">
     <p><strong>Status:</strong> {"Running" if pid else "DOWN"} |
        <strong>PID:</strong> {escape(pid_str)} |
@@ -539,19 +810,19 @@ def render_html(report: dict[str, Any]) -> str:
     <p><strong>Listening ports:</strong> {ports_html}</p>
   </div>
 
-  <h2>Cameras ({len(cams)})</h2>
+  <h3>Cameras ({len(cams)})</h3>
   <table>
     <thead>
       <tr>
         <th>Alias</th><th>Label</th><th>Model</th>
-        <th>RTSP</th><th>CPU</th><th>Main encode</th>
+        <th>Connections</th><th>CPU</th><th>Main encode</th>
       </tr>
     </thead>
     <tbody>
       {"".join(cam_rows)}
     </tbody>
   </table>
-  <p class="meta">CPU thresholds: green &lt; 70%, yellow 70–89%, red ≥ 90%.</p>
+  <p class="meta">CPU thresholds: green &lt; 70%, yellow 70-89%, red >= 90%.</p>
 
   <h2>Webhook activity (last 24h)</h2>
   <div class="summary-grid">
