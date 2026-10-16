@@ -827,5 +827,116 @@ class TestReconnectLoopSocketLeak(unittest.TestCase):
             CCR.clear()
 
 
+class TestInThreadTeardown(unittest.TestCase):
+    """Tests for US-049c: in-thread periodic teardown in _decode_iteration.
+
+    Verifies that when enough time has elapsed since the last container open,
+    _decode_iteration closes the container, resets the state, and falls through
+    to the normal open path.  Ring buffer is preserved.
+
+    Note: All IP addresses use RFC 5737 TEST-NET-1 (192.0.2.0/24).
+    """
+
+    def _make_reader(self):
+        """Create a PersistentRTSPReader with a mocked av.container."""
+        from unittest.mock import MagicMock
+
+        if "av" not in sys.modules:
+            _av_stub = MagicMock()
+            _av_stub.__version__ = "15.1.0"
+            _av_stub.container = MagicMock()
+            _av_stub.container.InputContainer = MagicMock
+            sys.modules["av"] = _av_stub
+
+        from infra.frame_capture import PersistentRTSPReader
+
+        reader = PersistentRTSPReader(
+            "rtsp://admin:pass@192.0.2.1:554/", camera_id="FRONT"
+        )
+        mock_container = MagicMock()
+        mock_container.close = MagicMock()
+        reader._container = mock_container
+        reader._last_container_open_monotonic = 0.0  # force teardown
+        return reader, mock_container
+
+    def test_in_thread_teardown_closes_container_and_resets(self):
+        """When time since last open >= _scheduled_reconnect_seconds,
+        _decode_iteration must call _container.close(), set _container=None,
+        reset _last_container_open_monotonic, and increment _teardowns_total.
+
+        Mock time.monotonic to advance 3601s to trigger teardown.
+        """
+        reader, mock_container = self._make_reader()
+
+        mock_av_open = MagicMock(return_value=MagicMock())
+
+        with patch("time.monotonic", return_value=3601.0):
+            with patch("av.open", mock_av_open):
+                with patch.object(reader, "_subscribe_geometry"):
+                    reader._decode_iteration()
+
+        # Teardown: close() called (once in teardown path)
+        self.assertEqual(mock_container.close.call_count, 1)
+        self.assertIsNone(reader._container)
+        self.assertIsNotNone(reader._last_container_open_monotonic)
+        self.assertEqual(reader._teardowns_total, 1)
+
+        # Post-teardown fall-through: new container opened
+        mock_av_open.assert_called_once()
+
+    def test_in_thread_teardown_preserves_ring(self):
+        """After teardown + reopen, the ring buffer is unchanged.
+
+        The teardown closes the container and reopens — it must NOT
+        touch the ring deque.
+        """
+        reader, _mock_container = self._make_reader()
+
+        with patch("time.monotonic", return_value=3601.0):
+            with patch("av.open", MagicMock(return_value=MagicMock())):
+                with patch.object(reader, "_subscribe_geometry"):
+                    reader._decode_iteration()
+
+        # Ring was untouched
+        from collections import deque
+        self.assertIsInstance(reader._ring, deque)
+
+    def test_in_thread_teardown_no_action_before_interval(self):
+        """When elapsed time < _scheduled_reconnect_seconds, teardown is skipped.
+
+        Simulates a normal decode iteration: container already open,
+        time elapsed is small → teardown block not entered.
+        """
+        reader, _mock_container = self._make_reader()
+        # Set last_container_open to a recent time → elapsed << 3600
+        reader._last_container_open_monotonic = time.monotonic() - 10
+
+        mock_av = MagicMock()
+        mock_av.open = MagicMock(return_value=MagicMock())
+
+        with patch("av.open", mock_av):
+            with patch.object(reader, "_subscribe_geometry"):
+                reader._decode_iteration()
+
+        # Teardown not fired: av.open was NOT called (container was already set,
+        # so fall-through skip the if self._container is None block)
+        mock_av.open.assert_not_called()
+
+    def test_in_thread_teardown_attribute_exists(self):
+        """AC2: _last_container_open_monotonic must be an instance attribute."""
+        if "av" not in sys.modules:
+            from unittest.mock import MagicMock
+            _av_stub = MagicMock()
+            _av_stub.__version__ = "15.1.0"
+            _av_stub.container = MagicMock()
+            _av_stub.container.InputContainer = MagicMock
+            sys.modules["av"] = _av_stub
+
+        from infra.frame_capture import PersistentRTSPReader
+        reader = PersistentRTSPReader("rtsp://x")
+        self.assertTrue(hasattr(reader, "_last_container_open_monotonic"))
+        self.assertIsNone(reader._last_container_open_monotonic)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -196,6 +196,7 @@ class PersistentRTSPReader:
             max_reconnect_attempts  # type: ignore[arg-type]
         )
         self._container: av.container.InputContainer | None = None
+        self._last_container_open_monotonic: float | None = None
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._container_lock = threading.Lock()
@@ -667,14 +668,16 @@ class PersistentRTSPReader:
 
     def _decode_iteration(self) -> None:
         # US-049c: periodic in-thread teardown (Frigate/go2rtc pattern).
-        # Closes + reopens the av container every TEARDOWN_INTERVAL_SECONDS
-        # so PyAV's demux can't wedge silently in C-land.
+        # Closes the container every _scheduled_reconnect_seconds so PyAV's
+        # C demux() can't wedge silently.  We close and set _container=None
+        # here, then fall through to the existing container-open path below
+        # (single entry point — shared with failure-driven reconnect).
         if (
-            self._last_teardown_monotonic is not None
+            self._last_container_open_monotonic is not None
             and (
-                time.monotonic() - self._last_teardown_monotonic
+                time.monotonic() - self._last_container_open_monotonic
             )
-            >= TEARDOWN_INTERVAL_SECONDS
+            >= self._scheduled_reconnect_seconds
         ):
             log.info("in_thread_teardown: starting")
             if self._container is not None:
@@ -682,13 +685,15 @@ class PersistentRTSPReader:
                     self._container.close()
                 except Exception:
                     log.exception("in_thread_teardown: container.close() failed")
-            self._container = av.open(self._rtsp_url, options=self._ffmpeg_flags)
-            self._last_teardown_monotonic = time.monotonic()
+            self._container = None
+            self._last_container_open_monotonic = time.monotonic()
             self._teardowns_total += 1
             log.info("in_thread_teardown: completed")
         # Normal connect (or post-teardown reuse of self._container).
         if self._container is None:
             self._container = av.open(self._rtsp_url, options=self._ffmpeg_flags)
+            # Record monotonic time of successful open (first open + post-teardown).
+            self._last_container_open_monotonic = time.monotonic()
         # Probe cv2.VideoCapture for live stream geometry and write into
         # infra.camera_creds on each successful RTSP open.
         self._subscribe_geometry()
