@@ -990,7 +990,6 @@ class TestFailureDrivenCapReached(unittest.TestCase):
           sleep (wait on _stop_event).
         - Stop the reader to end the wait.
         """
-        import logging
         from infra import frame_capture as fc
 
         reader = self._make_reader(max_reconnect=3)
@@ -1187,8 +1186,9 @@ class TestInThreadPeriodicTeardown(unittest.TestCase):
         reader = self._make_reader()
 
         # Pre-populate the ring with 5 dummy frames
-        from PIL import Image
         from collections import deque
+
+        from PIL import Image
 
         for i in range(5):
             img = Image.new("RGB", (10, 10), color=(i * 50, 0, 0))
@@ -1206,6 +1206,38 @@ class TestInThreadPeriodicTeardown(unittest.TestCase):
 
         # Ring should still be a deque
         self.assertIsInstance(reader._ring, deque)
+
+    def test_periodic_teardown_closes_and_resets_state(self):
+        """When time.monotonic advances 3601s, one _decode_iteration must:
+        (1) call container.close(), (2) update _last_container_open_monotonic,
+        and (3) leave the ring buffer length unchanged.
+
+        Mock time.monotonic to return 3601.0 so every call sees elapsed >= 3600.
+        """
+        reader = self._make_reader()
+        mock_container = reader._container
+        # Force teardown to fire: set last_container_open to 0 so elapsed >= 3600.
+        reader._last_container_open_monotonic = 0.0
+
+        # Pre-populate the ring to verify it is preserved.
+        from PIL import Image
+
+        for i in range(5):
+            img = Image.new("RGB", (10, 10), color=(i * 50, 0, 0))
+            reader._ring.append(img)
+        ring_len_before = len(reader._ring)
+
+        with patch("time.monotonic", return_value=3601.0):
+            with patch("av.open", MagicMock(return_value=MagicMock())):
+                with patch.object(reader, "_subscribe_geometry"):
+                    reader._decode_iteration()
+
+        # (1) container.close() was called
+        self.assertTrue(mock_container.close.called)
+        # (2) _last_container_open_monotonic was updated
+        self.assertIsNotNone(reader._last_container_open_monotonic)
+        # (3) ring length is unchanged
+        self.assertEqual(len(reader._ring), ring_len_before)
 
     def test_failure_driven_cap_still_fails_loud(self):
         """Regression: 11 consecutive decode failures (cap default = 10);
