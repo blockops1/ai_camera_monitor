@@ -37,17 +37,19 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from infra.paths import DATA_DIR
-
 import numpy as np
 
-from infra.paths import ANIMAL_KNOWN_FILE, PERSON_KNOWN_FILE, VEHICLE_KNOWN_FILE
+from infra.paths import (
+    ANIMAL_KNOWN_FILE,
+    DATA_DIR,
+    PERSON_KNOWN_FILE,
+    VEHICLE_KNOWN_FILE,
+)
 
 log = logging.getLogger(__name__)
 
