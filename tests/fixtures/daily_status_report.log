@@ -1,0 +1,50 @@
+2026-10-16 00:00:00,000 INFO listener: bootstrap starting
+2026-10-16 00:00:01,000 INFO listener: bootstrap ready
+2026-10-16 00:10:00,000 INFO listener_health: uptime=00:10 pid=12345 port=8090 env_total=12 plist_keepalive=True mcp_enabled=0 alerts_last_10m=0
+2026-10-16 00:10:00,001 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=100000 reconnects=0 teardowns=0 last_teardown_age=5000.0
+2026-10-16 00:10:00,002 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.3 frames=80000 reconnects=0 teardowns=0 last_teardown_age=5000.0
+2026-10-16 00:10:00,003 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.4 frames=60000 reconnects=0 teardowns=0 last_teardown_age=5000.0
+2026-10-16 00:10:00,004 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=True secs_since_last_frame=0.6 frames=70000 reconnects=0 teardowns=0 last_teardown_age=5000.0
+2026-10-16 00:10:00,005 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.2 frames=50000 reconnects=0 teardowns=0 last_teardown_age=5000.0
+2026-10-16 00:10:00,006 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.7 frames=90000 reconnects=0 teardowns=0 last_teardown_age=5000.0
+2026-10-16 00:20:00,000 INFO listener_health: uptime=00:20 pid=12345 port=8090 env_total=12 plist_keepalive=True mcp_enabled=0 alerts_last_10m=1
+2026-10-16 00:20:00,001 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.3 frames=100500 reconnects=0 teardowns=0 last_teardown_age=4400.0
+2026-10-16 00:20:00,002 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.4 frames=80200 reconnects=0 teardowns=0 last_teardown_age=4400.0
+2026-10-16 00:20:00,003 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=60100 reconnects=0 teardowns=0 last_teardown_age=4400.0
+2026-10-16 00:20:00,004 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=False secs_since_last_frame=12.0 frames=70050 reconnects=1 teardowns=1 last_teardown_age=12.0
+2026-10-16 00:20:00,005 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.3 frames=50100 reconnects=0 teardowns=0 last_teardown_age=4400.0
+2026-10-16 00:20:00,006 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=90200 reconnects=0 teardowns=0 last_teardown_age=4400.0
+2026-10-16 00:30:00,000 INFO listener_health: uptime=00:30 pid=12345 port=8090 env_total=12 plist_keepalive=True mcp_enabled=0 alerts_last_10m=0
+2026-10-16 00:30:00,001 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.4 frames=101000 reconnects=0 teardowns=0 last_teardown_age=3800.0
+2026-10-16 00:30:00,002 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.2 frames=80400 reconnects=0 teardowns=0 last_teardown_age=3800.0
+2026-10-16 00:30:00,003 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.3 frames=60200 reconnects=0 teardowns=0 last_teardown_age=3800.0
+2026-10-16 00:30:00,004 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=True secs_since_last_frame=0.5 frames=70100 reconnects=0 teardowns=0 last_teardown_age=1800.0
+2026-10-16 00:30:00,005 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.4 frames=50200 reconnects=0 teardowns=0 last_teardown_age=3800.0
+2026-10-16 00:30:00,006 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.6 frames=90400 reconnects=0 teardowns=0 last_teardown_age=3800.0
+2026-10-16 01:00:00,000 INFO listener: bootstrap restarting after crash
+2026-10-16 01:00:01,000 INFO listener: bootstrap ready
+2026-10-16 01:10:00,001 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.3 frames=102000 reconnects=0 teardowns=0 last_teardown_age=3200.0
+2026-10-16 01:10:00,002 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=80600 reconnects=0 teardowns=0 last_teardown_age=3200.0
+2026-10-16 01:10:00,003 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.4 frames=60300 reconnects=0 teardowns=0 last_teardown_age=3200.0
+2026-10-16 01:10:00,004 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=True secs_since_last_frame=0.3 frames=70200 reconnects=0 teardowns=0 last_teardown_age=2600.0
+2026-10-16 01:10:00,005 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=50300 reconnects=0 teardowns=0 last_teardown_age=3200.0
+2026-10-16 01:10:00,006 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.4 frames=90600 reconnects=0 teardowns=0 last_teardown_age=3200.0
+2026-10-16 02:00:00,000 ERROR listener/daemon.py: pipeline.run failed
+2026-10-16 02:00:00,001 ERROR listener/daemon.py:     raise TimeoutError()
+2026-10-16 02:00:00,002 ERROR listener/daemon.py: TimeoutError
+2026-10-16 02:05:00,000 ERROR infra.vision_analyzer: vision call failed
+2026-10-16 02:05:00,001 ERROR infra.vision_analyzer: infra.vision_analyzer.VisionAnalyzerError: llama-server connection failed: timed out
+2026-10-16 02:10:00,000 INFO httpx: HTTP Request: POST https://api.telegram.org/bot12345/sendPhoto "HTTP/1.1 200 OK"
+2026-10-16 02:15:00,000 INFO httpx: HTTP Request: POST https://api.telegram.org/bot12345/sendPhoto "HTTP/1.1 200 OK"
+2026-10-16 02:20:00,000 ERROR listener/telegram: send failed
+2026-10-16 02:20:00,001 ERROR listener/telegram: telegram.exceptions.TelemetryError: connection refused
+2026-10-16 02:30:00,000 INFO httpx: HTTP Request: GET http://100.64.0.10:8092/healthz "HTTP/1.0 200 OK"
+2026-10-16 02:40:00,000 ERROR infra.mcp_server: tool call failed
+2026-10-16 02:40:00,001 ERROR infra.mcp_server:     raise KeyError('missing_field')
+2026-10-16 02:40:00,002 ERROR infra.mcp_server: KeyError: missing_field
+2026-10-16 03:00:00,001 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.2 frames=103000 reconnects=0 teardowns=0 last_teardown_age=2600.0
+2026-10-16 03:00:00,002 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.3 frames=80800 reconnects=0 teardowns=0 last_teardown_age=2600.0
+2026-10-16 03:00:00,003 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=60400 reconnects=0 teardowns=0 last_teardown_age=2600.0
+2026-10-16 03:00:00,004 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=True secs_since_last_frame=0.4 frames=70300 reconnects=0 teardowns=0 last_teardown_age=2000.0
+2026-10-16 03:00:00,005 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.3 frames=50400 reconnects=0 teardowns=0 last_teardown_age=2600.0
+2026-10-16 03:00:00,006 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=90800 reconnects=0 teardowns=0 last_teardown_age=2600.0

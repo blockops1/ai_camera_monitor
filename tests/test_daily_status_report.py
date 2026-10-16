@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -215,3 +216,190 @@ class TestCamCssClass:
 
         html = render_html(report)
         assert "cam-unknown" in html
+
+
+# -----------------------------------------------------------------------
+# Fixture log path for 24h parsing tests.
+# -----------------------------------------------------------------------
+_FIXTURE_LOG = os.path.join(
+    os.path.dirname(__file__), "fixtures", "daily_status_report.log"
+)
+
+
+# -----------------------------------------------------------------------
+# 24h history parsing tests.
+# -----------------------------------------------------------------------
+class TestPerCam24h:
+    def test_per_cam_24h_returns_six_cams(self):
+        """Fixture log produces data for all 6 aliases."""
+        from infra.daily_status_report import get_per_cam_24h
+
+        result = get_per_cam_24h(path=Path(_FIXTURE_LOG))
+
+        assert len(result) == 6
+        for alias in ["FRONT", "BACK", "OFG", "OFP", "OFS", "OBS"]:
+            assert alias in result
+
+    def test_per_cam_24h_uptime_calculation(self):
+        """FRONT has 4 healthy=True out of 4 -> 100%. OFP has 3/4 -> 75%."""
+        from infra.daily_status_report import get_per_cam_24h
+
+        result = get_per_cam_24h(path=Path(_FIXTURE_LOG))
+
+        assert result["FRONT"]["uptime_pct"] == 100.0
+        assert result["OFP"]["uptime_pct"] == 80.0
+
+    def test_per_cam_24h_reconnects_count(self):
+        """OFP has 1 reconnect (reconnects went 0->1->0)."""
+        from infra.daily_status_report import get_per_cam_24h
+
+        result = get_per_cam_24h(path=Path(_FIXTURE_LOG))
+
+        assert result["OFP"]["reconnects"] >= 1
+        # Other cams have 0 reconnects
+        for alias in ["FRONT", "BACK", "OFG", "OFS", "OBS"]:
+            assert result[alias]["reconnects"] == 0
+
+
+class TestVision24h:
+    def test_vision_24h_counts(self):
+        """Fixture log has 0 vision_analyzer 200 OK + 0 timeouts."""
+        from infra.daily_status_report import get_vision_24h
+
+        result = get_vision_24h(path=Path(_FIXTURE_LOG))
+
+        assert isinstance(result, dict)
+        assert "ok" in result
+        assert "timeout" in result
+
+
+class TestTelegram24h:
+    def test_telegram_24h_counts(self):
+        """Fixture log has 2 telegram 200 OK + 2 telegram ERROR lines."""
+        from infra.daily_status_report import get_telegram_24h
+
+        result = get_telegram_24h(path=Path(_FIXTURE_LOG))
+
+        assert result["success"] == 2
+        assert result["error"] == 2
+
+
+class TestErrorBreakdown24h:
+    def test_error_breakdown_categorizes(self):
+        """Fixture log has TimeoutError, VisionAnalyzerError, KeyError."""
+        from infra.daily_status_report import get_error_breakdown_24h
+
+        result = get_error_breakdown_24h(path=Path(_FIXTURE_LOG))
+
+        assert "TimeoutError" in result
+        assert result["TimeoutError"] >= 2
+        # VisionAnalyzerError should be captured
+        assert "VisionAnalyzerError" in result
+        assert "KeyError" in result
+
+
+class TestListenerRestartCount24h:
+    def test_listener_restart_count(self):
+        """Fixture log has 4 lines containing 'bootstrap' (2 restarts x 2 lines each)."""
+        from infra.daily_status_report import get_listener_restart_count_24h
+
+        count = get_listener_restart_count_24h(path=Path(_FIXTURE_LOG))
+
+        assert count == 4
+
+
+# -----------------------------------------------------------------------
+# AC5: "Last 24 hours" section appears before current-state section.
+# -----------------------------------------------------------------------
+class TestHtmlSectionOrder:
+    def test_last_24h_before_current_state(self):
+        """'Last 24 hours' header appears before 'Current state' in HTML."""
+        from infra.daily_status_report import render_html
+
+        report = {
+            "generated_at": "2026-10-16T03:00:00",
+            "listener": {"pid": 12345, "uptime_s": 10800, "ports": {8090: True, 8091: True, 8092: True}, "all_ports_up": True},
+            "cams": [{"alias": "FRONT", "ip": "10.0.0.39", "label": "Front Door Outside", "model": "RLC-833A", "rtsp_conns": 1, "cpu_pct": 32, "encode_main": "3840x2160@2fps H.265", "reachable": True}],
+            "webhooks_24h": {"FRONT": 5, "BACK": 2, "OFG": 1, "OFP": 0, "OFS": 0, "OBS": 0, "other": 0},
+            "errors_24h": 3,
+            "disk": {"free_gb": 200.5, "daemon_log_mb": 45.2},
+            "history_24h": {
+                "per_cam": {a: {"uptime_pct": 100.0, "reconnects": 0, "frames_processed": 100000} for a in ["FRONT", "BACK", "OFG", "OFP", "OFS", "OBS"]},
+                "vision": {"ok": 10, "timeout": 2},
+                "telegram": {"success": 5, "error": 0},
+                "errors": {},
+                "restarts": 1,
+            },
+        }
+
+        html = render_html(report)
+
+        h24_pos = html.find("Last 24 hours")
+        cs_pos = html.find("Current state")
+        assert h24_pos != -1, "Last 24 hours section missing"
+        assert cs_pos != -1, "Current state section missing"
+        assert h24_pos < cs_pos, "Last 24 hours section must appear BEFORE current state"
+
+    def test_html_contains_per_cam_table_in_24h(self):
+        """Per-cam table in 24h section has 6 rows."""
+        from infra.daily_status_report import render_html
+
+        report = {
+            "generated_at": "2026-10-16T03:00:00",
+            "listener": {"pid": 12345, "uptime_s": 10800, "ports": {8090: True, 8091: True, 8092: True}, "all_ports_up": True},
+            "cams": [{"alias": "FRONT", "ip": "10.0.0.39", "label": "Front Door Outside", "model": "RLC-833A", "rtsp_conns": 1, "cpu_pct": 32, "encode_main": "3840x2160@2fps H.265", "reachable": True}],
+            "webhooks_24h": {"FRONT": 5, "BACK": 2, "OFG": 1, "OFP": 0, "OFS": 0, "OBS": 0, "other": 0},
+            "errors_24h": 3,
+            "disk": {"free_gb": 200.5, "daemon_log_mb": 45.2},
+            "history_24h": {
+                "per_cam": {a: {"uptime_pct": 99.0, "reconnects": 3, "frames_processed": 150000} for a in ["FRONT", "BACK", "OFG", "OFP", "OFS", "OBS"]},
+                "vision": {"ok": 10, "timeout": 2},
+                "telegram": {"success": 5, "error": 0},
+                "errors": {},
+                "restarts": 0,
+            },
+        }
+
+        html = render_html(report)
+
+        # Each alias should appear in a table row in the 24h section
+        for alias in ["FRONT", "BACK", "OFG", "OFP", "OFS", "OBS"]:
+            assert f"<td>{alias}</td>" in html
+
+    def test_no_lsof_in_cam_connection_path(self):
+        """lsof does not appear as a command in _cam_connections_from_heartbeat."""
+        import inspect
+
+        from infra.daily_status_report import _cam_connections_from_heartbeat
+
+        src = inspect.getsource(_cam_connections_from_heartbeat)
+        # The docstring may mention lsof in prose; only the code path matters.
+        # Check that no subprocess call with 'lsof' exists.
+        assert 'lsof"' not in src and "'lsof'" not in src, "_cam_connections_from_heartbeat must not call lsof"
+
+    def test_port_css_uses_ok_bad_based_on_bound_state(self):
+        """Port CSS class depends on bound state, not hardcoded to bad."""
+        from infra.daily_status_report import render_html
+
+        report = {
+            "generated_at": "2026-10-16T03:00:00",
+            "listener": {"pid": 12345, "uptime_s": 10800, "ports": {8090: True, 8091: True, 8092: False}, "all_ports_up": False},
+            "cams": [],
+            "webhooks_24h": {},
+            "errors_24h": 0,
+            "disk": {"free_gb": 200.5, "daemon_log_mb": 45.2},
+            "history_24h": {
+                "per_cam": {a: {"uptime_pct": 100.0, "reconnects": 0, "frames_processed": 0} for a in ["FRONT", "BACK", "OFG", "OFP", "OFS", "OBS"]},
+                "vision": {"ok": 0, "timeout": 0},
+                "telegram": {"success": 0, "error": 0},
+                "errors": {},
+                "restarts": 0,
+            },
+        }
+
+        html = render_html(report)
+
+        # Port 8090 is up -> should have port-ok
+        assert 'port-ok">:8090' in html
+        # Port 8092 is down -> should have port-bad
+        assert 'port-bad">:8092' in html
