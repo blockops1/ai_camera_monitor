@@ -1092,5 +1092,171 @@ class TestFailureDrivenCapReached(unittest.TestCase):
         self.assertEqual(call_count["n"], 1)
 
 
+class TestInThreadPeriodicTeardown(unittest.TestCase):
+    """Tests for US-049f: in-thread periodic teardown cadence.
+
+    Three positive acceptance criteria replacing the deleted watchdog tests
+    (US-049e). These prove that _decode_iteration correctly fires a
+    periodic container close/reopen at the 3600s cadence, preserves the
+    ring buffer across teardown, and does not interfere with the failure
+    cap (US-017e).
+
+    Note: All IP addresses use RFC 5737 TEST-NET-1 (192.0.2.0/24).
+    """
+
+    def _make_reader(self, max_reconnect_attempts=10):
+        """Create a PersistentRTSPReader with a mocked av.container."""
+        from unittest.mock import MagicMock
+
+        if "av" not in sys.modules:
+            _av_stub = MagicMock()
+            _av_stub.__version__ = "15.1.0"
+            _av_stub.container = MagicMock()
+            _av_stub.container.InputContainer = MagicMock
+            sys.modules["av"] = _av_stub
+
+        from infra.frame_capture import PersistentRTSPReader
+
+        reader = PersistentRTSPReader(
+            "rtsp://admin:pass@192.0.2.1:554/",
+            camera_id="FRONT",
+            max_reconnect_attempts=max_reconnect_attempts,
+        )
+        mock_container = MagicMock()
+        mock_container.close = MagicMock()
+        reader._container = mock_container
+        return reader
+
+    def test_teardown_fires_at_3600s_cadence(self):
+        """When 3600s have elapsed since last open, _decode_iteration
+        must call container.close(), reset _container to None,
+        reset _last_container_open_monotonic, and increment _teardowns_total.
+
+        Mock time.monotonic to return increasing values so each
+        _decode_iteration crosses the 3600s cadence boundary.
+        """
+        reader = self._make_reader()
+        # Set last_container_open to 0 so the first iteration's elapsed
+        # check always sees >= 3600 (forces teardown on every call).
+        reader._last_container_open_monotonic = 0.0
+
+        close_calls: list[bool] = []  # track every close() call
+
+        def make_container(*args, **kwargs):
+            """Factory that returns a MagicMock tracking close() calls."""
+            m = MagicMock()
+            original_close = m.close
+            def tracking_close(*args2, **kwargs2):
+                close_calls.append(True)
+                return original_close(*args2, **kwargs2)
+            m.close = tracking_close  # type: ignore[attr-defined]
+            return m
+
+        mock_av_open = MagicMock(side_effect=make_container)
+
+        # Each call to time.monotonic() must return a value at least 3601s
+        # after the previous one so that every iteration sees elapsed >= 3600.
+        _monotonic_counter = [0.0]
+
+        def monotonic_side_effect():
+            _monotonic_counter[0] += 3601.0
+            return _monotonic_counter[0]
+
+        with patch("time.monotonic", side_effect=monotonic_side_effect):
+            with patch("av.open", mock_av_open):
+                with patch.object(reader, "_subscribe_geometry"):
+                    reader._decode_iteration()
+                    reader._decode_iteration()
+                    reader._decode_iteration()
+
+        # _teardowns_total should be 3 (one per 3600s cadence)
+        self.assertEqual(reader._teardowns_total, 3)
+
+        # _last_container_open_monotonic was reset each time (post-teardown)
+        self.assertIsNotNone(reader._last_container_open_monotonic)
+
+        # av.open was called exactly 3 times (post-teardown reopen each time)
+        self.assertEqual(mock_av_open.call_count, 3)
+
+    def test_ring_buffer_survives_teardown(self):
+        """After teardown + reopen, the ring buffer is unchanged.
+
+        Populate the ring with 5 frames, advance time 3601s, trigger
+        teardown; assert self._ring length is still 5.
+        """
+        reader = self._make_reader()
+
+        # Pre-populate the ring with 5 dummy frames
+        from PIL import Image
+        from collections import deque
+
+        for i in range(5):
+            img = Image.new("RGB", (10, 10), color=(i * 50, 0, 0))
+            reader._ring.append(img)
+
+        self.assertEqual(len(reader._ring), 5)
+
+        with patch("time.monotonic", return_value=3601.0):
+            with patch("av.open", MagicMock(return_value=MagicMock())):
+                with patch.object(reader, "_subscribe_geometry"):
+                    reader._decode_iteration()
+
+        # Ring was untouched by teardown
+        self.assertEqual(len(reader._ring), 5)
+
+        # Ring should still be a deque
+        self.assertIsInstance(reader._ring, deque)
+
+    def test_failure_driven_cap_still_fails_loud(self):
+        """Regression: 11 consecutive decode failures (cap default = 10);
+        assert is_healthy() returns False after cap, and NO silent recovery.
+
+        The teardown is independent of the cap; they should not interfere.
+        We verify the cap fires at 10 and is_healthy() is False.
+        """
+        from infra import frame_capture as fc
+
+        reader = self._make_reader(max_reconnect_attempts=10)
+        # Reset _last_container_open so teardown doesn't interfere
+        reader._last_container_open_monotonic = time.monotonic()
+        decode_calls = {"n": 0}
+
+        def always_fail_decode():
+            decode_calls["n"] += 1
+            raise RuntimeError("simulated RTSP decode failure")
+
+        reader._decode_iteration = always_fail_decode  # type: ignore[method-assign]
+
+        with patch.object(fc.time, "sleep", lambda s: None):
+            with patch.object(reader, "_subscribe_geometry"):
+                with self.assertLogs("frame_capture", level="ERROR") as cm:
+                    reader.start()
+                    time.sleep(0.3)
+                    reader.stop(timeout=1.0)
+
+        # Cap fired: 10 consecutive errors logged
+        cap_logs = [
+            r for r in cm.records
+            if "consecutive_reconnect_cap_reached" in r.getMessage()
+        ]
+        self.assertEqual(len(cap_logs), 1, (
+            f"Expected exactly one consecutive_reconnect_cap_reached log, "
+            f"got {len(cap_logs)}"
+        ))
+
+        # _consecutive_errors should equal 10 (the cap value)
+        self.assertEqual(reader._consecutive_errors, 10, (
+            f"_consecutive_errors should be 10, got {reader._consecutive_errors}"
+        ))
+
+        # _decode_iteration was called exactly 10 times (cap tipped on the 10th)
+        self.assertEqual(decode_calls["n"], 10, (
+            f"Expected 10 _decode_iteration calls, got {decode_calls['n']}"
+        ))
+
+        # is_healthy() must be False — cap reached = reader unhealthy
+        self.assertFalse(reader.is_healthy())
+
+
 if __name__ == "__main__":
     unittest.main()
