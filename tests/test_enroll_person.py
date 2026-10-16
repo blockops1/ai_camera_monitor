@@ -202,7 +202,6 @@ class TestEnrollKnownPerson:
 
     def test_returns_entry(self, tmp_people_dir: Path, sample_image: Path) -> None:
         """AC3: enrolled entry has correct fields."""
-        # Patch paths temporarily
         import infra.farm_api.identities as ids
         from infra.farm_api.identities import enroll_known_person
 
@@ -215,11 +214,19 @@ class TestEnrollKnownPerson:
             ids.PERSON_KNOWN_FILE = str(tmp_people_dir / "known_people.json")
             ids.EMBEDDINGS_NPZ = tmp_people_dir / "embeddings.npz"
 
+            # sample_image is at tmp_path/sample.png; tmp_people_dir is
+            # tmp_path/data/known/people — so data_root = tmp_path/data.
+            # We need the image under the chroot root.
+            chroot_root = tmp_people_dir.parent  # tmp_path/data
+            inside_root = chroot_root / "sample.png"
+            sample_image.rename(inside_root)
+
             entry = enroll_known_person(
                 name="TestEntry",
                 person_id="t5-entry",
                 identity_markers=["marker1", "marker2"],
-                image_paths=[str(sample_image)],
+                image_paths=[str(inside_root)],
+                allowed_root=chroot_root,
             )
 
             assert isinstance(entry, dict)
@@ -257,12 +264,22 @@ class TestDuplicateId:
             ids.PERSON_KNOWN_FILE = str(tmp_people_dir / "known_people.json")
             ids.EMBEDDINGS_NPZ = tmp_people_dir / "embeddings.npz"
 
+            chroot_root = tmp_people_dir.parent  # tmp_path/data
+            inside_root = chroot_root / "sample.png"
+            sample_image.rename(inside_root)
+
             enroll_known_person(
-                name="First", person_id="dup-1", image_paths=[str(sample_image)]
+                name="First",
+                person_id="dup-1",
+                image_paths=[str(inside_root)],
+                allowed_root=chroot_root,
             )
             with pytest.raises(ValueError, match="already enrolled"):
                 enroll_known_person(
-                    name="Second", person_id="dup-1", image_paths=[str(sample_image)]
+                    name="Second",
+                    person_id="dup-1",
+                    image_paths=[str(inside_root)],
+                    allowed_root=chroot_root,
                 )
         finally:
             ids.PEOPLE_DIR = old_peopledir
@@ -309,3 +326,96 @@ class TestAPIEndpoint:
         assert "/api/v1/identities/people" in source, (
             "POST /api/v1/identities/people not found in do_POST"
         )
+
+
+# ---------------------------------------------------------------------------
+# T9: Chroot image paths under FARMSURV_DATA_DIR
+# ---------------------------------------------------------------------------
+
+class TestChroot:
+    """Verify image paths are chrooted under DATA_DIR."""
+
+    def test_validate_accepts_path_inside_root(
+        self, tmp_path: Path, sample_image: Path
+    ) -> None:
+        """A path inside the DATA_DIR chroot is accepted."""
+        from infra.farm_api.identities import _validate_image_path
+
+        # Create a path inside the chroot root
+        chroot_dir = tmp_path / "data"
+        chroot_dir.mkdir(parents=True)
+        inside_file = chroot_dir / "known" / "sample.png"
+        inside_file.parent.mkdir(parents=True)
+        Image.new("RGB", (10, 10), color=(64, 64, 64)).save(inside_file)
+
+        resolved = _validate_image_path(str(inside_file), allowed_root=chroot_dir)
+        assert resolved.exists()
+        # The resolved path must be under the root
+        assert str(resolved).startswith(str(chroot_dir.resolve()))
+
+    def test_validate_rejects_path_outside_root(
+        self, tmp_path: Path
+    ) -> None:
+        """A path outside the DATA_DIR chroot raises PermissionError."""
+        from infra.farm_api.identities import _validate_image_path
+
+        outside_path = tmp_path / "etc" / "passwd"
+        outside_path.parent.mkdir(parents=True)
+        outside_path.write_text("root:x:0:0\n")
+
+        with pytest.raises(PermissionError, match="escapes the data directory"):
+            _validate_image_path(
+                str(outside_path),
+                allowed_root=tmp_path / "data",
+            )
+
+    def test_validate_resolves_symlink_escape(
+        self, tmp_path: Path
+    ) -> None:
+        """A symlink pointing outside the root is rejected."""
+        from infra.farm_api.identities import _validate_image_path
+
+        chroot_dir = tmp_path / "data"
+        chroot_dir.mkdir(parents=True)
+        # Create a symlink inside chroot that points outside
+        legit = chroot_dir / "legit.png"
+        Image.new("RGB", (10, 10), color=(0, 0, 0)).save(legit)
+
+        outside = tmp_path / "etc"
+        outside.mkdir(parents=True)
+        symlink = chroot_dir / "evil.png"
+        symlink.symlink_to(outside / "passwd")
+        (outside / "passwd").write_text("x\n")
+
+        with pytest.raises(PermissionError, match="escapes the data directory"):
+            _validate_image_path(str(symlink), allowed_root=chroot_dir)
+
+    def test_enroll_known_person_rejects_path_outside_root(
+        self, tmp_path: Path, sample_image: Path
+    ) -> None:
+        """enroll_known_person raises PermissionError for out-of-chroot images."""
+        import infra.farm_api.identities as ids
+        from infra.farm_api.identities import enroll_known_person
+
+        old_peopledir = ids.PEOPLE_DIR
+        old_json = ids.PERSON_KNOWN_FILE
+        old_npz = ids.EMBEDDINGS_NPZ
+        data_root = tmp_path / "data"
+
+        try:
+            ids.PEOPLE_DIR = data_root / "known" / "people"
+            ids.PEOPLE_DIR.mkdir(parents=True)
+            ids.PERSON_KNOWN_FILE = str(ids.PEOPLE_DIR / "known_people.json")
+            ids.EMBEDDINGS_NPZ = ids.PEOPLE_DIR / "embeddings.npz"
+
+            with pytest.raises(PermissionError, match="escapes the data directory"):
+                enroll_known_person(
+                    name="OutsidePerson",
+                    person_id="outside-chroot",
+                    image_paths=["/etc/passwd"],
+                    allowed_root=data_root,
+                )
+        finally:
+            ids.PEOPLE_DIR = old_peopledir
+            ids.PERSON_KNOWN_FILE = old_json
+            ids.EMBEDDINGS_NPZ = old_npz
