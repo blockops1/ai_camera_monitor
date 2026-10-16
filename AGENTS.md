@@ -3,7 +3,8 @@
 > Auto-injected into the agent system prompt whenever workdir = this repo.
 > Follow on EVERY session, including compaction-restore sessions.
 >
-> **Cross-project rules** live in `~/.hermes/memories/MEMORY.md` and `USER.md`.
+> **Cross-project operator rules** live in `/Users/jill/AGENTS.md` (above this repo's git root). They are auto-injected via the `AGENTS.override.md` symlink at the project root, so any session that opens with cwd in this repo will see them. To change operator-level rules, edit `/Users/jill/AGENTS.md` directly (the symlink follows it).
+> **Cross-session per-user facts** live in `~/.hermes/memories/MEMORY.md` and `USER.md`.
 > **Project-specific rules** live here. Don't duplicate.
 
 ## Step 0 — directory guard (added 2026-09-20)
