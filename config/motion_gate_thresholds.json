@@ -8,7 +8,11 @@
     "bicycle": 0.45,
     "gate_cooldown": {"vehicle": 60, "person": 30, "default": 45},
     "gate_enabled": {"vehicle": true, "person": true, "motion": true},
-    "subjects": ["person", "animal", "vehicle", "bicycle"]
+    "subjects": ["person", "animal", "vehicle", "bicycle"],
+    "osd_masks": [
+      {"x": 0, "y": 1240, "w": 640, "h": 200},
+      {"x": 2000, "y": 1240, "w": 560, "h": 200}
+    ]
   },
   "BACK": {
     "_note": "Back Door Inside — secondary entry",
@@ -17,7 +21,11 @@
     "bicycle": 0.45,
     "gate_cooldown": {"vehicle": 60, "person": 30, "default": 45},
     "gate_enabled": {"vehicle": true, "person": true, "motion": true},
-    "subjects": ["person", "animal", "vehicle", "bicycle"]
+    "subjects": ["person", "animal", "vehicle", "bicycle"],
+    "osd_masks": [
+      {"x": 0, "y": 1240, "w": 640, "h": 200},
+      {"x": 2000, "y": 1240, "w": 560, "h": 200}
+    ]
   },
   "OUTSIDE_FRONT_GARAGE": {
     "_note": "Outside Front Garage — driveway area",
@@ -26,14 +34,22 @@
     "bicycle": 0.45,
     "gate_cooldown": {"vehicle": 90, "person": 45, "default": 60},
     "gate_enabled": {"vehicle": true, "person": true, "motion": true},
-    "subjects": ["person", "animal", "vehicle", "bicycle"]
+    "subjects": ["person", "animal", "vehicle", "bicycle"],
+    "osd_masks": [
+      {"x": 0, "y": 1240, "w": 640, "h": 200},
+      {"x": 2000, "y": 1240, "w": 560, "h": 200}
+    ]
   },
   "OUTSIDE_FRONT_POWER": {
     "_note": "Outside Front Power — perimeter",
     "vehicle": 0.55,
     "person": 0.45,
     "gate_cooldown": {"vehicle": 90, "person": 45, "default": 60},
-    "gate_enabled": {"vehicle": true, "person": false, "motion": true}
+    "gate_enabled": {"vehicle": true, "person": false, "motion": true},
+    "osd_masks": [
+      {"x": 0, "y": 1240, "w": 640, "h": 200},
+      {"x": 2000, "y": 1240, "w": 560, "h": 200}
+    ]
   },
   "OUTSIDE_FRONT_SOLAR": {
     "_note": "Outside Front Solar — noisy perimeter; thresholds tightened 2026-09-15 to suppress 921 false alarms",
@@ -43,13 +59,21 @@
     "dog": 0.75,
     "bird": 0.80,
     "gate_cooldown": {"vehicle": 120, "person": 60, "default": 90},
-    "gate_enabled": {"vehicle": true, "person": false, "cat": false, "dog": false, "motion": true}
+    "gate_enabled": {"vehicle": true, "person": false, "cat": false, "dog": false, "motion": true},
+    "osd_masks": [
+      {"x": 0, "y": 1240, "w": 640, "h": 200},
+      {"x": 2000, "y": 1240, "w": 560, "h": 200}
+    ]
   },
   "OUTSIDE_BACK_SOLAR": {
     "_note": "Outside Back Solar — rear perimeter",
     "vehicle": 0.55,
     "person": 0.45,
     "gate_cooldown": {"vehicle": 90, "person": 45, "default": 60},
-    "gate_enabled": {"vehicle": true, "person": false, "motion": true}
+    "gate_enabled": {"vehicle": true, "person": false, "motion": true},
+    "osd_masks": [
+      {"x": 0, "y": 1240, "w": 640, "h": 200},
+      {"x": 2000, "y": 1240, "w": 560, "h": 200}
+    ]
   }
 }

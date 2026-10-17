@@ -132,6 +132,109 @@ FILTER_DILATE_PX = 12
 MIN_AREA_PX_FLOOR = 50
 
 
+def _get_osd_masking_enabled() -> bool:
+    """Read FARMSURV_OSD_MASKING at call time.
+
+    1 = ON (apply OSD masks before AND in compute_cross_diff_bboxes).
+    0 = OFF (passthrough, no masking — preserves pre-change behavior).
+
+    Reading at call time (not import time) means operator changes to the
+    env var take effect on the next test run / next listener start without
+    needing a Python ``importlib.reload()``.
+
+    Returns:
+        True if OSD masking is enabled, False otherwise.
+    """
+    raw = os.environ.get("FARMSURV_OSD_MASKING", "1")
+    return raw.strip().lower() not in ("0", "off", "false", "")
+
+
+def _load_osd_masks_for_cam(cam_id: str | None) -> list[dict] | None:
+    """Load osd_masks for a camera from motion_gate_thresholds.json.
+
+    Looks up the camera prefix in config/motion_gate_thresholds.json and
+    returns the 'osd_masks' list if present, else None.
+
+    Args:
+        cam_id: Camera ID prefix (e.g. "OUTSIDE_FRONT_GARAGE").
+
+    Returns:
+        List of rect dicts {x, y, w, h} in 2560x1440 reference space, or None.
+    """
+    if not cam_id:
+        return None
+    import json as _json
+    from pathlib import Path as _Path
+
+    thresholds_path = _Path(__file__).resolve().parent.parent / "config" / "motion_gate_thresholds.json"
+    try:
+        with open(thresholds_path, "r") as f:
+            thresholds = _json.load(f)
+    except (OSError, _json.JSONDecodeError):
+        return None
+
+    camera_data = thresholds.get(cam_id)
+    if not isinstance(camera_data, dict):
+        return None
+
+    masks = camera_data.get("osd_masks")
+    if not isinstance(masks, list):
+        return None
+
+    return masks
+
+
+def _apply_osd_mask_to_rect(mask: np.ndarray, rect: dict, scale_x: float, scale_y: float) -> None:
+    """Zero out a single OSD rect region in-place.
+
+    Scales the rect from 2560x1440 reference space to the mask's actual
+    dimensions using proportional scaling.
+
+    Args:
+        mask: uint8 mask (modified in-place).
+        rect: dict with keys x, y, w, h (2560x1440 reference).
+        scale_x: mask_width / 2560.
+        scale_y: mask_height / 1440.
+    """
+    rx = int(rect["x"] * scale_x)
+    ry = int(rect["y"] * scale_y)
+    rw = int(rect["w"] * scale_x)
+    rh = int(rect["h"] * scale_y)
+    h, w = mask.shape
+    # Clamp to mask bounds
+    rx = max(0, min(rx, w - 1))
+    ry = max(0, min(ry, h - 1))
+    rw = min(rw, w - rx)
+    rh = min(rh, h - ry)
+    if rw <= 0 or rh <= 0:
+        return
+    mask[ry : ry + rh, rx : rx + rw] = 0
+
+
+def apply_osd_masks(mask: np.ndarray, rects: list[dict], w: int, h: int) -> np.ndarray:
+    """Zero out OSD regions in a mask, scaled to the given dimensions.
+
+    OSD rects are specified in 2560x1440 reference space. They are scaled
+    proportionally to the target (w, h) dimensions.
+
+    Args:
+        mask: Input uint8 mask (modified in-place).
+        rects: List of rect dicts with x, y, w, h in 2560x1440 reference space.
+        w: Target width.
+        h: Target height.
+
+    Returns:
+        The same mask array (modified in-place) for convenience.
+    """
+    if not rects:
+        return mask
+    scale_x = w / 2560.0
+    scale_y = h / 1440.0
+    for rect in rects:
+        _apply_osd_mask_to_rect(mask, rect, scale_x, scale_y)
+    return mask
+
+
 def _get_intersection_dilate_pct() -> float:
     """Read BBOX_INTERSECTION_DILATE_PCT at call time.
 
@@ -803,10 +906,17 @@ def compute_cross_diff_bboxes(
     This prevents noise-bridging where large dilation merges many small
     components into one giant blob covering most of the frame.
 
+    US-108a (2026-10-17): when FARMSURV_OSD_MASKING=1, OSD rect regions are
+    zeroed out BEFORE the AND (per mask_12, mask_23, mask_34) so burned-in
+    timestamp/label OSD digits cannot survive the pairwise AND as persistent
+    motion.  Rects are loaded from config/motion_gate_thresholds.json per
+    cam_id, scaled from 2560x1440 reference space to live frame geometry.
+
     Either may be None if no component meets the area threshold.
 
     Args:
-        cam_id: Optional camera ID for per-cam MIN_AREA_PCT override.
+        cam_id: Optional camera ID for per-cam MIN_AREA_PCT override and
+                osd_masks lookup.
 
     Returns (bbox_a, bbox_b).
     """
@@ -822,6 +932,16 @@ def compute_cross_diff_bboxes(
     mask_12 = pairwise_diff(f1, f2, threshold=_get_diff_threshold())
     mask_23 = pairwise_diff(f2, f3, threshold=_get_diff_threshold())
     mask_34 = pairwise_diff(f3, f4, threshold=_get_diff_threshold())
+
+    # US-108a: zero out OSD rect regions from each pairwise diff BEFORE AND.
+    # OSD digits change every frame -> appear in every pairwise diff ->
+    # survive mask-AND with high intensity -> win largest-component pick.
+    if _get_osd_masking_enabled():
+        osd_masks = _load_osd_masks_for_cam(cam_id)
+        if osd_masks is not None:
+            apply_osd_masks(mask_12, osd_masks, mask_12.shape[1], mask_12.shape[0])
+            apply_osd_masks(mask_23, osd_masks, mask_23.shape[1], mask_23.shape[0])
+            apply_osd_masks(mask_34, osd_masks, mask_34.shape[1], mask_34.shape[0])
 
     # US-096c: filter + dilate pipeline for each intersection pair.
     and_a = ((mask_12 > 0) & (mask_23 > 0)).astype(np.uint8) * 255
