@@ -310,8 +310,8 @@ def _get_dilate_px() -> int:
     return FILTER_DILATE_PX
 
 
-def _get_diff_threshold() -> int:
-    """Read DIFF_THRESHOLD at call time.
+def _get_diff_threshold(cam_id: str | None = None) -> int:
+    """Read DIFF_THRESHOLD at call time, with optional per-cam override.
 
     Grayscale pixel diff must exceed this to count as 'changed' between
     two consecutive frames. Default 25 works well for 1080p H.264 streams;
@@ -319,12 +319,34 @@ def _get_diff_threshold() -> int:
     up to ~80/255 which floods the diff mask (every pixel 'changed' across
     the entire frame). Raise to 80+ to filter codec noise on 4K.
 
+    Lookup order:
+      1. Per-cam env var ``FARMSV_{CAM_ID}_DIFF_THRESHOLD`` (uppercase
+         cam_id, e.g. ``FARMSV_OUTSIDE_FRONT_GARAGE_DIFF_THRESHOLD``)
+      2. Global ``DIFF_THRESHOLD`` env var
+      3. Default ``DEFAULT_DIFF_THRESHOLD`` (25)
+
     Reading at call time means operator changes to the env var take
     effect on the next test run / next listener start.
+
+    Args:
+        cam_id: Optional camera ID for per-cam override.  When None or
+                empty, only the global DIFF_THRESHOLD and default are
+                consulted.
 
     Returns:
       int pixel-diff threshold (clamped to [1, 254]).
     """
+    # Per-cam override: FARMSV_{CAM_ID}_DIFF_THRESHOLD
+    if cam_id:
+        per_cam_key = f"FARMSV_{cam_id}_DIFF_THRESHOLD"
+        raw = os.environ.get(per_cam_key)
+        if raw is not None:
+            try:
+                val = int(raw.strip())
+                return max(1, min(254, val))
+            except ValueError:
+                pass
+
     raw = os.environ.get("DIFF_THRESHOLD")
     if raw is not None:
         try:
@@ -929,9 +951,10 @@ def compute_cross_diff_bboxes(
     if f1 is None or f2 is None or f3 is None or f4 is None:
         return None, None
 
-    mask_12 = pairwise_diff(f1, f2, threshold=_get_diff_threshold())
-    mask_23 = pairwise_diff(f2, f3, threshold=_get_diff_threshold())
-    mask_34 = pairwise_diff(f3, f4, threshold=_get_diff_threshold())
+    threshold = _get_diff_threshold(cam_id)
+    mask_12 = pairwise_diff(f1, f2, threshold=threshold)
+    mask_23 = pairwise_diff(f2, f3, threshold=threshold)
+    mask_34 = pairwise_diff(f3, f4, threshold=threshold)
 
     # US-108a: zero out OSD rect regions from each pairwise diff BEFORE AND.
     # OSD digits change every frame -> appear in every pairwise diff ->

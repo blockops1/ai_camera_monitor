@@ -139,7 +139,6 @@ from infra.frame_diff import (
     DEFAULT_BBOX_PAD_PCT,
     DEFAULT_DIFF_THRESHOLD,
     DEFAULT_MIN_AREA_PX,
-    _get_diff_threshold,
     compute_cross_diff_bboxes,
 )
 from infra.quick_classifier import KEEP_CLASSES_DEFAULT, QuickClassifier, QuickVerdict
@@ -1159,7 +1158,6 @@ def run(
         frame_2_path,
         frame_3_path,
         frame_4_path,
-        threshold=_get_diff_threshold(),
         min_area_px=min_area_px,
         pad_pct=DEFAULT_BBOX_PAD_PCT,
         cam_id=camera_name,
