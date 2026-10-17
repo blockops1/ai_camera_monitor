@@ -702,8 +702,23 @@ class PersistentRTSPReader:
         self._healthy = True
         # Hold _container_lock during demux() so stop() can safely
         # drop the reference without racing a native C demux call.
+        _periodic_teardown = False
         with self._container_lock:
             for packet in self._container.demux(stream):
+                # US-049c-fix: age check inside the demux packet loop so
+                # periodic teardown is reachable during steady-state
+                # streaming (healthy demux never raises, so the entry-only
+                # check at line 675 is unreachable once demux starts).
+                if (
+                    self._last_container_open_monotonic is not None
+                    and (
+                        time.monotonic()
+                        - self._last_container_open_monotonic
+                    )
+                    >= self._scheduled_reconnect_seconds
+                ):
+                    _periodic_teardown = True
+                    break
                 if self._stop_event.is_set():
                     break
                 if packet.dts is None:
@@ -725,6 +740,23 @@ class PersistentRTSPReader:
                         self._ring.append(img)
                     self.frames_decoded_total += 1
                     self._last_frame_time = time.monotonic()
+        # US-049c-fix: teardown exit path — closes the container, resets
+        # state, and returns WITHOUT hitting the normal post-loop close
+        # block (which would set _healthy=False and break _run_loop out of
+        # the steady-state loop).  The caller (_run_loop) will re-enter
+        # _decode_iteration which re-opens the container normally.
+        if _periodic_teardown:
+            log.info("in_thread_teardown: starting")
+            if self._container is not None:
+                try:
+                    self._container.close()
+                except Exception:
+                    log.exception("in_thread_teardown: container.close() failed")
+            self._container = None
+            self._last_container_open_monotonic = time.monotonic()
+            self._teardowns_total += 1
+            log.info("in_thread_teardown: completed")
+            return
         # Close under lock so stop()'s lock-guarded close cannot race.
         # When stop() times out on join and calls close() inside _container_lock,
         # the demux thread's post-loop close must also acquire the lock,

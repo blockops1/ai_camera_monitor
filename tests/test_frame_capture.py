@@ -1290,5 +1290,218 @@ class TestInThreadPeriodicTeardown(unittest.TestCase):
         self.assertFalse(reader.is_healthy())
 
 
+class TestPeriodicTeardown(unittest.TestCase):
+    """Tests for US-049c-fix: age check inside the demux packet loop.
+
+    Verifies that when enough time has elapsed since the last container open,
+    the age check inside the `for packet in demux` loop fires, breaks out of
+    demux, performs a teardown (close, reset, increment), and returns WITHOUT
+    hitting the normal post-loop close block (which sets _healthy=False).
+
+    Key distinction from TestInThreadTeardown: these tests mock a demux
+    generator that yields >0 packets (steady-state, NOT immediate-exit),
+    proving the teardown path is reachable during active streaming.
+
+    Note: All IP addresses use RFC 5737 TEST-NET-1 (192.0.2.0/24).
+    """
+
+    def _make_reader(self):
+        """Create a PersistentRTSPReader with a mocked av.container."""
+        from unittest.mock import MagicMock
+
+        if "av" not in sys.modules:
+            _av_stub = MagicMock()
+            _av_stub.__version__ = "15.1.0"
+            _av_stub.container = MagicMock()
+            _av_stub.container.InputContainer = MagicMock
+            sys.modules["av"] = _av_stub
+
+        from infra.frame_capture import PersistentRTSPReader
+
+        reader = PersistentRTSPReader(
+            "rtsp://admin:pass@192.0.2.1:554/",
+            camera_id="FRONT",
+        )
+        mock_container = MagicMock()
+        mock_container.close = MagicMock()
+        reader._container = mock_container
+        return reader, mock_container
+
+    def test_steady_state_demux_breaks_on_age(self):
+        """When time.monotonic crosses 3600s mid-stream, the demux loop
+        must break out and perform teardown (close + reset + increment).
+
+        Mock demux(generator) yielding >0 packets (steady-state, NOT
+        immediate-exit), with time.monotonic patched to cross 3600s
+        mid-stream. Assert teardown fired, _healthy stays True.
+        """
+        reader, mock_container = self._make_reader()
+        # Set last_container_open to 100 so entry-time check does NOT fire
+        # (100 < 3600). Then av.open sets it to the first monotonic call.
+        reader._last_container_open_monotonic = 100.0
+
+        def demux_side_effect(stream):
+            """Yield 3 packets (steady-state, NOT immediate-exit)."""
+            for i in range(3):
+                pkt = MagicMock()
+                pkt.dts = 1000 + i
+                pkt.decode.return_value = []
+                yield pkt
+
+        # Build a mock container that tracks close() and has demux patched.
+        mock_container.close = MagicMock(side_effect=lambda: None)
+        mock_container.demux = MagicMock(side_effect=demux_side_effect)
+        mock_container.streams.video = [MagicMock()]
+
+        # time.monotonic returns 100 for the av.open timestamp, then 3701
+        # for all subsequent calls (including the age check inside the loop).
+        _mono_counter = [0]
+
+        def monotonic_side_effect():
+            if _mono_counter[0] == 0:
+                _mono_counter[0] = 1
+                return 100.0  # first call: sets _last_container_open in av.open
+            return 3701.0   # all later calls: age check sees 3601s elapsed
+
+        with patch("time.monotonic", side_effect=monotonic_side_effect):
+            with patch("av.open", return_value=mock_container):
+                with patch.object(reader, "_subscribe_geometry"):
+                    reader._decode_iteration()
+
+        # Teardown fired: container was closed
+        self.assertTrue(mock_container.close.called)
+        # _container is None after teardown
+        self.assertIsNone(reader._container)
+        # _teardowns_total incremented
+        self.assertEqual(reader._teardowns_total, 1)
+        # _healthy should still be True (teardown path does NOT set it False)
+        self.assertTrue(reader._healthy)
+        # Ring buffer preserved
+        from collections import deque
+        self.assertIsInstance(reader._ring, deque)
+        # demux was called (steady-state, not immediate-exit)
+        self.assertTrue(mock_container.demux.called)
+
+    def test_steady_state_demux_no_break_before_interval(self):
+        """When elapsed time < _scheduled_reconnect_seconds, demux runs
+        to completion without triggering teardown.
+
+        Mock demux yielding 3 packets with time.monotonic always < 3600s.
+        Assert teardown did NOT fire, _healthy is False (normal exit).
+        """
+        reader, mock_container = self._make_reader()
+        reader._last_container_open_monotonic = 100.0
+
+        call_order = []
+
+        def mock_open(*args, **kwargs):
+            m = MagicMock()
+            original_close = m.close
+
+            def tracking_close(*args2, **kwargs2):
+                call_order.append("close")
+                return original_close(*args2, **kwargs2)
+
+            m.close = tracking_close  # type: ignore[attr-defined]
+            return m
+
+        with patch("time.monotonic", return_value=100.0):
+            with patch("av.open", MagicMock(side_effect=mock_open)):
+                with patch.object(reader, "_subscribe_geometry"):
+                    def demux_side_effect(stream):
+                        for i in range(3):
+                            pkt = MagicMock()
+                            pkt.dts = 1000 + i
+                            pkt.decode.return_value = []
+                            yield pkt
+
+                    reader._container.demux = MagicMock(
+                        side_effect=demux_side_effect
+                    )
+                    reader._decode_iteration()
+
+        # Normal post-loop close ran (not teardown path)
+        self.assertTrue(mock_container.close.called)
+        # _container is None (normal close path)
+        self.assertIsNone(reader._container)
+        # _healthy was set to False (normal exit)
+        self.assertFalse(reader._healthy)
+        # teardown did NOT fire
+        self.assertEqual(reader._teardowns_total, 0)
+
+    def test_steady_state_demux_ring_preserved_across_teardown(self):
+        """After teardown fires mid-stream, the ring buffer is unchanged.
+
+        Pre-populate the ring, mock demux yielding 2 packets, force age
+        threshold on packet 2. Assert ring length is preserved.
+        """
+        reader, _mock_container = self._make_reader()
+
+        # Pre-populate ring with 5 frames
+        from PIL import Image
+
+        for i in range(5):
+            img = Image.new("RGB", (10, 10), color=(i * 50, 0, 0))
+            reader._ring.append(img)
+
+        ring_len_before = len(reader._ring)
+        reader._last_container_open_monotonic = 100.0
+
+        with patch("time.monotonic", return_value=3701.0):
+            with patch("av.open", MagicMock(return_value=MagicMock())):
+                with patch.object(reader, "_subscribe_geometry"):
+                    def demux_side_effect(stream):
+                        for i in range(2):
+                            pkt = MagicMock()
+                            pkt.dts = 1000 + i
+                            pkt.decode.return_value = []
+                            yield pkt
+
+                    reader._container.demux = MagicMock(
+                        side_effect=demux_side_effect
+                    )
+                    reader._decode_iteration()
+
+        # Ring was untouched by teardown
+        self.assertEqual(len(reader._ring), ring_len_before)
+        # teardown fired
+        self.assertEqual(reader._teardowns_total, 1)
+
+    def test_steady_state_demux_teardown_log_pair(self):
+        """When teardown fires inside demux loop, both
+        'in_thread_teardown: starting' and 'in_thread_teardown: completed'
+        are logged as INFO.
+        """
+        from infra.frame_capture import log as fc_log
+
+        reader, _mock_container = self._make_reader()
+        reader._last_container_open_monotonic = 100.0
+
+        with patch("time.monotonic", return_value=3701.0):
+            with patch("av.open", MagicMock(return_value=MagicMock())):
+                with patch.object(reader, "_subscribe_geometry"):
+                    with self.assertLogs(fc_log, level="INFO") as cm:
+                        def demux_side_effect(stream):
+                            for i in range(2):
+                                pkt = MagicMock()
+                                pkt.dts = 1000 + i
+                                pkt.decode.return_value = []
+                                yield pkt
+
+                        reader._container.demux = MagicMock(
+                            side_effect=demux_side_effect
+                        )
+                        reader._decode_iteration()
+
+        # Both teardown log lines emitted
+        teardown_msgs = [
+            r.getMessage() for r in cm.records
+            if "in_thread_teardown" in r.getMessage()
+        ]
+        self.assertEqual(len(teardown_msgs), 2)
+        self.assertIn("in_thread_teardown: starting", teardown_msgs[0])
+        self.assertIn("in_thread_teardown: completed", teardown_msgs[1])
+
+
 if __name__ == "__main__":
     unittest.main()
