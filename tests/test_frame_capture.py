@@ -27,9 +27,7 @@ class TestSubscribeGeometry(unittest.TestCase):
 
     def _make_cc_module(self, env_content: str):
         """Write a temp env file and return the module, patching the creds path."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".env", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
             f.write(env_content)
             f.flush()
             env_path = f.name
@@ -37,6 +35,7 @@ class TestSubscribeGeometry(unittest.TestCase):
         old = os.environ.get("FARM_CAMERA_CREDS_FILE")
         os.environ["FARM_CAMERA_CREDS_FILE"] = env_path
         import infra.camera_creds as _cc
+
         importlib.reload(_cc)
 
         return _cc, env_path, old
@@ -50,8 +49,10 @@ class TestSubscribeGeometry(unittest.TestCase):
     def setUp(self):
         # Ensure av stub is available (same as conftest).
         import sys
+
         if "av" not in sys.modules:
             from unittest.mock import MagicMock
+
             _av_stub = MagicMock()
             _av_stub.__version__ = "15.1.0"
             _av_stub.container = MagicMock()
@@ -60,6 +61,7 @@ class TestSubscribeGeometry(unittest.TestCase):
 
     def _get_cap_prop(self, w: int, h: int, fps: float):
         """Build a side_effect function for cap.get()."""
+
         def side_effect(prop):
             prop_map = {
                 cv2.CAP_PROP_FRAME_WIDTH: w,
@@ -67,6 +69,7 @@ class TestSubscribeGeometry(unittest.TestCase):
                 cv2.CAP_PROP_FPS: fps,
             }
             return prop_map.get(prop, 0.0)
+
         return side_effect
 
     # -- AC1: geometry written to camera_creds --
@@ -74,8 +77,7 @@ class TestSubscribeGeometry(unittest.TestCase):
         """Mock cap.get returning (3840, 2160, 2.0); call _subscribe_geometry;
         assert infra.camera_creds.get_frame_geometry(cam_id) has the values."""
         env_content = (
-            "FRONT_IP=192.0.2.1\n"
-            "FRONT_RTSP_URL=rtsp://admin:pass@192.0.2.1:554/\n"
+            "FRONT_IP=192.0.2.1\nFRONT_RTSP_URL=rtsp://admin:pass@192.0.2.1:554/\n"
         )
         _cc, env_path, old = self._make_cc_module(env_content)
         try:
@@ -107,8 +109,7 @@ class TestSubscribeGeometry(unittest.TestCase):
     def test_subscribe_geometry_logs_info_line(self):
         """Assert the INFO log line is emitted with the correct format string."""
         env_content = (
-            "FRONT_IP=192.0.2.1\n"
-            "FRONT_RTSP_URL=rtsp://admin:pass@192.0.2.1:554/\n"
+            "FRONT_IP=192.0.2.1\nFRONT_RTSP_URL=rtsp://admin:pass@192.0.2.1:554/\n"
         )
         _cc, env_path, old = self._make_cc_module(env_content)
         try:
@@ -183,8 +184,7 @@ class TestSubscribeGeometry(unittest.TestCase):
     def test_subscribe_geometry_substream_warning(self):
         """Mock cap.get returning (640, 480, 25.0); assert SUBSTREAM WARNING fires."""
         env_content = (
-            "FRONT_IP=192.0.2.1\n"
-            "FRONT_RTSP_URL=rtsp://admin:pass@192.0.2.1:554/\n"
+            "FRONT_IP=192.0.2.1\nFRONT_RTSP_URL=rtsp://admin:pass@192.0.2.1:554/\n"
         )
         _cc, env_path, old = self._make_cc_module(env_content)
         try:
@@ -304,8 +304,7 @@ class TestSubscribeGeometry(unittest.TestCase):
         """When no camera_creds entry matches the camera_id, DEBUG log
         is emitted and no crash occurs."""
         env_content = (
-            "FRONT_IP=192.0.2.1\n"
-            "FRONT_RTSP_URL=rtsp://admin:pass@192.0.2.1:554/\n"
+            "FRONT_IP=192.0.2.1\nFRONT_RTSP_URL=rtsp://admin:pass@192.0.2.1:554/\n"
         )
         _cc, env_path, old = self._make_cc_module(env_content)
         try:
@@ -475,7 +474,7 @@ class TestContainerLock(unittest.TestCase):
         # Give the demux thread time to acquire and hold the lock.
         __import__("time").sleep(0.05)
 
-        # Now call stop() — it should acquire the lock after demux releases it.
+        # Now call stop() - it should acquire the lock after demux releases it.
         reader._thread = MagicMock()
         reader._thread.is_alive.return_value = True
         reader._thread.join = MagicMock(side_effect=lambda timeout: None)
@@ -508,6 +507,7 @@ class TestResolveStaleSeconds(unittest.TestCase):
 
     def _import_module(self):
         import infra.frame_capture as m  # isort: skip
+
         return m
 
     def test_default_20_seconds(self):
@@ -523,7 +523,7 @@ class TestResolveStaleSeconds(unittest.TestCase):
         try:
             m = self._import_module()
             # Need to reimport to pick up the env var (resolvers read os.environ
-            # at call time, not import time — but the module might be cached).
+            # at call time, not import time - but the module might be cached).
             importlib.reload(m)
             self.assertEqual(m._resolve_stale_seconds(), 42.0)
         finally:
@@ -540,6 +540,7 @@ class TestResolveReconnectMinUptime(unittest.TestCase):
 
     def _import_module(self):
         import infra.frame_capture as m  # isort: skip
+
         return m
 
     def test_default_30_seconds(self):
@@ -577,9 +578,7 @@ class TestReconnectLoopSocketLeak(unittest.TestCase):
 
     def _make_cc_module(self, env_content: str):
         """Write a temp env file and return the module, patching the creds path."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".env", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
             f.write(env_content)
             f.flush()
             env_path = f.name
@@ -587,6 +586,7 @@ class TestReconnectLoopSocketLeak(unittest.TestCase):
         old = os.environ.get("FARM_CAMERA_CREDS_FILE")
         os.environ["FARM_CAMERA_CREDS_FILE"] = env_path
         import infra.camera_creds as _cc
+
         importlib.reload(_cc)
 
         return _cc, env_path, old
@@ -597,7 +597,9 @@ class TestReconnectLoopSocketLeak(unittest.TestCase):
             os.environ["FARM_CAMERA_CREDS_FILE"] = old
         importlib.reload(_cc)
 
-    def _make_reader(self, rtsp_url="rtsp://admin:pass@192.0.2.1:554/", camera_id="FRONT"):
+    def _make_reader(
+        self, rtsp_url="rtsp://admin:pass@192.0.2.1:554/", camera_id="FRONT"
+    ):
         """Create a PersistentRTSPReader with a fully mocked container."""
         from unittest.mock import MagicMock
 
@@ -622,6 +624,7 @@ class TestReconnectLoopSocketLeak(unittest.TestCase):
     def _init_ccr(self):
         """Initialize a clean CameraCaptureRegistry for tests."""
         from infra.frame_capture import CameraCaptureRegistry as CCR
+
         CCR.clear()
         CCR._instance = CCR()
         CCR._reconnect_thread = None
@@ -683,8 +686,7 @@ class TestReconnectLoopSocketLeak(unittest.TestCase):
         inst = CCR._instance
 
         env_content = (
-            "FRONT_IP=192.0.2.1\n"
-            "FRONT_RTSP_URL=rtsp://admin:pass@192.0.2.1:554/\n"
+            "FRONT_IP=192.0.2.1\nFRONT_RTSP_URL=rtsp://admin:pass@192.0.2.1:554/\n"
         )
         _cc, env_path, old = self._make_cc_module(env_content)
         try:
@@ -706,9 +708,7 @@ class TestReconnectLoopSocketLeak(unittest.TestCase):
                     dead_reader._container.close()
                     dead_reader._container = None
             inst._readers.pop("FRONT", None)
-            new_reader = PersistentRTSPReader(
-                dead_reader._rtsp_url, camera_id="FRONT"
-            )
+            new_reader = PersistentRTSPReader(dead_reader._rtsp_url, camera_id="FRONT")
             new_reader.start()
             new_reader.reconnects_total = dead_reader.reconnects_total + 1
             with inst._lock:
@@ -727,9 +727,7 @@ class TestReconnectLoopSocketLeak(unittest.TestCase):
                     reader2._container.close()
                     reader2._container = None
             inst._readers.pop("FRONT", None)
-            reader3 = PersistentRTSPReader(
-                reader2._rtsp_url, camera_id="FRONT"
-            )
+            reader3 = PersistentRTSPReader(reader2._rtsp_url, camera_id="FRONT")
             reader3.start()
             reader3.reconnects_total = reader2.reconnects_total + 1
             with inst._lock:
@@ -746,9 +744,7 @@ class TestReconnectLoopSocketLeak(unittest.TestCase):
                     reader3._container.close()
                     reader3._container = None
             inst._readers.pop("FRONT", None)
-            reader4 = PersistentRTSPReader(
-                reader3._rtsp_url, camera_id="FRONT"
-            )
+            reader4 = PersistentRTSPReader(reader3._rtsp_url, camera_id="FRONT")
             reader4.start()
             reader4.reconnects_total = reader3.reconnects_total + 1
             with inst._lock:
@@ -775,8 +771,7 @@ class TestReconnectLoopSocketLeak(unittest.TestCase):
         inst = CCR._instance
 
         env_content = (
-            "FRONT_IP=192.0.2.1\n"
-            "FRONT_RTSP_URL=rtsp://admin:pass@192.0.2.1:554/\n"
+            "FRONT_IP=192.0.2.1\nFRONT_RTSP_URL=rtsp://admin:pass@192.0.2.1:554/\n"
         )
         _cc, env_path, old = self._make_cc_module(env_content)
         try:
@@ -797,7 +792,10 @@ class TestReconnectLoopSocketLeak(unittest.TestCase):
                 fc_log.warning(
                     "Reader swap: %s (id=%s, uptime=%.0fs, "
                     "consecutive_errors=%d); reconnecting.",
-                    "FRONT", reader_id, dead_uptime, retry_count,
+                    "FRONT",
+                    reader_id,
+                    dead_uptime,
+                    retry_count,
                 )
                 dead_reader.stop(timeout=0.0)
                 with dead_reader._container_lock:
@@ -887,7 +885,7 @@ class TestInThreadTeardown(unittest.TestCase):
     def test_in_thread_teardown_preserves_ring(self):
         """After teardown + reopen, the ring buffer is unchanged.
 
-        The teardown closes the container and reopens — it must NOT
+        The teardown closes the container and reopens - it must NOT
         touch the ring deque.
         """
         reader, _mock_container = self._make_reader()
@@ -899,16 +897,17 @@ class TestInThreadTeardown(unittest.TestCase):
 
         # Ring was untouched
         from collections import deque
+
         self.assertIsInstance(reader._ring, deque)
 
     def test_in_thread_teardown_no_action_before_interval(self):
         """When elapsed time < _scheduled_reconnect_seconds, teardown is skipped.
 
         Simulates a normal decode iteration: container already open,
-        time elapsed is small → teardown block not entered.
+        time elapsed is small -> teardown block not entered.
         """
         reader, _mock_container = self._make_reader()
-        # Set last_container_open to a recent time → elapsed << 3600
+        # Set last_container_open to a recent time -> elapsed << 3600
         reader._last_container_open_monotonic = time.monotonic() - 10
 
         mock_av = MagicMock()
@@ -926,6 +925,7 @@ class TestInThreadTeardown(unittest.TestCase):
         """AC2: _last_container_open_monotonic must be an instance attribute."""
         if "av" not in sys.modules:
             from unittest.mock import MagicMock
+
             _av_stub = MagicMock()
             _av_stub.__version__ = "15.1.0"
             _av_stub.container = MagicMock()
@@ -933,6 +933,7 @@ class TestInThreadTeardown(unittest.TestCase):
             sys.modules["av"] = _av_stub
 
         from infra.frame_capture import PersistentRTSPReader
+
         reader = PersistentRTSPReader("rtsp://x")
         self.assertTrue(hasattr(reader, "_last_container_open_monotonic"))
         self.assertIsNone(reader._last_container_open_monotonic)
@@ -975,7 +976,9 @@ class TestFailureDrivenCapReached(unittest.TestCase):
         reader._container = mock_container
         return reader
 
-    def test_cap_reached_logged_and_decode_halted(self,):
+    def test_cap_reached_logged_and_decode_halted(
+        self,
+    ):
         """After max_reconnect_attempts consecutive decode failures, the
         _run_loop must:
         1. Log 'consecutive_reconnect_cap_reached' (ERROR level),
@@ -1012,24 +1015,33 @@ class TestFailureDrivenCapReached(unittest.TestCase):
 
         # Verify cap_reached log emitted exactly once.
         cap_logs = [
-            r for r in cm.records
+            r
+            for r in cm.records
             if "consecutive_reconnect_cap_reached" in r.getMessage()
         ]
-        self.assertEqual(len(cap_logs), 1, (
-            f"Expected exactly one consecutive_reconnect_cap_reached log, "
-            f"got {len(cap_logs)}: {[r.getMessage() for r in cap_logs]}"
-        ))
+        self.assertEqual(
+            len(cap_logs),
+            1,
+            (
+                f"Expected exactly one consecutive_reconnect_cap_reached log, "
+                f"got {len(cap_logs)}: {[r.getMessage() for r in cap_logs]}"
+            ),
+        )
 
         # Verify _consecutive_errors reached N (=max_reconnect_attempts).
-        self.assertEqual(reader._consecutive_errors, 3, (
-            f"_consecutive_errors should be 3, got {reader._consecutive_errors}"
-        ))
+        self.assertEqual(
+            reader._consecutive_errors,
+            3,
+            (f"_consecutive_errors should be 3, got {reader._consecutive_errors}"),
+        )
 
         # Verify _decode_iteration was called exactly 3 times (the cap tipped
         # on the 3rd failure).
-        self.assertEqual(decode_calls["n"], 3, (
-            f"Expected 3 _decode_iteration calls, got {decode_calls['n']}"
-        ))
+        self.assertEqual(
+            decode_calls["n"],
+            3,
+            (f"Expected 3 _decode_iteration calls, got {decode_calls['n']}"),
+        )
 
     def test_cap_disabled_retries_forever(self):
         """When max_reconnect_attempts<=0, the cap is disabled and the loop
@@ -1037,7 +1049,7 @@ class TestFailureDrivenCapReached(unittest.TestCase):
 
         Verify by checking that _max_reconnect_attempts=0 means the
         cap-check branch (line 600: if self._max_reconnect_attempts > 0)
-        is never entered — the loop falls through to the warning+retry path.
+        is never entered - the loop falls through to the warning+retry path.
         """
         reader = self._make_reader(max_reconnect=0)
         # The key invariant: with cap disabled, _max_reconnect_attempts is 0
@@ -1056,7 +1068,7 @@ class TestFailureDrivenCapReached(unittest.TestCase):
         _run_loop's recovery branch by checking the code path: when
         _decode_iteration returns without exception, the loop breaks and
         _consecutive_errors is left at its last value (reset by the
-        successful iteration's own code — see _decode_iteration line 701).
+        successful iteration's own code - see _decode_iteration line 701).
 
         This test confirms the _decode_iteration resets consecutive_errors
         on success (line 701: self._consecutive_errors = 0).
@@ -1067,6 +1079,7 @@ class TestFailureDrivenCapReached(unittest.TestCase):
         reader._consecutive_errors = 5  # simulate prior failures
 
         call_count = {"n": 0}
+
         def success_iteration():
             call_count["n"] += 1
             # Simulate _decode_iteration's success path: reset errors
@@ -1083,10 +1096,14 @@ class TestFailureDrivenCapReached(unittest.TestCase):
             reader.stop(timeout=1.0)
 
         # The first call succeeded, resetting _consecutive_errors to 0.
-        self.assertEqual(reader._consecutive_errors, 0, (
-            f"Expected 0 consecutive_errors after success, "
-            f"got {reader._consecutive_errors}"
-        ))
+        self.assertEqual(
+            reader._consecutive_errors,
+            0,
+            (
+                f"Expected 0 consecutive_errors after success, "
+                f"got {reader._consecutive_errors}"
+            ),
+        )
         self.assertTrue(reader._healthy)
         self.assertEqual(call_count["n"], 1)
 
@@ -1145,9 +1162,11 @@ class TestInThreadPeriodicTeardown(unittest.TestCase):
             """Factory that returns a MagicMock tracking close() calls."""
             m = MagicMock()
             original_close = m.close
+
             def tracking_close(*args2, **kwargs2):
                 close_calls.append(True)
                 return original_close(*args2, **kwargs2)
+
             m.close = tracking_close  # type: ignore[attr-defined]
             return m
 
@@ -1268,25 +1287,34 @@ class TestInThreadPeriodicTeardown(unittest.TestCase):
 
         # Cap fired: 10 consecutive errors logged
         cap_logs = [
-            r for r in cm.records
+            r
+            for r in cm.records
             if "consecutive_reconnect_cap_reached" in r.getMessage()
         ]
-        self.assertEqual(len(cap_logs), 1, (
-            f"Expected exactly one consecutive_reconnect_cap_reached log, "
-            f"got {len(cap_logs)}"
-        ))
+        self.assertEqual(
+            len(cap_logs),
+            1,
+            (
+                f"Expected exactly one consecutive_reconnect_cap_reached log, "
+                f"got {len(cap_logs)}"
+            ),
+        )
 
         # _consecutive_errors should equal 10 (the cap value)
-        self.assertEqual(reader._consecutive_errors, 10, (
-            f"_consecutive_errors should be 10, got {reader._consecutive_errors}"
-        ))
+        self.assertEqual(
+            reader._consecutive_errors,
+            10,
+            (f"_consecutive_errors should be 10, got {reader._consecutive_errors}"),
+        )
 
         # _decode_iteration was called exactly 10 times (cap tipped on the 10th)
-        self.assertEqual(decode_calls["n"], 10, (
-            f"Expected 10 _decode_iteration calls, got {decode_calls['n']}"
-        ))
+        self.assertEqual(
+            decode_calls["n"],
+            10,
+            (f"Expected 10 _decode_iteration calls, got {decode_calls['n']}"),
+        )
 
-        # is_healthy() must be False — cap reached = reader unhealthy
+        # is_healthy() must be False - cap reached = reader unhealthy
         self.assertFalse(reader.is_healthy())
 
 
@@ -1361,7 +1389,7 @@ class TestPeriodicTeardown(unittest.TestCase):
             if _mono_counter[0] == 0:
                 _mono_counter[0] = 1
                 return 100.0  # first call: sets _last_container_open in av.open
-            return 3701.0   # all later calls: age check sees 3601s elapsed
+            return 3701.0  # all later calls: age check sees 3601s elapsed
 
         with patch("time.monotonic", side_effect=monotonic_side_effect):
             with patch("av.open", return_value=mock_container):
@@ -1378,6 +1406,7 @@ class TestPeriodicTeardown(unittest.TestCase):
         self.assertTrue(reader._healthy)
         # Ring buffer preserved
         from collections import deque
+
         self.assertIsInstance(reader._ring, deque)
         # demux was called (steady-state, not immediate-exit)
         self.assertTrue(mock_container.demux.called)
@@ -1408,6 +1437,7 @@ class TestPeriodicTeardown(unittest.TestCase):
         with patch("time.monotonic", return_value=100.0):
             with patch("av.open", MagicMock(side_effect=mock_open)):
                 with patch.object(reader, "_subscribe_geometry"):
+
                     def demux_side_effect(stream):
                         for i in range(3):
                             pkt = MagicMock()
@@ -1415,9 +1445,7 @@ class TestPeriodicTeardown(unittest.TestCase):
                             pkt.decode.return_value = []
                             yield pkt
 
-                    reader._container.demux = MagicMock(
-                        side_effect=demux_side_effect
-                    )
+                    reader._container.demux = MagicMock(side_effect=demux_side_effect)
                     reader._decode_iteration()
 
         # Normal post-loop close ran (not teardown path)
@@ -1450,6 +1478,7 @@ class TestPeriodicTeardown(unittest.TestCase):
         with patch("time.monotonic", return_value=3701.0):
             with patch("av.open", MagicMock(return_value=MagicMock())):
                 with patch.object(reader, "_subscribe_geometry"):
+
                     def demux_side_effect(stream):
                         for i in range(2):
                             pkt = MagicMock()
@@ -1457,9 +1486,7 @@ class TestPeriodicTeardown(unittest.TestCase):
                             pkt.decode.return_value = []
                             yield pkt
 
-                    reader._container.demux = MagicMock(
-                        side_effect=demux_side_effect
-                    )
+                    reader._container.demux = MagicMock(side_effect=demux_side_effect)
                     reader._decode_iteration()
 
         # Ring was untouched by teardown
@@ -1481,6 +1508,7 @@ class TestPeriodicTeardown(unittest.TestCase):
             with patch("av.open", MagicMock(return_value=MagicMock())):
                 with patch.object(reader, "_subscribe_geometry"):
                     with self.assertLogs(fc_log, level="INFO") as cm:
+
                         def demux_side_effect(stream):
                             for i in range(2):
                                 pkt = MagicMock()
@@ -1495,8 +1523,7 @@ class TestPeriodicTeardown(unittest.TestCase):
 
         # Both teardown log lines emitted
         teardown_msgs = [
-            r.getMessage() for r in cm.records
-            if "in_thread_teardown" in r.getMessage()
+            r.getMessage() for r in cm.records if "in_thread_teardown" in r.getMessage()
         ]
         self.assertEqual(len(teardown_msgs), 2)
         self.assertIn("in_thread_teardown: starting", teardown_msgs[0])
