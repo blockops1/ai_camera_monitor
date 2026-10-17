@@ -44,7 +44,9 @@ class TestListenerHealthLine:
         assert f"pid={os.getpid()}" in line
         assert "port=8090" in line
         assert "env_total=25" in line
-        assert "plist_keepalive=True" in line
+        # plist_keepalive reflects the actual plist value (module-level default).
+        # On this box KeepAlive was removed, so default is False.
+        assert "plist_keepalive=" in line
         assert "mcp_enabled=False" in line
         assert "alerts_last_10m=" in line
 
@@ -247,3 +249,88 @@ class TestLogWhenNoAlerts:
         assert line.startswith("listener_health:")
         # The uptime format is correct.
         assert "uptime=0h+2m" in line
+
+
+# ---------------------------------------------------------------------------
+# Test: plist_keepalive reads actual plist value (not hardcoded True)
+# ---------------------------------------------------------------------------
+
+
+class TestPlistKeepaliveRead:
+    """US-073h-fix: verify _read_plist_keepalive reads the real plist."""
+
+    def test_read_plist_keepalive_false_on_missing_key(self, tmp_path):
+        """When the plist has no KeepAlive key, _read_plist_keepalive returns False."""
+        plist = tmp_path / "test.plist"
+        plist.write_bytes(
+            b'<?xml version="1.0" encoding="UTF-8"?>\n'
+            b'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+            b'"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+            b'<plist version="1.0">\n'
+            b'<dict>\n'
+            b'  <key>Label</key>\n'
+            b'  <string>com.test</string>\n'
+            b'</dict>\n'
+            b'</plist>\n'
+        )
+        from listener.health import _read_plist_keepalive
+        assert _read_plist_keepalive(str(plist)) is False
+
+    def test_read_plist_keepalive_true_on_explicit_key(self, tmp_path):
+        """When the plist has KeepAlive=true, _read_plist_keepalive returns True."""
+        plist = tmp_path / "test_keepalive.plist"
+        plist.write_bytes(
+            b'<?xml version="1.0" encoding="UTF-8"?>\n'
+            b'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+            b'"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+            b'<plist version="1.0">\n'
+            b'<dict>\n'
+            b'  <key>Label</key>\n'
+            b'  <string>com.test</string>\n'
+            b'  <key>KeepAlive</key>\n'
+            b'  <true/>\n'
+            b'</dict>\n'
+            b'</plist>\n'
+        )
+        from listener.health import _read_plist_keepalive
+        assert _read_plist_keepalive(str(plist)) is True
+
+    def test_read_plist_keepalive_false_on_absent_file(self):
+        """When the plist file doesn't exist, _read_plist_keepalive returns False."""
+        from listener.health import _read_plist_keepalive
+        assert _read_plist_keepalive("/nonexistent/path.plist") is False
+
+    def test_format_listener_health_accepts_true(self):
+        """format_listener_health renders plist_keepalive=True when passed."""
+        line = HealthReporter.format_listener_health(
+            uptime_s=10.0,
+            port=8090,
+            env_total=5,
+            mcp_enabled=False,
+            plist_keepalive=True,
+        )
+        assert "plist_keepalive=True" in line
+
+    def test_format_listener_health_accepts_false(self):
+        """format_listener_health renders plist_keepalive=False when passed."""
+        line = HealthReporter.format_listener_health(
+            uptime_s=10.0,
+            port=8090,
+            env_total=5,
+            mcp_enabled=False,
+            plist_keepalive=False,
+        )
+        assert "plist_keepalive=False" in line
+
+    def test_format_listener_health_default_is_module_read(self):
+        """When not passed, the default comes from the module-level read."""
+        from listener.health import _PLIST_KEEPALIVE
+
+        line = HealthReporter.format_listener_health(
+            uptime_s=10.0,
+            port=8090,
+            env_total=5,
+            mcp_enabled=False,
+        )
+        expected = f"plist_keepalive={_PLIST_KEEPALIVE}"
+        assert expected in line

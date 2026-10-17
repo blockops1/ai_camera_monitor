@@ -1344,14 +1344,14 @@ def main():
     _start_api_server()
 
     # US-073h: start the periodic health heartbeat thread.
-    from listener.health import HealthReporter
+    from listener.health import HealthReporter, _read_plist_keepalive
 
     mcp_enabled = os.environ.get("FARMSURV_MCP_ENABLED", "0") == "1"
     api_enabled = os.environ.get("FARMSURV_API_ENABLED", "0") == "1"
     hr = HealthReporter(
         port=port,
         env_total=_ENV_TOTAL_LOADED,
-        plist_keepalive=True,
+        plist_keepalive=_read_plist_keepalive(),
         api_enabled=api_enabled,
     )
     hr.start(mcp_enabled=mcp_enabled)
