@@ -86,6 +86,39 @@ def _redact_ip(value: str) -> str:
 _START_TIME: float = time.monotonic()
 
 # ---------------------------------------------------------------------------
+# Plist KeepAlive read (US-073h-fix).
+# ---------------------------------------------------------------------------
+_PLIST_PATH: str = os.path.expanduser(
+    "~/Library/LaunchAgents/com.farm.surveillance.v2.plist"
+)
+
+
+def _read_plist_keepalive(plist_path: str | None = None) -> bool:
+    """Return True if the launchd plist has KeepAlive=true, False otherwise.
+
+    Reads via plutil(1) Print :KeepAlive; returns False if the key is missing,
+    the plist is absent, or plutil fails.
+    """
+    path = plist_path or _PLIST_PATH
+    try:
+        result = subprocess.run(
+            ["plutil", "-extract", "KeepAlive", "raw", path],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+        val = result.stdout.strip().lower()
+        return val in ("true", "1", "yes")
+    except (subprocess.TimeoutExpired, OSError, FileNotFoundError):
+        return False
+
+
+_PLIST_KEEPALIVE: bool = _read_plist_keepalive()
+
+# ---------------------------------------------------------------------------
 # Cadence
 # ---------------------------------------------------------------------------
 _INTERVAL_SECONDS: int = int(
@@ -213,6 +246,7 @@ class HealthReporter:
                 self._port,
                 self._env_total,
                 self._mcp_enabled,
+                self._plist_keepalive,
             )
         )
 
@@ -276,13 +310,14 @@ class HealthReporter:
         port: int,
         env_total: int,
         mcp_enabled: bool,
+        plist_keepalive: bool = _PLIST_KEEPALIVE,
     ) -> str:
         """Return the listener_health line."""
         uptime = _uptime_str(uptime_s)
         return (
             f"listener_health: uptime={uptime} pid={os.getpid()} "
             f"port={port} env_total={env_total} "
-            f"plist_keepalive={True} "
+            f"plist_keepalive={plist_keepalive} "
             f"mcp_enabled={mcp_enabled} "
             f"alerts_last_10m={_count_alerts_last_10m()}"
         )
