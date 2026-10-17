@@ -1,0 +1,287 @@
+[
+  {
+    "alert_id": "c0dd834a-22f4-4a3a-8802-8675c40d277a",
+    "camera_id": "OUTSIDE_BACK_SOLAR",
+    "type": "person",
+    "bbox": [
+      419,
+      622,
+      480,
+      576
+    ],
+    "full_body": [
+      419,
+      622,
+      480,
+      748
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  },
+  {
+    "alert_id": "3835d4c4-92fc-4c48-8cfd-556016ed53de",
+    "camera_id": "FRONT",
+    "type": "person",
+    "bbox": [
+      1824,
+      226,
+      736,
+      1120
+    ],
+    "full_body": [
+      1824,
+      226,
+      736,
+      1456
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  },
+  {
+    "alert_id": "9a41e804-8ebb-4dde-aa22-fcdaea803000",
+    "camera_id": "OUTSIDE_FRONT_POWER",
+    "type": "person",
+    "bbox": [
+      686,
+      18,
+      512,
+      256
+    ],
+    "full_body": [
+      686,
+      18,
+      512,
+      332
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  },
+  {
+    "alert_id": "87551b8e-c44f-4f94-a1e2-464e1b53c611",
+    "camera_id": "BACK",
+    "type": "person",
+    "bbox": [
+      2196,
+      154,
+      224,
+      544
+    ],
+    "full_body": [
+      2196,
+      154,
+      224,
+      707
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  },
+  {
+    "alert_id": "d7b14265-cbd9-4fc6-a685-a8214db52c09",
+    "camera_id": "BACK",
+    "type": "person",
+    "bbox": [
+      2128,
+      104,
+      160,
+      192
+    ],
+    "full_body": [
+      2128,
+      104,
+      160,
+      249
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  },
+  {
+    "alert_id": "8456921d-ff95-4137-bb14-32c9f2bd1ed5",
+    "camera_id": "FRONT",
+    "type": "person",
+    "bbox": [
+      1425,
+      312,
+      1056,
+      1024
+    ],
+    "full_body": [
+      1425,
+      312,
+      1056,
+      1331
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  },
+  {
+    "alert_id": "622ee5fd-e643-4cd2-b7ba-7de7e5d657ed",
+    "camera_id": "OUTSIDE_BACK_SOLAR",
+    "type": "person",
+    "bbox": [
+      22,
+      564,
+      416,
+      576
+    ],
+    "full_body": [
+      22,
+      564,
+      416,
+      748
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  },
+  {
+    "alert_id": "ac05611d-5dda-42aa-ae8a-37a0a7aa1287",
+    "camera_id": "OUTSIDE_BACK_SOLAR",
+    "type": "person",
+    "bbox": [
+      440,
+      382,
+      192,
+      224
+    ],
+    "full_body": [
+      440,
+      382,
+      192,
+      291
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  },
+  {
+    "alert_id": "f2d30799-b2b5-4d53-9851-9c00abcb7513",
+    "camera_id": "FRONT",
+    "type": "person",
+    "bbox": [
+      0,
+      606,
+      1504,
+      704
+    ],
+    "full_body": [
+      0,
+      606,
+      1504,
+      915
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  },
+  {
+    "alert_id": "aad7b646-6a7a-46a0-a865-8b9fa18808b2",
+    "camera_id": "BACK",
+    "type": "person",
+    "bbox": [
+      2240,
+      67,
+      320,
+      704
+    ],
+    "full_body": [
+      2240,
+      67,
+      320,
+      915
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  },
+  {
+    "alert_id": "1248d1e8-6036-465d-86fa-78b657e1bed5",
+    "camera_id": "OUTSIDE_FRONT_POWER",
+    "type": "vehicle",
+    "bbox": [
+      1120,
+      413,
+      1216,
+      416
+    ],
+    "full_body": [
+      1120,
+      413,
+      1216,
+      416
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  },
+  {
+    "alert_id": "96153c5e-a8a5-4fc9-b5f4-87a44d96c83e",
+    "camera_id": "FRONT",
+    "type": "vehicle",
+    "bbox": [
+      614,
+      602,
+      768,
+      832
+    ],
+    "full_body": [
+      614,
+      602,
+      768,
+      832
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  },
+  {
+    "alert_id": "afd96de3-2c84-4689-81d3-dae64a33ad0b",
+    "camera_id": "OUTSIDE_FRONT_SOLAR",
+    "type": "vehicle",
+    "bbox": [
+      876,
+      221,
+      640,
+      352
+    ],
+    "full_body": [
+      876,
+      221,
+      640,
+      352
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  },
+  {
+    "alert_id": "da48497c-1d02-4fad-9a83-5ae52d7caab2",
+    "camera_id": "OUTSIDE_FRONT_SOLAR",
+    "type": "vehicle",
+    "bbox": [
+      690,
+      40,
+      896,
+      544
+    ],
+    "full_body": [
+      690,
+      40,
+      896,
+      544
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  },
+  {
+    "alert_id": "4a666f15-c5af-44f3-a5c8-fb6f0b03637b",
+    "camera_id": "OUTSIDE_FRONT_SOLAR",
+    "type": "vehicle",
+    "bbox": [
+      2008,
+      76,
+      224,
+      224
+    ],
+    "full_body": [
+      2008,
+      76,
+      224,
+      224
+    ],
+    "frame_w": 2560,
+    "frame_h": 1440
+  }
+]
