@@ -1,0 +1,84 @@
+{
+  "phase": "V2-098",
+  "title": "public-tree security repair",
+  "summary": "Fixes from the 2026-10-17 external security review of v0.7.2 (29e0241): restore the .env example templates the strip-list regression deleted; add history-scan mode to the privacy scanner (tree-clean-but-history-dirty blind spot); pin YOLO weights to official ultralytics release with SHA256 verification; document the API_BIND=all plaintext escape hatch and remove shipped farm lat/lon defaults.",
+  "operator_provided_problem": "Review findings: (1) v0.7.2 ships zero .example files (v0.7.1 shipped 4) because config.yaml strip_paths grew to include *.example; (2) camera password reachable in public git history via c1a1640/e03ab06 (pre-existing, predates v0.7.2; rotation deferred by operator decision - secure LAN; history scan + scrub still required); (3) quick_classifier.py downloads yolov8n.onnx from third-party yoobright/yolo-onnx with no checksum - official ultralytics v8.4.0 sha256=b2bc52f40e8e1c532427d5bde3575a5d5b571b739fab2c6df443733ed1589cbd, live operator model sha256=b4ee8cd940e37cb9287b29845fb7dad18b021f578884c45c02758891f19e0b3f matches neither; (4) FARMSURV_API_BIND=all resolves 0.0.0.0 plaintext HTTP undocumented; quiet_hours.py + time_of_day.py ship farm lat/lon as code defaults.",
+  "scope": "scripts/release/config.yaml, scripts/check_no_private_data.py, scripts/hooks wiring, infra/quick_classifier.py, infra/quiet_hours.py, infra/time_of_day.py, README.md, *.example files.",
+  "design_constraints": [
+    "workers NEVER write ~/.env or ~/.hermes/memories",
+    "env-var booleans documented words-not-numbers (1=ON,0=OFF)",
+    "github push is orchestrator+operator gated, never coder-side"
+  ],
+  "stories": [
+    {
+      "id": "US-110a",
+      "title": "restore .example templates + fix strip-list regression",
+      "scope_files": [
+        "scripts/release/config.yaml",
+        ".env.example",
+        "camera-creds.env.example",
+        "telegram-creds.env.example",
+        "llm-creds.env.example",
+        "README.md"
+      ],
+      "done_evidence": [
+        "git ls-files *.example -> 4",
+        "strip_paths has zero *.example entries",
+        "required_files includes the 4 templates",
+        "templates carry KEY names + comments only, no values"
+      ],
+      "no_go": "no real values in templates"
+    },
+    {
+      "id": "US-110b",
+      "title": "history-scan mode in privacy scanner",
+      "scope_files": [
+        "scripts/check_no_private_data.py",
+        "scripts/hooks/",
+        "tests/"
+      ],
+      "done_evidence": [
+        "--history mode scans git log -p patches for cred patterns + LAN IPs + lat/lon",
+        "detects the known bad commits (exit 1)",
+        "clean-history negative test exits 0",
+        "hook wires mode via FARMSURV_HISTORY_SCAN=fail|warn (warn default until history scrub)"
+      ],
+      "no_go": "do not rewrite git history in this card"
+    },
+    {
+      "id": "US-110c",
+      "title": "YOLO weights supply-chain pin + SHA256 verify",
+      "scope_files": [
+        "infra/quick_classifier.py",
+        "README.md",
+        "tests/"
+      ],
+      "done_evidence": [
+        "official URL replaces yoobright URL",
+        "SHA256 verified after download, mismatch raises loudly",
+        "allow-list includes operator export hash",
+        "README install step with URL + hash + verify command"
+      ],
+      "no_go": "do not swap the live model file"
+    },
+    {
+      "id": "US-110d",
+      "title": "document API_BIND=all plaintext risk + env-drive farm coordinates",
+      "scope_files": [
+        "README.md",
+        "infra/quiet_hours.py",
+        "infra/time_of_day.py",
+        ".env.example",
+        "tests/"
+      ],
+      "done_evidence": [
+        "README loud warning: all = 0.0.0.0 plaintext HTTP, no TLS",
+        "lat/lon defaults removed from code, read via env-required pattern",
+        "pointing test suites 0 failed"
+      ],
+      "no_go": "worker does not add FARMSURV_LAT/LON to ~/.env (orchestrator activation)"
+    }
+  ],
+  "verification_recipe": "cd /Users/jill/farm-surveillance-v2 && git ls-files '*.example' | wc -l && python3 scripts/check_no_private_data.py --history; echo rc=$?",
+  "results_interpretation": "After all four: fresh clone has working templates, pre-push catches history leaks, model download is pinned/verified, property coordinates no longer ship in code. Credential rotation remains operator-scheduled; history scrub (filter-repo) is orchestrator-side after US-110b lands."
+}

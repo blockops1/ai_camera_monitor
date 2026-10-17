@@ -1,0 +1,96 @@
+{
+  "phase": "V2-097",
+  "title": "green pytest gate",
+  "summary": "Restore a fully-green pytest suite on main so scripts/release/cut_public_release.py --push-mode dry-run passes its pytest stage unmodified. The v0.7.2 cut had to ship with an honest-debt disclosure (64 failures) because the suite has pre-existing failures. This PRD eliminates them. All fixes are test-side unless noted; no production behavior changes.",
+  "operator_provided_problem": "security review + v0.7.2 cut: pytest tests/ --no-header -q -> 64 failed, 646 passed, 2 skipped on clean main. Same debt exists at v0.7.1. Cut script gates on green pytest; orchestrator had to bypass manually.",
+  "scope": "tests/ only. 63 bare os.environ pops without restore; orphaned watchdog tests; stale fixtures; mock wiring; assertion drift.",
+  "design_constraints": [
+    "no production code behavior changes",
+    "archive-first for retired test files (move, never delete)",
+    "every AC is a one-line shell command with explicit expected output"
+  ],
+  "stories": [
+    {
+      "id": "US-109a",
+      "title": "suite-wide env isolation",
+      "scope_files": [
+        "tests/conftest.py",
+        "tests/**"
+      ],
+      "done_evidence": [
+        "bare env pops eliminated",
+        "targeted pollution suites green"
+      ],
+      "no_go": "no .env edits, no listener restart"
+    },
+    {
+      "id": "US-109b",
+      "title": "retire orphaned watchdog-ladder tests",
+      "scope_files": [
+        "tests/e2e/test_watchdog_restart_ladder.py",
+        "archive/tests/"
+      ],
+      "done_evidence": [
+        "file archived",
+        "no imports of watchdog_restart outside archive"
+      ],
+      "no_go": "do not resurrect the watchdog module"
+    },
+    {
+      "id": "US-109c",
+      "title": "refresh daily-status fixture to US-105 log format",
+      "scope_files": [
+        "tests/fixtures/daily_status_report.log",
+        "tests/test_daily_status_report.py"
+      ],
+      "done_evidence": [
+        "pytest tests/test_daily_status_report.py -q -> 0 failed"
+      ],
+      "no_go": "no raw chat ids or tokens in fixture"
+    },
+    {
+      "id": "US-109d",
+      "title": "data-gate cross-diff + backtest fixture suites",
+      "scope_files": [
+        "tests/test_cross_diff_bbox_e2e.py",
+        "tests/test_backtest_vm1.py",
+        "data/frames/FRONT/ground_truth.json"
+      ],
+      "done_evidence": [
+        "skipif when referenced alert frames absent",
+        "0 failed",
+        "ground truth regenerated vs surviving alerts"
+      ],
+      "no_go": "commit NO camera frames into git without operator privacy waiver"
+    },
+    {
+      "id": "US-109e",
+      "title": "fix mock + assertion wiring (6 suites)",
+      "scope_files": [
+        "tests/conftest.py",
+        "tests/test_register_cameras.py",
+        "tests/test_frame_diff_filter.py",
+        "tests/test_time_of_day.py",
+        "tests/e2e/test_telegram_html_rendering.py",
+        "tests/e2e/test_animal_recognition_e2e.py",
+        "tests/test_farm_api_telegram_e2e.py"
+      ],
+      "done_evidence": [
+        "each named suite -> 0 failed"
+      ],
+      "no_go": "no production behavior changes; expectations read from config/env not hardcoded"
+    },
+    {
+      "id": "US-109f",
+      "title": "full-suite green gate on main",
+      "scope_files": [],
+      "done_evidence": [
+        "pytest tests/ --no-header -q -> 0 failed",
+        "merge-to-main check for US-109a-e"
+      ],
+      "no_go": "no pushes to github"
+    }
+  ],
+  "verification_recipe": "cd /Users/jill/farm-surveillance-v2 && env -u PYTHONPATH -u PYTHONHOME .venv/bin/python3.11 -m pytest tests/ --no-header -q --tb=no",
+  "results_interpretation": "0 failed = cut-script pytest gate restored; next public release ships a truthful pytest PASS line."
+}
