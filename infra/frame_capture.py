@@ -1,5 +1,5 @@
 """
-frame_capture.py — Persistent RTSP reader with in-memory ring buffer.
+frame_capture.py - Persistent RTSP reader with in-memory ring buffer.
 
 STATUS: stable
 THREAD SAFETY: uses threading.Lock
@@ -11,14 +11,14 @@ INPUTS:
 OUTPUTS:
     - list[str]: PNG file paths from capture_around_now
 PUBLIC API:
-    start() — Open RTSP and start decode loop (idempotent).
-    stop(timeout=5.0) — Stop decode loop and close socket (idempotent).
+    start() - Open RTSP and start decode loop (idempotent).
+    stop(timeout=5.0) - Stop decode loop and close socket (idempotent).
     capture_around_now(count, stride_s, output_dir) -> concurrent.futures.Future
-    is_healthy(stale_seconds=_UNSET → env-tuned, default 20.0) -> bool
+    is_healthy(stale_seconds=_UNSET -> env-tuned, default 20.0) -> bool
     uptime_seconds() -> float
     get_frames_by_offset(indices, output_dir) -> list[str]
-    CameraCaptureRegistry.start_all() — Boot one reader per camera.
-    CameraCaptureRegistry.stop_all() — Stop all readers, drain threads.
+    CameraCaptureRegistry.start_all() - Boot one reader per camera.
+    CameraCaptureRegistry.stop_all() - Stop all readers, drain threads.
     CameraCaptureRegistry.is_healthy_all() -> dict[str, bool]
 DOES NOT DO:
     - Parse camera-creds.env (infra/camera_creds)
@@ -51,24 +51,25 @@ from PIL import Image
 log = logging.getLogger("frame_capture")
 
 RING_SIZE_DEFAULT = 12
-RECONNECT_BACKOFF_INITIAL = 1.0   # seconds
+RECONNECT_BACKOFF_INITIAL = 1.0  # seconds
 RECONNECT_BACKOFF_MAX = 30.0
 RECONNECT_BACKOFF_MULT = 2.0
 
 
 class _capture_result(Enum):
     """Return sentinels for _capture_worker early-exit paths."""
-    NOTHING_TO_CAPTURE = 0   # ring empty at i=0, return []
-    PARTIAL = 1              # some frames saved, return partial list
+
+    NOTHING_TO_CAPTURE = 0  # ring empty at i=0, return []
+    PARTIAL = 1  # some frames saved, return partial list
 
 
-# US-017e — Phase 6B.155 (PLAN §11.78). Cap on consecutive failure-driven
+# US-017e - Phase 6B.155 (PLAN s11.78). Cap on consecutive failure-driven
 # reconnects. After N attempts the failure loop stops hammering the camera
 # and waits for either (a) the next in-thread periodic teardown (US-049c,
 # every 3600s) or (b) operator intervention via stop_event. Prevents log/CPU
 # starvation during a camera-side Reolink stickiness event (where RTSP
 # returns ERRNO 60 / Invalid data / 404 in a burst, but the camera IS still
-# on the network — just temporarily refusing new sessions). Without this cap
+# on the network - just temporarily refusing new sessions). Without this cap
 # the loop will keep hammering the camera at the 30s max forever, filling
 # logs and (worse) potentially blocking other code paths.
 RECONNECT_MAX_ATTEMPTS_DEFAULT = 10
@@ -96,12 +97,10 @@ _STALE_SECONDS_ENV = "FARMSV_RTSP_STALE_SECONDS"
 _RECONNECT_MIN_UPTIME_ENV = "FARMSV_RTSP_RECONNECT_MIN_UPTIME"
 
 # Sentinel: signals that no explicit arg was passed (caller wants env/default).
-# Replaces `float | None` / `int | None` in resolver signatures — the None
+# Replaces `float | None` / `int | None` in resolver signatures - the None
 # branch would silently pick up env vars, creating two data sources for the
 # same value.
 _UNSET = object()
-
-
 
 
 def _resolve_max_reconnect_attempts(arg_value: int | object = _UNSET) -> int:
@@ -166,9 +165,6 @@ def _resolve_reconnect_min_uptime(arg_value: float | object = _UNSET) -> float:
     return _RECONNECT_MIN_UPTIME_DEFAULT
 
 
-
-
-
 class PersistentRTSPReader:
     """Long-lived RTSP reader: background thread decodes into a deque ring."""
 
@@ -191,7 +187,7 @@ class PersistentRTSPReader:
             "fflags": "+genpts",
             "buffer_size": "20000000",
         }
-        self._scheduled_reconnect_seconds = 3600.0  # 1 hour — hardcoded per US-049a
+        self._scheduled_reconnect_seconds = 3600.0  # 1 hour - hardcoded per US-049a
         self._max_reconnect_attempts = _resolve_max_reconnect_attempts(
             max_reconnect_attempts  # type: ignore[arg-type]
         )
@@ -258,7 +254,7 @@ class PersistentRTSPReader:
         infra.camera_creds._all_cameras on the matching camera entry.
 
         Called once at first RTSP open. Uses a lightweight metadata probe
-        — does NOT decode frames.  Idempotent: skips on teardown reconnects
+        - does NOT decode frames.  Idempotent: skips on teardown reconnects
         via the _geometry_subscribed flag.
 
         Failure modes:
@@ -270,7 +266,7 @@ class PersistentRTSPReader:
         """
         if self._camera_id is None:
             return
-        # US-096b: one-shot — do not re-probe on teardown reconnects.
+        # US-096b: one-shot - do not re-probe on teardown reconnects.
         if self._geometry_subscribed:
             return
         # Look up the camera entry by matching our camera_id (prefix) to the
@@ -293,7 +289,7 @@ class PersistentRTSPReader:
             )
             return
 
-        # Lightweight cv2 probe — open the RTSP stream, read metadata, close.
+        # Lightweight cv2 probe - open the RTSP stream, read metadata, close.
         cap = cv2.VideoCapture(self._rtsp_url)
         if not cap.isOpened():
             log.warning(
@@ -415,12 +411,10 @@ class PersistentRTSPReader:
         most recent frame from ``self._ring`` on each stride, saves it as
         ``frame_NNN.png``, and sets the Future result to the list of paths.
 
-        Only ``future.result()`` blocks — the calling thread is free
+        Only ``future.result()`` blocks - the calling thread is free
         immediately after this call returns.
         """
-        future: concurrent.futures.Future[list[str]] = (
-            concurrent.futures.Future()
-        )
+        future: concurrent.futures.Future[list[str]] = concurrent.futures.Future()
         name = f"capture-{self._camera_id}" if self._camera_id else "capture-unknown"
 
         def _worker() -> None:
@@ -451,7 +445,7 @@ class PersistentRTSPReader:
         to the caller.
 
         Captures 4 frames with uniform 1.0s spacing (US-104b):
-        ring offsets [-6, -4, -2, -1] — i=3 sleeps 1.0s before grab.
+        ring offsets [-6, -4, -2, -1] - i=3 sleeps 1.0s before grab.
         """
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         self._clean_old(output_dir)
@@ -520,9 +514,7 @@ class PersistentRTSPReader:
         for idx in indices:
             if idx < 0 or idx >= len(ring_list):
                 continue
-            self._save_one(
-                ring_list[idx], output_dir, len(out_paths) + 1, out_paths
-            )
+            self._save_one(ring_list[idx], output_dir, len(out_paths) + 1, out_paths)
         return out_paths
 
     # -- internal helpers --
@@ -560,7 +552,7 @@ class PersistentRTSPReader:
     def _run_loop(self) -> None:
         """Main decode loop. Runs in a background thread.
 
-        Phase 6B.155 (PLAN §11.78): failure-driven reconnects are capped at
+        Phase 6B.155 (PLAN s11.78): failure-driven reconnects are capped at
         `self._max_reconnect_attempts`. After the cap, the loop stops retrying
         and waits on _stop_event with the configured cadence. The in-thread
         periodic teardown (US-049c, every 3600s) re-opens the container and
@@ -569,7 +561,7 @@ class PersistentRTSPReader:
         re-entering this except-block exhaustion logic on each iteration.
 
         Per the 2026-08-28 CAM3 incident (6 errors in 80s with ERRNO 60 /
-        Invalid data / 404 — Reolink RTSP session stickiness), this caps
+        Invalid data / 404 - Reolink RTSP session stickiness), this caps
         log spam and CPU usage during long camera outages.
         """
         backoff = RECONNECT_BACKOFF_INITIAL
@@ -581,7 +573,7 @@ class PersistentRTSPReader:
                 # _decode_iteration returned normally).
                 if cap_exhausted:
                     log.info(
-                        "RTSP recovered after %d consecutive failures — "
+                        "RTSP recovered after %d consecutive failures - "
                         "decoder running normally",
                         self._consecutive_errors,
                     )
@@ -592,21 +584,19 @@ class PersistentRTSPReader:
                 if self._stop_event.is_set():
                     break
 
-                # 2026-08-28 — Phase 6B.155 (PLAN §11.78). Cap on
+                # 2026-08-28 - Phase 6B.155 (PLAN s11.78). Cap on
                 # failure-driven reconnects. After N consecutive failures
                 # we stop retrying here and wait for the in-thread
                 # periodic teardown (US-049c, every hour) to re-open
                 # the container.
                 if self._max_reconnect_attempts > 0 and not cap_exhausted:
-                    remaining = (
-                        self._max_reconnect_attempts - self._consecutive_errors
-                    )
+                    remaining = self._max_reconnect_attempts - self._consecutive_errors
                     if remaining <= 0:
                         log.error(
                             "consecutive_reconnect_cap_reached: "
                             "PersistentRTSP decode iteration failed "
                             "(%d consecutive attempts). Last error: %s. "
-                            "Reader is UNHEALTHY — waiting %.0fs for the "
+                            "Reader is UNHEALTHY - waiting %.0fs for the "
                             "next in-thread periodic teardown "
                             "(US-049c).",
                             self._consecutive_errors,
@@ -628,11 +618,11 @@ class PersistentRTSPReader:
                         # Outer while-loop retries the decode. If it
                         # succeeds, the early "if cap_exhausted" block
                         # above logs recovery. If it fails again, we
-                        # hit this except block again — but since
+                        # hit this except block again - but since
                         # cap_exhausted=True, the inner if is skipped
                         # and we just fall through to the warning (no
                         # behavioral change vs. retry-forever, but
-                        # without the 30s hammering — the cadence
+                        # without the 30s hammering - the cadence
                         # waits on _stop_event for the next teardown).
                         continue
 
@@ -640,9 +630,7 @@ class PersistentRTSPReader:
                 # exhausted, or when cap is disabled via
                 # max_reconnect_attempts<=0).
                 if self._max_reconnect_attempts > 0 and not cap_exhausted:
-                    remaining = (
-                        self._max_reconnect_attempts - self._consecutive_errors
-                    )
+                    remaining = self._max_reconnect_attempts - self._consecutive_errors
                     log.warning(
                         "Decode failed (attempt %d): %s. Reconnecting "
                         "in %.1fs... (%d attempt(s) remaining before "
@@ -656,8 +644,7 @@ class PersistentRTSPReader:
                     # Cap disabled (max_reconnect_attempts<=0): retry
                     # forever, no remaining-count to report.
                     log.warning(
-                        "Decode failed (attempt %d): %s. Reconnecting "
-                        "in %.1fs...",
+                        "Decode failed (attempt %d): %s. Reconnecting in %.1fs...",
                         self._consecutive_errors,
                         e,
                         backoff,
@@ -671,12 +658,10 @@ class PersistentRTSPReader:
         # Closes the container every _scheduled_reconnect_seconds so PyAV's
         # C demux() can't wedge silently.  We close and set _container=None
         # here, then fall through to the existing container-open path below
-        # (single entry point — shared with failure-driven reconnect).
+        # (single entry point - shared with failure-driven reconnect).
         if (
             self._last_container_open_monotonic is not None
-            and (
-                time.monotonic() - self._last_container_open_monotonic
-            )
+            and (time.monotonic() - self._last_container_open_monotonic)
             >= self._scheduled_reconnect_seconds
         ):
             log.info("in_thread_teardown: starting")
@@ -711,10 +696,7 @@ class PersistentRTSPReader:
                 # check at line 675 is unreachable once demux starts).
                 if (
                     self._last_container_open_monotonic is not None
-                    and (
-                        time.monotonic()
-                        - self._last_container_open_monotonic
-                    )
+                    and (time.monotonic() - self._last_container_open_monotonic)
                     >= self._scheduled_reconnect_seconds
                 ):
                     _periodic_teardown = True
@@ -740,7 +722,7 @@ class PersistentRTSPReader:
                         self._ring.append(img)
                     self.frames_decoded_total += 1
                     self._last_frame_time = time.monotonic()
-        # US-049c-fix: teardown exit path — closes the container, resets
+        # US-049c-fix: teardown exit path - closes the container, resets
         # state, and returns WITHOUT hitting the normal post-loop close
         # block (which would set _healthy=False and break _run_loop out of
         # the steady-state loop).  The caller (_run_loop) will re-enter
@@ -939,14 +921,17 @@ class CameraCaptureRegistry:
                     log.warning(
                         "Reader swap: %s (id=%s, uptime=%.0fs, "
                         "consecutive_errors=%d); reconnecting.",
-                        cid, reader_id, dead_uptime, retry_count,
+                        cid,
+                        reader_id,
+                        dead_uptime,
+                        retry_count,
                     )
                     # AC1: Close the old reader fully before opening a new one.
                     # stop() joins the thread (12s timeout) then closes the
                     # container under _container_lock.  If the demux thread
                     # is still stuck after 12s, we force-close a second time
                     # to drain any lingering ESTABLISHED sockets on the cam
-                    # side — otherwise the socket persists ~60s past close().
+                    # side - otherwise the socket persists ~60s past close().
                     dead_reader.stop(timeout=12.0)
                     # Force a second close if the thread is still alive.
                     with dead_reader._container_lock:
@@ -976,7 +961,9 @@ class CameraCaptureRegistry:
         if inst._reconnect_thread is not None and inst._reconnect_thread.is_alive():
             return
         inst._reconnect_stop.clear()
-        t = threading.Thread(target=cls._reconnect_loop, name="reconnect-loop", daemon=True)
+        t = threading.Thread(
+            target=cls._reconnect_loop, name="reconnect-loop", daemon=True
+        )
         t.start()
         inst._reconnect_thread = t
 
@@ -1015,6 +1002,4 @@ def get_frames_by_offset(
         return []
     from infra.paths import FRAMES_DIR
 
-    return reader.get_frames_by_offset(
-        indices, os.path.join(FRAMES_DIR, camera_id)
-    )
+    return reader.get_frames_by_offset(indices, os.path.join(FRAMES_DIR, camera_id))
