@@ -118,9 +118,10 @@ class TestReolinkCliPath:
         with (
             patch("infra.daily_status_report.REOLINK_CLI", cli_path),
             patch("infra.daily_status_report._get_shared_cam_password", return_value="testpass"),
-            patch("infra.daily_status_report.CAMS", [
+            patch("infra.daily_status_report.CAMS", return_value=[
                 {"alias": "FRONT", "ip": _TEST_FRONT_IP, "label": "Front Door Outside", "model": "RLC-833A"},
             ]),
+            patch("infra.daily_status_report._cam_connections_from_heartbeat", return_value={"FRONT": 1}),
             patch("infra.daily_status_report.subprocess.run", side_effect=fake_subprocess_run),
         ):
             results = get_per_cam_status()
@@ -142,16 +143,20 @@ class TestReolinkCliPath:
         with (
             patch("infra.daily_status_report.REOLINK_CLI", missing_cli),
             patch("infra.daily_status_report._get_shared_cam_password", return_value="testpass"),
-            patch("infra.daily_status_report.CAMS", [
+            patch("infra.daily_status_report.CAMS", return_value=[
                 {"alias": "FRONT", "ip": _TEST_FRONT_IP, "label": "Front Door Outside", "model": "RLC-833A"},
             ]),
+            patch("infra.daily_status_report._cam_connections_from_heartbeat", return_value={"FRONT": 1}),
         ):
             results = get_per_cam_status()
 
         assert len(results) == 1
         assert results[0]["cpu_pct"] is None
         assert results[0]["encode_main"] is None
-        assert mock_run.call_count == 2  # launchctl list + lsof, no reolink-cli calls
+        # _cam_connections_from_heartbeat is patched so _run is never called
+        # (the heartbeat path bypasses lsof entirely); reolink-cli missing means
+        # CPU/encode calls are skipped too.
+        assert mock_run.call_count == 0
 
 
 # -----------------------------------------------------------------------
