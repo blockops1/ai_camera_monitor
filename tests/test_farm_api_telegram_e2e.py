@@ -16,47 +16,52 @@ Bug classes covered:
 
 from __future__ import annotations
 
-import os
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 # ---------------------------------------------------------------------------
-# Realistic daemon.log lines
+# Realistic daemon.log lines — timestamps relative to fixture setup time so
+# the 24-hour error-count window in _count_errors_last_24h catches them.
 # ---------------------------------------------------------------------------
 
-_LOG_SUCCESS = (
-    "2026-09-24 18:00:00,000 INFO daemon: tg-send: "
-    "alert_id=abc123 TG#1 chat=123456789 method=sendMediaGroup "
-    "url=https://api.telegram.org/response=HTTP 200\n"
-)
-
-_LOG_ERROR = (
-    "2026-09-24 17:00:00,000 ERROR daemon: tg-send: "
-    "alert_id=def456 TG#2 error=ConnectionError: timeout\n"
-)
+def _make_log_lines():
+    """Build log lines with timestamps relative to fixture setup."""
+    now = datetime.now(UTC)
+    success_ts = now.strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+    error_ts = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+    return (
+        (f"{success_ts} INFO daemon: tg-send: "
+         "alert_id=abc123 TG#1 chat=123456789 method=sendMediaGroup "
+         "url=https://api.telegram.org/response=HTTP 200\n"),
+        (
+            f"{error_ts} ERROR daemon: tg-send: "
+            "alert_id=def456 TG#2 error=ConnectionError: timeout\n"
+        ),
+    )
 
 
 @pytest.fixture()
-def _telegram_e2e_env(tmp_path: Path):
+def _telegram_e2e_env(tmp_path: Path, monkeypatch):
     """Create a fake logs/daemon.log with Telegram dispatch entries."""
     logs_dir = tmp_path / "logs"
     logs_dir.mkdir()
     log_file = logs_dir / "daemon.log"
 
-    # Write realistic log lines
+    # Write realistic log lines (timestamps relative to fixture setup)
+    success_line, error_line = _make_log_lines()
     log_file.write_text(
         "2026-09-24 16:00:00,000 INFO daemon: env load complete: "
         "TELEGRAM_HOME_CHAT_ID=123456789\n"
-        + _LOG_SUCCESS
-        + _LOG_ERROR
-        + _LOG_ERROR  # two errors
+        + success_line
+        + error_line
+        + error_line  # two errors
     )
 
-    # Monkeypatch env var BEFORE importing telegram module
-    old_logs_dir = os.environ.get("FARMSURV_LOGS_DIR")
-    os.environ["FARMSURV_LOGS_DIR"] = str(logs_dir)
+    # Set env var BEFORE importing telegram module
+    monkeypatch.setenv("FARMSURV_LOGS_DIR", str(logs_dir))
 
     # Clear cached modules
     for mod_name in list(sys.modules.keys()):
@@ -65,11 +70,7 @@ def _telegram_e2e_env(tmp_path: Path):
 
     yield tmp_path
 
-    # Restore
-    if old_logs_dir is not None:
-        os.environ["FARMSURV_LOGS_DIR"] = old_logs_dir
-    else:
-        os.environ.pop("FARMSURV_LOGS_DIR", None)
+    # Env cleanup is automatic with monkeypatch
     for mod_name in list(sys.modules.keys()):
         if mod_name.startswith(("infra.paths", "infra.farm_api.telegram")):
             del sys.modules[mod_name]
@@ -118,13 +119,12 @@ class TestTelegramStatusE2E:
         status = get_telegram_status()
         assert status.errors_last_24h == 2
 
-    def test_missing_log_file(self, tmp_path):
+    def test_missing_log_file(self, tmp_path, monkeypatch):
         """No daemon.log → all fields default."""
         logs_dir = tmp_path / "logs"
         logs_dir.mkdir()
 
-        old_logs_dir = os.environ.get("FARMSURV_LOGS_DIR")
-        os.environ["FARMSURV_LOGS_DIR"] = str(logs_dir)
+        monkeypatch.setenv("FARMSURV_LOGS_DIR", str(logs_dir))
 
         # Clear cached modules
         for mod_name in list(sys.modules.keys()):
@@ -134,15 +134,6 @@ class TestTelegramStatusE2E:
         from infra.farm_api.telegram import get_telegram_status
 
         status = get_telegram_status()
-
-        # Restore
-        if old_logs_dir is not None:
-            os.environ["FARMSURV_LOGS_DIR"] = old_logs_dir
-        else:
-            os.environ.pop("FARMSURV_LOGS_DIR", None)
-        for mod_name in list(sys.modules.keys()):
-            if mod_name.startswith(("infra.paths", "infra.farm_api.telegram")):
-                del sys.modules[mod_name]
 
         assert status.last_send_status == "unknown"
         assert status.errors_last_24h == 0

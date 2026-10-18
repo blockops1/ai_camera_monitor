@@ -10,12 +10,19 @@ remains active because we only override for those two module names.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def mock_llama_server(monkeypatch, request):
-    """Override the root conftest autouse fixture for server E2E tests."""
+    """Override the root conftest autouse fixture for server E2E tests.
+
+    For test_api_server_e2e / test_mcp_server_e2e: restore real httpx.Client.
+    For all other E2E tests: install the same httpx.Client mock from the
+    root conftest so tests receive a proper MagicMock instead of None.
+    """
     if request.module.__name__ in (
         "tests.e2e.test_api_server_e2e",
         "tests.e2e.test_mcp_server_e2e",
@@ -27,6 +34,24 @@ def mock_llama_server(monkeypatch, request):
         monkeypatch.setattr("httpx.Client", _original_httpx.Client)
         yield None
     else:
-        # For other tests, yield nothing — the root conftest's patch
-        # remains in place.
-        yield None
+        # Build the mock response that the root conftest creates.
+        _mock_resp = MagicMock()
+        _mock_resp.status_code = 200  # real int, not MagicMock
+        _mock_resp.json.return_value = {
+            "choices": [{
+                "message": {
+                    "content": '{"class": "vehicle", "subclass": "sedan", "confidence": "likely", "count": 1, "face_visible": false, "notes": null}'
+                }
+            }]
+        }
+
+        # Build the mock client — httpx.Client(timeout=...) returns this.
+        _mock_client = MagicMock()
+        _mock_client.post.return_value = _mock_resp
+        _mock_client.__enter__ = MagicMock(return_value=_mock_client)
+        _mock_client.__exit__ = MagicMock(return_value=False)
+
+        # Patch httpx.Client to return _mock_client (not to BE _mock_client).
+        # Use patch.context so it auto-undoes on fixture teardown.
+        with patch("httpx.Client", return_value=_mock_client) as _patch:
+            yield _mock_client

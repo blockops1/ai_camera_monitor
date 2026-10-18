@@ -80,7 +80,11 @@ def test_night_start_is_sunset_plus_buffer(request, mock_sun):
     fixture = request.getfixturevalue(mock_sun)
     sunset = fixture.get_sunset_time.return_value
 
-    with patch("infra.time_of_day.Sun", return_value=fixture):
+    with patch("infra.time_of_day.Sun", return_value=fixture), patch.dict(
+        "os.environ",
+        {"FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN": "30"},
+        clear=False,
+    ):
         from infra.time_of_day import get_night_window
 
         window = get_night_window()
@@ -97,7 +101,11 @@ def test_sunrise_before_night_end(mock_sun_sep19):
     """AC4: night_end = sunrise - buffer, so sunrise >= night_end."""
     sunrise = mock_sun_sep19.get_sunrise_time.return_value
 
-    with patch("infra.time_of_day.Sun", return_value=mock_sun_sep19):
+    with patch("infra.time_of_day.Sun", return_value=mock_sun_sep19), patch.dict(
+        "os.environ",
+        {"FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN": "30"},
+        clear=False,
+    ):
         from infra.time_of_day import get_night_window
 
         window = get_night_window()
@@ -141,7 +149,11 @@ def _patch_sun_and_reload(sun_fixture, env_overrides=None):
 
 def test_night_at_edt_01_20_is_night(mock_sun_sep19):
     """AC5: 01:20 AM UTC on Sep 19 should be night."""
-    with patch("infra.time_of_day.Sun", return_value=mock_sun_sep19):
+    with patch("infra.time_of_day.Sun", return_value=mock_sun_sep19), patch.dict(
+        "os.environ",
+        {"FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN": "30"},
+        clear=False,
+    ):
         from infra.time_of_day import is_night_at_edt
 
         dt = datetime(2026, 9, 19, 1, 20, tzinfo=UTC)
@@ -150,7 +162,11 @@ def test_night_at_edt_01_20_is_night(mock_sun_sep19):
 
 def test_night_at_edt_noon_is_day(mock_sun_sep19):
     """AC6: 12:00 noon UTC on Sep 19 should be day."""
-    with patch("infra.time_of_day.Sun", return_value=mock_sun_sep19):
+    with patch("infra.time_of_day.Sun", return_value=mock_sun_sep19), patch.dict(
+        "os.environ",
+        {"FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN": "30"},
+        clear=False,
+    ):
         from infra.time_of_day import is_night_at_edt
 
         dt = datetime(2026, 9, 19, 12, 0, tzinfo=UTC)
@@ -159,7 +175,11 @@ def test_night_at_edt_noon_is_day(mock_sun_sep19):
 
 def test_night_at_edt_winter_17_30_is_day(mock_sun_dec21):
     """AC7: winter 5:30 PM should still be day (sunset ~5:38 PM + buffer)."""
-    with patch("infra.time_of_day.Sun", return_value=mock_sun_dec21):
+    with patch("infra.time_of_day.Sun", return_value=mock_sun_dec21), patch.dict(
+        "os.environ",
+        {"FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN": "30"},
+        clear=False,
+    ):
         from infra.time_of_day import is_night_at_edt
 
         dt = datetime(2026, 12, 21, 17, 30, tzinfo=UTC)
@@ -180,7 +200,11 @@ def test_night_at_edt_summer_21_30_is_night():
     mock_sun.get_sunset_time.return_value = sunset
     mock_sun.get_sunrise_time.return_value = sunrise
 
-    with patch("infra.time_of_day.Sun", return_value=mock_sun):
+    with patch("infra.time_of_day.Sun", return_value=mock_sun), patch.dict(
+        "os.environ",
+        {"FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN": "30"},
+        clear=False,
+    ):
         from infra.time_of_day import is_night_at_edt
 
         # 2026-06-21 21:30 EDT = 01:30 UTC
@@ -195,7 +219,13 @@ def test_night_at_edt_summer_21_30_is_night():
 
 def test_lat_lon_override(mock_sun_sep19):
     """AC9: env-var lat/lon override changes the Sun instance."""
-    with patch("infra.time_of_day.Sun", return_value=mock_sun_sep19) as mock_sun_cls:
+    with patch(
+        "infra.time_of_day.Sun", return_value=mock_sun_sep19
+    ) as mock_sun_cls, patch.dict(
+        "os.environ",
+        {"FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN": "30"},
+        clear=False,
+    ):
         from infra.time_of_day import get_night_window
 
         get_night_window()
@@ -279,11 +309,15 @@ def test_custom_buffer():
 
 def test_naive_datetime_converted_to_utc(mock_sun_sep19):
     """Naive datetime is treated as UTC."""
-    with patch("suntime.Sun", return_value=mock_sun_sep19):
+    with patch("infra.time_of_day.Sun", return_value=mock_sun_sep19), patch.dict(
+        "os.environ",
+        {"FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN": "30"},
+        clear=False,
+    ):
         from infra.time_of_day import is_night_at_edt
 
         # 2026-09-19 01:20 naive = treated as UTC = night
-        dt = datetime(2026, 9, 19, 1, 20)  # noqa: DTZ001 (testing naive dt behavior)
+        dt = datetime(2026, 9, 19, 1, 20)
         assert is_night_at_edt(dt) is True
 
 
@@ -294,7 +328,11 @@ def test_naive_datetime_converted_to_utc(mock_sun_sep19):
 
 def test_22_00_is_night(mock_sun_sep19):
     """22:00 UTC on Sep 19 (sunset 19:40 + 30 = night_start 20:10) is night."""
-    with patch("suntime.Sun", return_value=mock_sun_sep19):
+    with patch("infra.time_of_day.Sun", return_value=mock_sun_sep19), patch.dict(
+        "os.environ",
+        {"FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN": "30"},
+        clear=False,
+    ):
         from infra.time_of_day import is_night_at_edt
 
         dt = datetime(2026, 9, 19, 22, 0, tzinfo=UTC)
@@ -307,7 +345,11 @@ def test_05_41_is_day(mock_sun_sep19):
     night_end = 05:40, so 05:41 > night_end AND 05:41 < night_start (20:10),
     meaning 05:41 is in the day window.
     """
-    with patch("suntime.Sun", return_value=mock_sun_sep19):
+    with patch("infra.time_of_day.Sun", return_value=mock_sun_sep19), patch.dict(
+        "os.environ",
+        {"FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN": "30"},
+        clear=False,
+    ):
         from infra.time_of_day import is_night_at_edt
 
         dt = datetime(2026, 9, 19, 5, 41, tzinfo=UTC)
@@ -316,7 +358,11 @@ def test_05_41_is_day(mock_sun_sep19):
 
 def test_05_30_is_night(mock_sun_sep19):
     """05:30 UTC on Sep 19 is still night (night_end = 05:40)."""
-    with patch("suntime.Sun", return_value=mock_sun_sep19):
+    with patch("infra.time_of_day.Sun", return_value=mock_sun_sep19), patch.dict(
+        "os.environ",
+        {"FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN": "30"},
+        clear=False,
+    ):
         from infra.time_of_day import is_night_at_edt
 
         dt = datetime(2026, 9, 19, 5, 30, tzinfo=UTC)

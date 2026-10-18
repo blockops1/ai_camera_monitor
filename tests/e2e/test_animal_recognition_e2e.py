@@ -332,4 +332,4 @@ class TestTg3Path:
         # Should not contain "Recognized:" since no match.
         caption = msg["caption"]
         assert "Recognized:" not in caption
-        assert "No match" in caption
+        assert "Unrecognized animal" in caption

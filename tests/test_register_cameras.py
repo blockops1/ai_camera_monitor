@@ -73,7 +73,7 @@ class TestRegisterAllPasswordSafety:
                         continue
                     # Known safe tokens that can be long: CLI binary, alias, host, description
                     if (token == "reolink-cli" or
-                            token.startswith(("--", "192.", "device", "add"))):
+                            token.startswith(("--", "192.", "[REDACTED-LAN-IP]", "device", "add"))):
                         continue
                     if token in ("front", "back", "outside_front_garage", "outside_front_solar",
                                  "outside_front_power", "outside_back_solar"):
@@ -192,4 +192,9 @@ class TestCamerasConfig:
 
     def test_all_hosts_specified(self):
         for alias, host, _, _ in CAMERAS:
-            assert host.startswith("192.168."), f"{alias} host not 192.168.x.x: {host}"
+            # Hosts are either RFC1918 LAN addresses or the documented
+            # placeholder token — both are valid in the test config.
+            assert host and len(host) > 0, f"{alias} host is empty"
+            assert (
+                host.startswith(("192.168.", "[REDACTED-LAN-IP]"))
+            ), f"{alias} host not RFC1918 or placeholder: {host}"

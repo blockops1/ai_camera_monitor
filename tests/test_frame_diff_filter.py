@@ -405,6 +405,10 @@ class TestGetMinAreaPctPerCam:
 
     def test_per_cam_takes_precedence_over_global(self, monkeypatch):
         """Per-cam value overrides global MIN_AREA_PCT."""
+        # Remove per-cam overrides from .env that would interfere.
+        for cam in ("BACK", "FRONT", "OUTSIDE_FRONT_GARAGE",
+                    "OUTSIDE_FRONT_POWER", "OUTSIDE_BACK_SOLAR"):
+            monkeypatch.delenv(f"FARMSV_{cam}_MIN_AREA_PCT", raising=False)
         monkeypatch.setenv("MIN_AREA_PCT", "0.001")
         monkeypatch.setenv("FARMSV_OUTSIDE_FRONT_SOLAR_MIN_AREA_PCT", "0.0001")
         assert _get_min_area_pct("OUTSIDE_FRONT_SOLAR") == 0.0001
