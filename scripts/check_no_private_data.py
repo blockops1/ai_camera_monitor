@@ -38,6 +38,7 @@ import json
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -121,6 +122,48 @@ RUNTIME_DATA_PATTERNS: list[tuple[str, str]] = [
     ("scripts/push*.log", "forgejo push log"),
     ("scripts/push*.txt", "forgejo push log"),
 ]
+
+# History-scan patterns: these detect secrets that may have lived in
+# git history (e.g. camera-creds.env.bak files). Only ADDED lines
+# (diff hunks starting with '+') are scanned.
+#
+# Categories:
+#   1. Creds-shaped assignments: KEY=secret (e.g. RTSP_PASS=xxx)
+#   2. RTSP URLs with embedded credentials: rtsp://user:pass@host
+#   3. LAN IPs on added lines (192.168.x.x pattern in diff context)
+#   4. Farm lat/lon pair (34.57 + 84.94) appearing together
+HISTORY_PATTERNS: list[tuple[str, str]] = [
+    # Creds-shaped: PASSWORD, PASS, CRED, TOKEN on the right of =
+    (r"(?i)(PASS|PASSWORD|CRED|TOKEN)\s*=\s*\S+", "creds-shaped assignment"),
+    # RTSP URL with embedded auth
+    (r"rtsp://[^\s:@]+:[^\s@]+@[^\s]+", "rtsp:// URL with embedded credentials"),
+    # Production LAN IPs (same range as PRODUCTION_IP_PATTERNS)
+    (r"192\.168\.[1-9]\d?\.1[0-9]{2}", "LAN IP literal"),
+    # Farm lat/lon pair — both lat 34.57 and lon 84.94
+    (r"34\.57[^\d]*84\.94|84\.94[^\d]*34\.57", "farm lat/lon pair (34.57, 84.94)"),
+]
+
+# ---------------------------------------------------------------------------
+# Data types
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class HistoryHit:
+    """A single finding from a history scan."""
+
+    commit_sha: str
+    pattern_name: str
+    line_no: int  # line number in the patch file (+N context line)
+    masked_value: str  # masked version of the match
+
+
+def _mask_value(value: str) -> str:
+    """Mask a matched secret: first4***last2. Never return the raw value."""
+    if len(value) <= 6:
+        return value[:2] + "***" + value[-1:] if len(value) >= 3 else "****"
+    return value[:4] + "***" + value[-2:]
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -253,6 +296,177 @@ def _compile_patterns():
 
 
 # ---------------------------------------------------------------------------
+# History scan
+# ---------------------------------------------------------------------------
+
+
+def _run_git_log_patch(repo_root: Path) -> str:
+    """Run `git log -p --all` and return the raw diff output."""
+    result = subprocess.run(
+        ["git", "log", "-p", "--all"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=str(repo_root),
+    )
+    if result.returncode != 0:
+        print("ERROR: git log -p --all failed", file=sys.stderr)
+        sys.exit(2)
+    return result.stdout
+
+
+def _parse_patch_for_added_lines(patch_text: str) -> list[tuple[int, str]]:
+    """Parse a git diff patch and return (line_number_in_patch, added_line_text) pairs.
+
+    Only lines starting with '+' (after the diff header) are returned.
+    The line_number is the position within the patch text (1-indexed).
+    """
+    added_lines: list[tuple[int, str]] = []
+    for i, line in enumerate(patch_text.splitlines(), start=1):
+        if line.startswith("+") and not line.startswith("+++ "):
+            added_lines.append((i, line[1:]))  # strip the leading '+'
+    return added_lines
+
+
+def _scan_history(
+    repo_root: Path,
+    baseline_path: Path | None = None,
+    write_baseline: bool = False,
+) -> int:
+    """Scan git history for private data leaks.
+
+    Returns 1 if leaks are found (exit code for the CLI), 0 if clean.
+    """
+    patch_text = _run_git_log_patch(repo_root)
+    added_lines = _parse_patch_for_added_lines(patch_text)
+
+    if write_baseline:
+        # Collect commits that contain pattern hits
+        baseline_commits: set[str] = set()
+        patch_blocks = patch_text.split("\ncommit ")
+        for block in patch_blocks:
+            # After splitting on "\ncommit ", block[0] starts with "commit "
+            # but subsequent blocks start with just the SHA.
+            # Normalize: extract SHA from first word.
+            first_word = block.split()[0] if block.split() else ""
+            # Skip if first_word is not a 40-hex SHA (means it's the "commit"
+            # keyword that was part of the split, not the actual SHA — only
+            # happens if the text has a stray "commit" that isn't a header)
+            if not re.match(r"^[a-f0-9]{40}$", first_word):
+                # block[0] was "commit" itself (block 0 after split)
+                # The SHA is the second word
+                words = block.split()
+                if len(words) > 1 and re.match(r"^[a-f0-9]{40}$", words[1]):
+                    sha = words[1]
+                else:
+                    continue
+            else:
+                sha = first_word
+            # Extract added lines for this commit
+            lines = block.splitlines()
+            for line in lines:
+                if line.startswith("+") and not line.startswith("+++ "):
+                    for pat_regex, pat_label in HISTORY_PATTERNS:
+                        if re.search(pat_regex, line[1:]):
+                            baseline_commits.add(sha)
+                            break
+
+        # Write baseline file
+        if baseline_path:
+            baseline_path.parent.mkdir(parents=True, exist_ok=True)
+            header = (
+                "# History scan baseline — known-pre-existing offending commits.\n"
+                "# Generated by `--history --write-baseline`.\n"
+                "# Commits listed here are downgraded to warnings when\n"
+                "# `--baseline <file>` is passed.\n"
+                "#\n"
+                "# Each line is a commit SHA (full or short, 7+ chars).\n#\n"
+            )
+            baseline_path.write_text(header, encoding="utf-8")
+            for sha in sorted(baseline_commits):
+                baseline_path.write_text(
+                    baseline_path.read_text() + sha + "\n",
+                    encoding="utf-8",
+                )
+            print(
+                f"Wrote {len(baseline_commits)} baseline entries to {baseline_path}"
+            )
+        return 0
+
+    # Load baseline if provided
+    baseline_commits: set[str] = set()
+    if baseline_path and baseline_path.is_file():
+        baseline_commits = {
+            line.strip()
+            for line in baseline_path.read_text().splitlines()
+            if line.strip() and not line.startswith("#")
+        }
+
+    # Now parse patch text commit-by-commit and scan added lines
+    hits: list[HistoryHit] = []
+    warn_lines: list[str] = []
+    patch_blocks = patch_text.split("\ncommit ")
+    for block in patch_blocks:
+        # After splitting on "\ncommit ", block[0] starts with "commit "
+        # but subsequent blocks start with just the 40-char SHA.
+        first_word = block.split()[0] if block.split() else ""
+        if re.match(r"^[a-f0-9]{40}$", first_word):
+            sha_full = first_word
+        else:
+            # Block 0: first word is "commit", SHA is second word
+            words = block.split()
+            if len(words) > 1 and re.match(r"^[a-f0-9]{40}$", words[1]):
+                sha_full = words[1]
+            else:
+                continue
+        sha_short = sha_full[:12] if len(sha_full) >= 12 else sha_full
+        # Find the diff body (everything after the commit-header block)
+        parts = block.split("\n", 1)
+        block_body = parts[1] if len(parts) > 1 else ""
+
+        added_lines = _parse_patch_for_added_lines(block_body)
+        for line_idx, added_text in added_lines:
+            for pat_regex, pat_name in HISTORY_PATTERNS:
+                m = re.search(pat_regex, added_text)
+                if m:
+                    hit = HistoryHit(
+                        commit_sha=sha_short,
+                        pattern_name=pat_name,
+                        line_no=line_idx,
+                        masked_value=_mask_value(m.group()),
+                    )
+                    # Check if this commit is in the baseline
+                    if sha_full in baseline_commits or sha_short in baseline_commits:
+                        warn_lines.append(
+                            f"WARN: {pat_name} in {sha_short}+{line_idx} "
+                            f"(baseline: {_mask_value(m.group())})"
+                        )
+                    else:
+                        hits.append(hit)
+                    break  # one pattern hit per line is enough
+
+    # Print warnings (baseline commits)
+    if warn_lines:
+        print(f"History scan: {len(warn_lines)} known issue(s) in baseline:\n")
+        for wl in warn_lines:
+            print(wl)
+        print()
+
+    # Print errors (non-baseline commits)
+    if hits:
+        print(f"History scan: {len(hits)} private data leak(s) in git history:\n")
+        for h in hits:
+            print(
+                f"ERROR: {h.commit_sha}+{h.line_no} [{h.pattern_name}] "
+                f"{h.masked_value}"
+            )
+        return 1
+
+    print("History scan: OK — no un-baselined private data leaks found.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -267,7 +481,29 @@ def main() -> int:
         default=None,
         help="File or directory to scan (defaults to all tracked files).",
     )
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="Scan git history (all commits) instead of the working tree.",
+    )
+    parser.add_argument(
+        "--baseline",
+        type=str,
+        default=None,
+        help="Path to a baseline file with known-pre-existing commits (downgrades to warnings).",
+    )
+    parser.add_argument(
+        "--write-baseline",
+        action="store_true",
+        help="Write a baseline file from the current history scan and exit.",
+    )
     args = parser.parse_args()
+
+    # --- history mode ---
+    if args.history:
+        repo_root = _get_repo_root()
+        baseline_path = Path(args.baseline) if args.baseline else None
+        return _scan_history(repo_root, baseline_path=baseline_path, write_baseline=args.write_baseline)
 
     repo_root = _get_repo_root()
     _load_private_identifiers(repo_root)

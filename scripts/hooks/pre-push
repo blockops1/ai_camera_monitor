@@ -1,0 +1,48 @@
+#!/bin/bash
+# pre-push hook — runs the privacy scanner in history mode before allowing pushes.
+#
+# FARMSURV_HISTORY_SCAN=fail|warn|off (default: warn)
+#   fail = block the push if history scan finds issues (exit 1)
+#   warn = run history scan but only print warnings, never block
+#   off  = skip the history scan entirely
+#
+# The hook runs from the repository root.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$HOOK_DIR/.." && pwd)"
+
+# --- history-scan mode: read env, default warn ---
+SCAN_MODE="${FARMSURV_HISTORY_SCAN:-warn}"
+
+if [ "$SCAN_MODE" = "off" ]; then
+    echo "[pre-push] history scan disabled (FARMSURV_HISTORY_SCAN=off), skipping."
+    exit 0
+fi
+
+echo "[pre-push] running privacy history scan (mode=$SCAN_MODE)..."
+
+# Run the scanner
+RESULT=$(python3 "$SCRIPT_DIR/check_no_private_data.py" \
+    --history \
+    --baseline "$SCRIPT_DIR/release/history-baseline.txt" \
+    2>&1) || true
+
+EXIT_CODE=$?
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+    echo "$RESULT"
+    if [ "$SCAN_MODE" = "fail" ]; then
+        echo "[pre-push] FAIL: history scan found un-baselined issues — push blocked."
+        exit 1
+    else
+        echo "[pre-push] WARN: history scan found issues (warn mode), but allowing push."
+    fi
+else
+    echo "$RESULT"
+    echo "[pre-push] history scan OK."
+fi
+
+exit 0
