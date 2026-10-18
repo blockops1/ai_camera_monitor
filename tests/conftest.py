@@ -74,6 +74,26 @@ def sample_frames():
     ]
 
 
+# restore_environment: session-scoped env-snapshot fixture (see also mock_llama_server for per-test isolation)
+@pytest.fixture(autouse=True, scope="session")
+def restore_environment():
+    """Snapshot os.environ at session start; restore verbatim at teardown.
+
+    Session-scoped so we snapshot once and restore once — avoids per-test
+    overhead and works where monkeypatch (function-scoped) cannot.  This
+    neutralizes ALL bare ``os.environ[...]`` mutations across the suite so
+    tests remain order-independent without per-call monkeypatch wiring.
+
+    Tear-down strategy: clear then update (not update-then-clear) so any
+    env vars added during the session are removed and all original vars
+    are present after teardown.
+    """
+    original = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(original)
+
+
 @pytest.fixture(autouse=True)
 def mock_llama_server(monkeypatch):
     """Mock httpx.post to prevent any live HTTP call to the llama-server.
