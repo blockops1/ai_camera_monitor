@@ -674,6 +674,34 @@ def _stage_gate(frames, camera_id, alert_id, timestamp):
     )
 
     if gate_verdict.is_none():
+        # US-111a: try VM1 night rescue before dropping.
+        # Rescue dict -> log + return status ok with gsum;
+        # None -> byte-identical drop path (pre-change behavior).
+        from infra.night_rescue import night_rescue as _night_rescue
+
+        # Collect available bboxes from the gate verdict.
+        _bboxes: list[tuple[int, int, int, int]] = []
+        if gate_verdict.bbox_a is not None:
+            _bboxes.append(gate_verdict.bbox_a)
+        if gate_verdict.bbox_b is not None:
+            _bboxes.append(gate_verdict.bbox_b)
+
+        rescue = _night_rescue(
+            frames=frames,
+            bboxes=_bboxes,
+            camera_id=camera_id,
+            alert_id=alert_id,
+            timestamp=timestamp,
+        )
+
+        if rescue is not None:
+            log.info(
+                f"night_rescue alert_id={alert_id} camera={camera_id} "
+                f"vm1_class={rescue['classification']} "
+                f"conf={rescue['confidence']} reason={rescue['reason']}"
+            )
+            return rescue
+
         log.info(
             f"pipeline: dropped alert_id={alert_id} "
             f"camera={camera_id} classification=none "
