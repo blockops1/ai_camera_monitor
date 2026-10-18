@@ -511,6 +511,16 @@ def _expand_bbox_pct(
     cx = x + w / 2.0
     cy = y + h / 2.0
 
+    # US-108d: vertical person-crop extension (FARMSURV_CROP_EXT env-gated).
+    # When the bbox is taller than wide (h > w) and FARMSURV_CROP_EXT != 0,
+    # extend vertically by FARMSURV_CROP_EXT percent of the ORIGINAL height
+    # on BOTH sides: y' = y - h*k, h' = h*(1+2k) where k = FARMSURV_CROP_EXT/100.
+    # The center (cx, cy) stays the same — extending equally on both sides
+    # does not shift the centre.  Landscape bboxes (h <= w) are untouched.
+    _crop_ext = int(os.environ.get("FARMSURV_CROP_EXT", "0"))
+    if _crop_ext > 0 and h > w:
+        h = round(h * (1 + 2 * _crop_ext / 100.0))
+
     raw_w = round(w * (1 + 2 * pad_pct))
     raw_h = round(h * (1 + 2 * pad_pct))
 
