@@ -235,6 +235,87 @@ def apply_osd_masks(mask: np.ndarray, rects: list[dict], w: int, h: int) -> np.n
     return mask
 
 
+# ============================================================================
+# ROI exclusion zones (US-112a, 2026-10-18)
+# ============================================================================
+
+
+def _get_roi_masking_enabled() -> bool:
+    """Read FARMSURV_ROI_MASKING at call time.
+
+    1 = ON (apply ROI exclusion zones before AND in compute_cross_diff_bboxes).
+    0 = OFF (passthrough, no masking — preserves pre-change behavior).
+
+    Reading at call time (not import time) means operator changes to the
+    env var take effect on the next test run / next listener start without
+    needing a Python ``importlib.reload()``.
+
+    Returns:
+        True if ROI masking is enabled, False otherwise.
+    """
+    raw = os.environ.get("FARMSURV_ROI_MASKING", "1")
+    return raw.strip().lower() not in ("0", "off", "false", "")
+
+
+def _load_roi_zones_for_cam(cam_id: str | None) -> list[dict] | None:
+    """Load roi_exclusion_zones for a camera from motion_gate_thresholds.json.
+
+    Looks up the camera prefix in config/motion_gate_thresholds.json and
+    returns the 'roi_exclusion_zones' list if present, else None.
+
+    Args:
+        cam_id: Camera ID prefix (e.g. "OUTSIDE_FRONT_POWER").
+
+    Returns:
+        List of rect dicts {x, y, w, h} in 2560x1440 reference space, or None.
+    """
+    if not cam_id:
+        return None
+    import json as _json
+    from pathlib import Path as _Path
+
+    thresholds_path = _Path(__file__).resolve().parent.parent / "config" / "motion_gate_thresholds.json"
+    try:
+        with open(thresholds_path, "r") as f:
+            thresholds = _json.load(f)
+    except (OSError, _json.JSONDecodeError):
+        return None
+
+    camera_data = thresholds.get(cam_id)
+    if not isinstance(camera_data, dict):
+        return None
+
+    zones = camera_data.get("roi_exclusion_zones")
+    if not isinstance(zones, list):
+        return None
+
+    return zones
+
+
+def apply_roi_exclusions(mask: np.ndarray, rects: list[dict], w: int, h: int) -> np.ndarray:
+    """Zero out ROI exclusion regions in a mask, scaled to the given dimensions.
+
+    ROI rects are specified in 2560x1440 reference space. They are scaled
+    proportionally to the target (w, h) dimensions.
+
+    Args:
+        mask: Input uint8 mask (modified in-place).
+        rects: List of rect dicts with x, y, w, h in 2560x1440 reference space.
+        w: Target width.
+        h: Target height.
+
+    Returns:
+        The same mask array (modified in-place) for convenience.
+    """
+    if not rects:
+        return mask
+    scale_x = w / 2560.0
+    scale_y = h / 1440.0
+    for rect in rects:
+        _apply_osd_mask_to_rect(mask, rect, scale_x, scale_y)
+    return mask
+
+
 def _get_intersection_dilate_pct() -> float:
     """Read BBOX_INTERSECTION_DILATE_PCT at call time.
 
@@ -975,6 +1056,16 @@ def compute_cross_diff_bboxes(
             apply_osd_masks(mask_12, osd_masks, mask_12.shape[1], mask_12.shape[0])
             apply_osd_masks(mask_23, osd_masks, mask_23.shape[1], mask_23.shape[0])
             apply_osd_masks(mask_34, osd_masks, mask_34.shape[1], mask_34.shape[0])
+
+    # US-112a: zero out ROI exclusion zones from each pairwise diff BEFORE AND.
+    # Prevents motion entirely inside an exclusion zone (e.g. road glare on
+    # OFP right edge) from producing bboxes. Same pattern as OSD masking.
+    if _get_roi_masking_enabled():
+        roi_zones = _load_roi_zones_for_cam(cam_id)
+        if roi_zones is not None:
+            apply_roi_exclusions(mask_12, roi_zones, mask_12.shape[1], mask_12.shape[0])
+            apply_roi_exclusions(mask_23, roi_zones, mask_23.shape[1], mask_23.shape[0])
+            apply_roi_exclusions(mask_34, roi_zones, mask_34.shape[1], mask_34.shape[0])
 
     # US-096c: filter + dilate pipeline for each intersection pair.
     and_a = ((mask_12 > 0) & (mask_23 > 0)).astype(np.uint8) * 255
