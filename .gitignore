@@ -7,6 +7,7 @@ _ac1_verify.py
 # secrets
 .env
 *.env
+!.env.example
 !camera-creds.env.example
 !telegram-creds.env.example
 !llm-creds.env.example

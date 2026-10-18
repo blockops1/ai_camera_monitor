@@ -41,12 +41,8 @@ strip_paths:
   - "scripts/release/"
   # Operator credentials (.env and creds.env files — gitignored but if tracked, strip)
   - ".env"
-  - ".env.example"
   - "camera-creds.env"
-  - "camera-creds.env.example"
   - "telegram-creds.env"
-  - "telegram-creds.env.example"
-  - "llm-creds.env.example"
   # ML model weights (large binaries; users export via scripts/export_yolo_dynamic.py)
   - "models/yolov8n.onnx"
   - "models/*.onnx"
@@ -85,6 +81,10 @@ tests_to_fix:
 required_files:
   - LICENSE
   - README.md
+  - .env.example
+  - camera-creds.env.example
+  - telegram-creds.env.example
+  - llm-creds.env.example
 
 # License author line for the public cut. Update on operator request.
 license:

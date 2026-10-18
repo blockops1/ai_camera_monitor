@@ -116,8 +116,6 @@ A small Python service that:
 10. Runs a daily status report cron that posts an HTML report to a
     Telegram chat
 
-Pipeline shape in [`docs/PLAN.md`](docs/PLAN.md). PRDs by phase in
-[`docs/PHASE-V2-*.json`](docs/).
 
 ## What alerts look like
 
