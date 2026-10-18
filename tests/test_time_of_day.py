@@ -223,7 +223,11 @@ def test_lat_lon_override(mock_sun_sep19):
         "infra.time_of_day.Sun", return_value=mock_sun_sep19
     ) as mock_sun_cls, patch.dict(
         "os.environ",
-        {"FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN": "30"},
+        {
+            "FARMSURV_FARM_LAT": "34.0",
+            "FARMSURV_FARM_LON": "-84.0",
+            "FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN": "30",
+        },
         clear=False,
     ):
         from infra.time_of_day import get_night_window
@@ -233,8 +237,8 @@ def test_lat_lon_override(mock_sun_sep19):
     # Sun was instantiated with the env-provided lat/lon
     mock_sun_cls.assert_called_once()
     args = mock_sun_cls.call_args
-    assert args[0][0] == 34.5782  # default lat
-    assert args[0][1] == -84.9438  # default lon
+    assert args[0][0] == 34.0  # env-provided lat
+    assert args[0][1] == -84.0  # env-provided lon
 
 
 # ---------------------------------------------------------------------------
