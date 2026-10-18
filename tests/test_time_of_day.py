@@ -265,9 +265,10 @@ def test_reads_env_vars():
 
     with open(module.__file__) as fh:
         source = fh.read()
-    # Each env var name should appear in os.environ.get() calls
-    assert 'os.environ.get("FARMSURV_FARM_LAT"' in source
-    assert 'os.environ.get("FARMSURV_FARM_LON"' in source
+    # FARMSURV_FARM_LAT and FARMSURV_FARM_LON are required (via _require_env).
+    # Buffer and timezone use os.environ.get with safe defaults.
+    assert '_require_env("FARMSURV_FARM_LAT")' in source
+    assert '_require_env("FARMSURV_FARM_LON")' in source
     assert 'os.environ.get("FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN"' in source
     assert 'os.environ.get("FARMSURV_FARM_TIMEZONE"' in source
 

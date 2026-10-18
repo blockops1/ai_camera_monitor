@@ -62,20 +62,28 @@ def _require_env(name: str) -> str:
 def _require_env_lower_bool(name: str) -> bool:
     """Read an env var as a lowercase truthy boolean.
 
-    Reads ``os.environ[name]`` (via _require_env, so it fails if unset),
+    Reads ``os.environ[name]`` via _require_env (fails if unset),
     lowercases the value, and checks against '1', 'true', 'yes', 'on'.
+    An empty string is treated as False (kill switch OFF) rather than
+    raising — empty is a valid operator choice to disable a boolean knob.
 
     Args:
         name: environment variable name (e.g. ``"FARMSURV_QUIET_HOURS_ENABLED"``).
 
     Returns:
-        True if the value is truthy, False otherwise.
+        True if the value is truthy, False otherwise (including empty).
 
     Raises:
-        RuntimeError: if the variable is unset.
+        RuntimeError: if the variable is unset (None).
     """
-    value = _require_env(name).lower().strip()
-    return value in ("1", "true", "yes", "on")
+    value = os.environ.get(name)
+    if value is None:
+        raise RuntimeError(
+            f"{name} is not set in os.environ. "
+            f"Set it in your .env file (see .env.example for the minimal set). "
+            f"Example: {name}=<value>"
+        )
+    return value.lower().strip() in ("1", "true", "yes", "on")
 
 
 def _require_csv_env(name: str) -> list[str]:

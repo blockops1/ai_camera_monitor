@@ -29,7 +29,7 @@ import logging
 import os
 from datetime import datetime
 
-from infra.env_required import _require_env_lower_bool
+from infra.env_required import _require_env, _require_env_lower_bool
 from infra.quick_classifier import night_suppress_match
 from infra.time_of_day import is_night_at_edt
 
@@ -43,9 +43,8 @@ log = logging.getLogger("quiet_hours")
 # If empty, the gate matches no camera (effectively disabled).
 _QUIET_HOURS_CAMERAS_DEFAULT = ""
 
-# Default lat/lon: passed through to time_of_day when unset.
-_DEFAULT_LAT = "34.5782"
-_DEFAULT_LON = "-84.9438"
+# No hardcoded lat/lon — operator must set FARMSURV_FARM_LAT / FARMSURV_FARM_LON
+# via .env. Required by time_of_day.py's suntime calculations.
 
 
 def _parse_cameras(raw: str) -> frozenset[str]:
@@ -97,15 +96,9 @@ def in_quiet_hours(dt: datetime, camera_name: str, class_name: str | None = None
             f"camera={camera_name} class={class_name}"
         )
         return True
-    # Ensure time_of_day has lat/lon set (third os.environ.get for AC7).
-    os.environ.setdefault(
-        "FARMSURV_FARM_LAT",
-        os.environ.get("FARMSURV_FARM_LAT", _DEFAULT_LAT),
-    )
-    os.environ.setdefault(
-        "FARMSURV_FARM_LON",
-        os.environ.get("FARMSURV_FARM_LON", _DEFAULT_LON),
-    )
+    # Ensure time_of_day has lat/lon set (required, fail-loud).
+    os.environ.setdefault("FARMSURV_FARM_LAT", _require_env("FARMSURV_FARM_LAT"))
+    os.environ.setdefault("FARMSURV_FARM_LON", _require_env("FARMSURV_FARM_LON"))
 
     # AC3: kill switch -- fail-loud if operator hasn't set it.
     # _require_env_lower_bool raises RuntimeError if the var is unset.

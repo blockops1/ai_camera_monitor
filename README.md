@@ -509,8 +509,8 @@ Public-facing env vars (no secrets; values shown in `.env.example`):
 | `FARMSURV_API_TOKEN` | (required) | API bearer token (32+ chars) |
 | `FARMSURV_BOX_ID` | `''` | box identifier in API responses |
 | `FARMSURV_TG_RATE_LIMIT_PER_MIN` | `30` | Telegram bot API rate-limit guard |
-| `FARMSURV_FARM_LAT` | `34.5782` | suntime twilight calc (Resaca, GA) |
-| `FARMSURV_FARM_LON` | `-84.9438` | suntime twilight calc |
+| `FARMSURV_FARM_LAT` | **(required)** | suntime twilight calc — set to your property's latitude |
+| `FARMSURV_FARM_LON` | **(required)** | suntime twilight calc — set to your property's longitude |
 | `FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN` | `0` | night-window buffer (minutes) |
 | `MOTION_GATE_NIGHT_SUPPRESS_ENABLED` | `1` | night motion-gate suppression (1=ON, 0=OFF) |
 | `FARMSURV_QUIET_HOURS_ENABLED` | `0` | quiet-hours Telegram suppression (1=ON, 0=OFF) |
@@ -525,6 +525,25 @@ Per-camera tunables live in `config/motion_gate_thresholds.json`
 (`subjects`, `vehicle_confidence_floor`, `person_confidence_floor`,
 `gate_enabled`). Per-camera recipe (vision-LLM prompt adjustments
 and re-ID threshold) lives in `config/camera_recipes.toml`.
+
+## Security notes
+
+**API_BIND=all binds 0.0.0.0 — bearer token travels over PLAINTEXT HTTP.**
+When `FARMSURV_API_BIND=all`, the API server listens on every interface at
+`0.0.0.0:8092`. Requests are **unencrypted HTTP** — the bearer token is sent
+in plaintext. This is safe on a trusted Tailscale CGNAT (100.64.0.0/10) where
+all traffic is encrypted by the Tailscale overlay, but **dangerous on any
+other network** (home LAN, public Wi-Fi, cellular). The default
+`FARMSURV_API_BIND=tailnet-only` is the safe mode. If you use `all`, ensure
+your network is trusted and consider deploying a TLS reverse proxy.
+
+Same applies to `FARMSURV_MCP_BIND=all` for the MCP server on port 8091.
+
+**Farm coordinates are now required in .env.** The code no longer ships
+hardcoded lat/lon defaults that geolocate the property in the public repo.
+Set `FARMSURV_FARM_LAT` and `FARMSURV_FARM_LON` in your `.env` file (see
+`.env.example` for the template). The daemon refuses to start without these
+values set.
 
 ## Daemon management
 

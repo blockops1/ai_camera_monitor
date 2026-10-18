@@ -129,14 +129,17 @@ def test_camera_not_in_list_not_suppressed():
 
 
 def test_reads_env_vars():
-    """AC7: module reads 3+ os.environ.get calls."""
+    """AC7: module reads env vars via os.environ.get or _require_env (no hardcoded defaults)."""
     import infra.quiet_hours as mod
 
     with open(mod.__file__) as fh:
         source = fh.read()
 
-    count = source.count("os.environ.get")
-    assert count >= 3, f"Expected 3+ os.environ.get calls, found {count}"
+    # Count direct env reads + _require_env calls (each implies env reading)
+    direct = source.count("os.environ.get")
+    req = source.count("_require_env(")
+    total = direct + req
+    assert total >= 3, f"Expected 3+ env reads (os.environ.get + _require_env), found {direct} + {req}"
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,8 @@ from datetime import UTC, datetime, timedelta, timezone
 
 from suntime import Sun
 
+from infra.env_required import _require_env
+
 # ---------------------------------------------------------------------------
 # NightWindow -- immutable result of get_night_window()
 # ---------------------------------------------------------------------------
@@ -54,16 +56,22 @@ class NightWindow:
 # Env-var defaults
 # ---------------------------------------------------------------------------
 
-_DEFAULT_LAT = 34.5782  # Georgia, US
-_DEFAULT_LON = -84.9438
+# FARMSURV_FARM_LAT and FARMSURV_FARM_LON are REQUIRED (no default).
+# Fail-loud via _require_env so the operator cannot accidentally ship with
+# hardcoded property-geolocating coordinates.
 _DEFAULT_BUFFER_MIN = 30
 _DEFAULT_TZ = "UTC"
 
 
 def _read_env() -> tuple[float, float, int, str]:
-    """Read configuration from environment. One os.environ.get per line."""
-    lat = float(os.environ.get("FARMSURV_FARM_LAT", str(_DEFAULT_LAT)))
-    lon = float(os.environ.get("FARMSURV_FARM_LON", str(_DEFAULT_LON)))
+    """Read configuration from environment. One os.environ.get per line.
+
+    FARMSURV_FARM_LAT and FARMSURV_FARM_LON are required (no numeric default).
+    FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN and FARMSURV_FARM_TIMEZONE use safe
+    defaults (30 min buffer, UTC).
+    """
+    lat = float(_require_env("FARMSURV_FARM_LAT"))
+    lon = float(_require_env("FARMSURV_FARM_LON"))
     buffer_min = int(os.environ.get("FARMSURV_NIGHT_TWILIGHT_BUFFER_MIN", str(_DEFAULT_BUFFER_MIN)))
     tz_str = os.environ.get("FARMSURV_FARM_TIMEZONE", _DEFAULT_TZ)
     return lat, lon, buffer_min, tz_str
