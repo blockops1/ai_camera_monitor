@@ -50,19 +50,52 @@ CALLS INTO:
 RELATED:
     - infra/motion_detector.py: provides the bbox / crop this classifies
     - infra/vision_analyzer.py: receives the hint when gate passes
-    - models/yolov8n.onnx: the pretrained model (COCO, ~12MB)
+    - models/yolov8n.onnx: the pretrained model (COCO, ~12MB,
+      sha256=b2bc52f40e8e...1589cbd, official ultralytics v8.4.0).
+      Download: curl -sSL -o models/yolov8n.onnx
+      https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8n.onnx
+      Verify: shasum -a 256 models/yolov8n.onnx
     - PLAN.md §11.41.7 + §11.47 — night-mode gate history
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import tempfile
+import urllib
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
+
+# SHA256 pins for the YOLOv8n ONNX model.
+# 'official'  = ultralytics v8.4.0 release (the trusted source).
+# 'operator-export' = operator's own dynamic-axes export (US-019a).
+# The download path verifies against 'official'; any other hash is rejected
+# unless the operator adds it via FARMSURV_YOLO_ALLOW_EXTRA_SHA.
+_YOLO_SHA256_PINS: dict[str, str] = {
+    "official": "b2bc52f40e8e1c532427d5bde3575a5d5b571b739fab2c6df443733ed1589cbd",
+    "operator-export": "b4ee8cd940e37cb9287b29845fb7dad18b021f578884c45c02758891f19e0b3f",
+}
+# Allowed extra SHA256 hex digest (64 chars), read from env. Empty default.
+# Lets the operator add an ad-hoc hash without code edit (e.g. fine-tuned
+# model produced by a later export). Value is validated: must be exactly 64
+# lowercase hex chars.
+_EXTRA_SHA256_RAW = os.environ.get("FARMSURV_YOLO_ALLOW_EXTRA_SHA", "").strip()
+if _EXTRA_SHA256_RAW:
+    if len(_EXTRA_SHA256_RAW) == 64 and all(
+        c in "0123456789abcdef" for c in _EXTRA_SHA256_RAW
+    ):
+        _YOLO_SHA256_PINS["extra"] = _EXTRA_SHA256_RAW
+    else:
+        raise RuntimeError(
+            f"FARMSURV_YOLO_ALLOW_EXTRA_SHA must be 64 lowercase hex chars; "
+            f"got '{_EXTRA_SHA256_RAW}' ({len(_EXTRA_SHA256_RAW)} chars)"
+        )
 
 # UTC alias kept for compat shim — PLW0127 suppressed (explicit design, not accident)
 # ruff: noqa: PLW0127
@@ -227,12 +260,113 @@ MOTION_GATE_PRIORITY_FLOOR = float(os.environ.get(
 # (after NMS), suppress. Shadows and flares typically score 0.10-0.30.
 DEFAULT_CONFIDENCE_THRESHOLD = 0.40
 
+def _download_model(url: str, dest: Path) -> None:
+    """Download the YOLOv8n ONNX model to *dest*, verifying SHA256 on write.
+
+    The downloaded bytes are streamed through hashlib.sha256; the final digest
+    is compared against ``_YOLO_SHA256_PINS['official']``.  A mismatch raises
+    ``RuntimeError``, the corrupt file is deleted, and the download path
+    refuses to load.
+
+    Args:
+        url: https URL to download.
+        dest: file path to write.
+
+    Raises:
+        RuntimeError: on hash mismatch or network error.
+    """
+    log.info(f"quick_classifier: downloading model from {url}")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    # Stream the download so we hash on-the-fly without loading the full file
+    # into memory (model is ~12 MB, but streaming is safer for future growth).
+    expected = _YOLO_SHA256_PINS["official"]
+    h = hashlib.sha256()
+    chunk_size = 1024 * 1024  # 1 MiB
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "farm-surveillance-v2"})
+        with urllib.request.urlopen(req, timeout=300) as response, tempfile.NamedTemporaryFile(
+            dir=dest.parent, delete=False, suffix=".tmp"
+        ) as tmp:
+            while True:
+                chunk = response.read(chunk_size)
+                if not chunk:
+                    break
+                h.update(chunk)
+                tmp.write(chunk)
+            tmp_path = Path(tmp.name)
+    except Exception as exc:
+        # Clean up partial download on any failure
+        tmp_path = Path(tmp.name) if "tmp" in dir() else None
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise RuntimeError(f"quick_classifier: download failed from {url}: {exc}") from exc
+
+    digest = h.hexdigest()
+    if digest != expected:
+        # Hash mismatch — delete the corrupt file and refuse to load.
+        if tmp_path and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        raise RuntimeError(
+            f"quick_classifier: SHA256 hash mismatch for downloaded model "
+            f"(expected {expected}, got {digest}). The model file has been "
+            f"deleted. Verify the download source. "
+            f"Official: https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8n.onnx"
+        )
+
+    # Move temp file into final location (atomic on same filesystem).
+    tmp_path.replace(dest)
+    log.info(f"quick_classifier: model downloaded and verified (sha256={digest[:16]}...)")
+
+
+def verify_model_sha256(model_path: Path) -> str:
+    """Compute SHA256 of an existing model file and verify against pins.
+
+    Checks the file against all keys in ``_YOLO_SHA256_PINS``.  Returns the
+    pin name ('official', 'operator-export', or 'extra') on match, or raises
+    ``RuntimeError`` with the actual digest if nothing matches.
+
+    Args:
+        model_path: path to the ONNX model file.
+
+    Returns:
+        Pin name that matched.
+
+    Raises:
+        RuntimeError: if the file's hash does not match any pin.
+    """
+    h = hashlib.sha256()
+    with model_path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    digest = h.hexdigest()
+
+    # Find which pin (if any) matches.
+    for name, pin in _YOLO_SHA256_PINS.items():
+        if digest == pin:
+            log.info(f"quick_classifier: model matches pin '{name}'")
+            return name
+
+    _shown = {k: v[:16] + "..." for k, v in _YOLO_SHA256_PINS.items()}
+    raise RuntimeError(
+        f"quick_classifier: SHA256 hash mismatch for model at {model_path} "
+        f"(got {digest}, expected one of {_shown})"
+    )
+
+
 # YOLOv8n dynamic-axes ONNX accepts any (h, w) where h%32==0 AND w%32==0.
 # The caller pads crops via pad_to_multiple_of_32() before inference.
 
-# Default model path (relative to project root). Download with:
+# Default model path (relative to project root). Official ultralytics v8.4.0:
 #   curl -sSL -o models/yolov8n.onnx \
-#     https://github.com/yoobright/yolo-onnx/raw/master/yolov8n.onnx
+#     https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8n.onnx
+# SHA256: b2bc52f40e8e1c532427d5bde3575a5d5b571b739fab2c6df443733ed1589cbd
+# Verify after download:
+#   shasum -a 256 models/yolov8n.onnx
 DEFAULT_MODEL_PATH = "models/yolov8n.onnx"
 
 
@@ -301,7 +435,7 @@ class QuickClassifier:
             log.fatal(
                 "quick_classifier: model file missing at %s. "
                 "Download with: curl -sSL -o %s "
-                "https://github.com/yoobright/yolo-onnx/raw/master/yolov8n.onnx",
+                "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8n.onnx",
                 model_path,
                 model_path,
             )

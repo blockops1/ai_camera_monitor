@@ -585,6 +585,34 @@ Pre-push before opening a PR:
 make check-privacy   # 4 scanners + cred-guard
 ```
 
+## Model weights
+
+The YOLOv8n ONNX model (COCO, ~12 MB) is downloaded from the official
+ultralytics v8.4.0 release:
+
+```bash
+curl -sSL -o models/yolov8n.onnx \
+  https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8n.onnx
+```
+
+Expected SHA256:
+`b2bc52f40e8e1c532427d5bde3575a5d5b571b739fab2c6df443733ed1589cbd`
+
+Verify after download:
+
+```bash
+shasum -a 256 models/yolov8n.onnx
+```
+
+If the hash does not match, the file is corrupt or tampered with. Do not
+proceed.
+
+**Operator-fine-tuned exports** (e.g. `scripts/export_yolo_dynamic.py`)
+produce a different binary with a different SHA256. When loading one of
+those, set the env var `FARMSURV_YOLO_ALLOW_EXTRA_SHA=<your-sha256-hex>`
+so the classifier accepts it. Without that env var the classifier refuses
+to load a model whose hash does not match the official pin.
+
 ## License
 
 This project is licensed under the MIT License — see [`LICENSE`](LICENSE).
