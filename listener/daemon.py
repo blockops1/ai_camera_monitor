@@ -240,6 +240,7 @@ def _log_creds_status(creds_labels: dict[str, str], total_loaded: int) -> None:
 _ENV_TOTAL_LOADED = _load_home_env()
 
 from infra import (
+    night_corroborate,
     paths as infra_paths,
     pipeline_cooldown as infra_pipeline_cooldown,
     tg_upload_cleanup,
@@ -610,6 +611,33 @@ def _run_pipeline(alert: dict) -> dict:
     mode = vm1_result.get("class", "vehicle")
     vm2_result = stage_detail_class_vm2(mode, a_p, b_p)
 
+    # US-114a: night vehicle corroboration gate — suppress flare-suspect
+    # vehicles at night (low confidence + few/no VM2 features).
+    if not night_corroborate.night_corroborate(
+        vm1_result, vm2_result, alert_ts, alert_id, camera_id,
+    ):
+        log.info(
+            f"pipeline: flare_suspect alert_id={alert_id} "
+            f"camera={camera_id} classification={classification} "
+            f"vm1_conf={vm1_result.get('confidence')} "
+            f"vm2_feats={night_corroborate._count_vm2_features(vm2_result)}"
+        )
+        _write_event(
+            alert_id, camera_id, frames, gate_result, vm1_result,
+            started_at, dropped="flare_suspect",
+            vm2_result=vm2_result,
+        )
+        _record_alert_run()
+        return {
+            "id": alert_id,
+            "status": "dropped",
+            "reason": "flare_suspect",
+            "classification": classification,
+            "gate": gate_result["gsum"],
+            "vm1_result": vm1_result,
+            "vm2_result": vm2_result,
+        }
+
     # Stage 11: build TG#2.
     tg2 = stage_build_tg2(mode, vm2_result, a_p, b_p, camera_label, alert)
 
@@ -700,6 +728,38 @@ def _stage_gate(frames, camera_id, alert_id, timestamp):
                 f"vm1_class={rescue['classification']} "
                 f"conf={rescue['confidence']} reason={rescue['reason']}"
             )
+            # US-114a: night vehicle corroboration on rescue path.
+            # Rescue dict has no vm2_result — only definite confidence passes.
+            if not night_corroborate.night_corroborate(
+                {
+                    "class": rescue["classification"],
+                    "confidence": rescue["confidence"],
+                    "subclass": None,
+                    "count": None,
+                    "face_visible": None,
+                    "notes": None,
+                },
+                None,
+                timestamp,
+                alert_id,
+                camera_id,
+            ):
+                log.info(
+                    f"night_corroborate: flare_suspect alert_id={alert_id} "
+                    f"camera={camera_id} vm1_conf={rescue['confidence']} feats=0"
+                )
+                return {
+                    "status": "dropped",
+                    "reason": "flare_suspect",
+                    "classification": "none",
+                    "gate_verdict": gate_verdict,
+                    "gsum": {
+                        "classification": gate_verdict.classification,
+                        "class_label": gate_verdict.class_label,
+                        "confidence": gate_verdict.confidence,
+                        "reason": "flare_suspect",
+                    },
+                }
             return rescue
 
         log.info(
