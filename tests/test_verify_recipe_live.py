@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import tempfile
+from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
@@ -137,7 +137,7 @@ class TestVerifyRecipeLiveMain:
     @patch("scripts.verify_recipe_live.ReolinkClient")
     @patch("scripts.verify_recipe_live.apply_recipe")
     @patch("scripts.verify_recipe_live.verify_recipe")
-    def test_all_match(self, mock_verify, mock_apply, mock_client_cls):
+    def test_all_match(self, mock_verify, mock_apply, mock_client_cls, tmp_path: Path):
         """All 6 cameras match -> exit 0, evidence match=True."""
         all_cams = ("front", "back", "outside_front_garage",
                      "outside_front_solar", "outside_front_power", "outside_back_solar")
@@ -151,15 +151,14 @@ class TestVerifyRecipeLiveMain:
         mock_verify.side_effect = _verify_side(cam_match, cam_diffs)
         mock_apply.side_effect = _verify_side(cam_match, cam_diffs)
 
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
-            tmp_path = tmp.name
+        tmp_path = tmp_path / "evidence.json"
 
-        with (patch("scripts.verify_recipe_live.EVIDENCE_PATH", tmp_path),
+        with (patch("scripts.verify_recipe_live.EVIDENCE_PATH", str(tmp_path)),
               patch("scripts.verify_recipe_live._PROJECT_ROOT") as root_mock):
             root_mock.__truediv__.return_value.is_file.return_value = False
             import scripts.verify_recipe_live as m
             m.RECIPE_PATH = "/fake/recipe.toml"
-            m.EVIDENCE_PATH = tmp_path
+            m.EVIDENCE_PATH = str(tmp_path)
             code = m.main()
 
         assert code == 0
@@ -180,7 +179,7 @@ class TestVerifyRecipeLiveMain:
     @patch("scripts.verify_recipe_live.ReolinkClient")
     @patch("scripts.verify_recipe_live.apply_recipe")
     @patch("scripts.verify_recipe_live.verify_recipe")
-    def test_one_mismatch(self, mock_verify, mock_apply, mock_client_cls):
+    def test_one_mismatch(self, mock_verify, mock_apply, mock_client_cls, tmp_path: Path):
         """One camera mismatch -> exit 1, summary has mismatched=1."""
         all_cams = ("front", "back", "outside_front_garage",
                      "outside_front_solar", "outside_front_power", "outside_back_solar")
@@ -196,15 +195,14 @@ class TestVerifyRecipeLiveMain:
         mock_verify.side_effect = _verify_side(cam_match, cam_diffs)
         mock_apply.side_effect = _verify_side(cam_match, cam_diffs)
 
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
-            tmp_path = tmp.name
+        tmp_path = tmp_path / "evidence.json"
 
-        with (patch("scripts.verify_recipe_live.EVIDENCE_PATH", tmp_path),
+        with (patch("scripts.verify_recipe_live.EVIDENCE_PATH", str(tmp_path)),
               patch("scripts.verify_recipe_live._PROJECT_ROOT") as root_mock):
             root_mock.__truediv__.return_value.is_file.return_value = False
             import scripts.verify_recipe_live as m
             m.RECIPE_PATH = "/fake/recipe.toml"
-            m.EVIDENCE_PATH = tmp_path
+            m.EVIDENCE_PATH = str(tmp_path)
             code = m.main()
 
         assert code == 1
@@ -216,7 +214,7 @@ class TestVerifyRecipeLiveMain:
     @patch("scripts.verify_recipe_live.ReolinkClient")
     @patch("scripts.verify_recipe_live.apply_recipe")
     @patch("scripts.verify_recipe_live.verify_recipe")
-    def test_evidence_has_before_after(self, mock_verify, mock_apply, mock_client_cls):
+    def test_evidence_has_before_after(self, mock_verify, mock_apply, mock_client_cls, tmp_path: Path):
         """Evidence JSON contains before and after for each camera."""
         cam_stays = {"front": 2}
         client = MagicMock()
@@ -225,15 +223,14 @@ class TestVerifyRecipeLiveMain:
         mock_verify.side_effect = _verify_side({"front": True}, {"front": []})
         mock_apply.side_effect = _verify_side({"front": True}, {"front": []})
 
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
-            tmp_path = tmp.name
+        tmp_path = tmp_path / "evidence.json"
 
-        with (patch("scripts.verify_recipe_live.EVIDENCE_PATH", tmp_path),
+        with (patch("scripts.verify_recipe_live.EVIDENCE_PATH", str(tmp_path)),
               patch("scripts.verify_recipe_live._PROJECT_ROOT") as root_mock):
             root_mock.__truediv__.return_value.is_file.return_value = False
             import scripts.verify_recipe_live as m
             m.RECIPE_PATH = "/fake/recipe.toml"
-            m.EVIDENCE_PATH = tmp_path
+            m.EVIDENCE_PATH = str(tmp_path)
             m.main()
 
         with open(tmp_path) as fh:
@@ -250,7 +247,7 @@ class TestVerifyRecipeLiveMain:
     @patch("scripts.verify_recipe_live.ReolinkClient")
     @patch("scripts.verify_recipe_live.apply_recipe")
     @patch("scripts.verify_recipe_live.verify_recipe")
-    def test_evidence_has_camera_metadata(self, mock_verify, mock_apply, mock_client_cls):
+    def test_evidence_has_camera_metadata(self, mock_verify, mock_apply, mock_client_cls, tmp_path: Path):
         """Evidence includes ip and model per camera."""
         cam_stays = {"front": 2}
         client = MagicMock()
@@ -259,15 +256,14 @@ class TestVerifyRecipeLiveMain:
         mock_verify.side_effect = _verify_side({"front": True}, {"front": []})
         mock_apply.side_effect = _verify_side({"front": True}, {"front": []})
 
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
-            tmp_path = tmp.name
+        tmp_path = tmp_path / "evidence.json"
 
-        with (patch("scripts.verify_recipe_live.EVIDENCE_PATH", tmp_path),
+        with (patch("scripts.verify_recipe_live.EVIDENCE_PATH", str(tmp_path)),
               patch("scripts.verify_recipe_live._PROJECT_ROOT") as root_mock):
             root_mock.__truediv__.return_value.is_file.return_value = False
             import scripts.verify_recipe_live as m
             m.RECIPE_PATH = "/fake/recipe.toml"
-            m.EVIDENCE_PATH = tmp_path
+            m.EVIDENCE_PATH = str(tmp_path)
             m.main()
 
         with open(tmp_path) as fh:

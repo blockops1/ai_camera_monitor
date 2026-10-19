@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import tempfile
 import textwrap
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from infra.reolink import (
@@ -22,16 +22,15 @@ from infra.reolink import (
 class TestParseRecipeToml:
     """TOML parser returns {camera: {subcmd: {field: value}}}."""
 
-    def test_parse_person_front(self):
+    def test_parse_person_front(self, tmp_path: Path):
         toml_text = textwrap.dedent("""
             [detect_ai.person.front]
             stay_time = 2
             sensitivity = 50
         """)
-        with tempfile.NamedTemporaryFile(suffix=".toml", mode="w", delete=False) as f:
-            f.write(toml_text)
-            f.flush()
-            result = _parse_recipe_toml(f.name)
+        recipe = tmp_path / "recipe.toml"
+        recipe.write_text(toml_text)
+        result = _parse_recipe_toml(str(recipe))
 
         assert result == {
             "front": {
@@ -39,7 +38,7 @@ class TestParseRecipeToml:
             }
         }
 
-    def test_parse_multi_camera(self):
+    def test_parse_multi_camera(self, tmp_path: Path):
         toml_text = textwrap.dedent("""
             [detect_ai.person.front]
             stay_time = 2
@@ -48,15 +47,14 @@ class TestParseRecipeToml:
             stay_time = 3
             sensitivity = 60
         """)
-        with tempfile.NamedTemporaryFile(suffix=".toml", mode="w", delete=False) as f:
-            f.write(toml_text)
-            f.flush()
-            result = _parse_recipe_toml(f.name)
+        recipe = tmp_path / "recipe.toml"
+        recipe.write_text(toml_text)
+        result = _parse_recipe_toml(str(recipe))
 
         assert result["front"]["detect_ai.person"] == {"stay_time": 2, "sensitivity": 50}
         assert result["back"]["detect_ai.person"] == {"stay_time": 3, "sensitivity": 60}
 
-    def test_parse_all_subcommands(self):
+    def test_parse_all_subcommands(self, tmp_path: Path):
         toml_text = textwrap.dedent("""
             [detect_ai.person.front]
             stay_time = 2
@@ -68,10 +66,9 @@ class TestParseRecipeToml:
             stay_time = 2
             sensitivity = 30
         """)
-        with tempfile.NamedTemporaryFile(suffix=".toml", mode="w", delete=False) as f:
-            f.write(toml_text)
-            f.flush()
-            result = _parse_recipe_toml(f.name)
+        recipe = tmp_path / "recipe.toml"
+        recipe.write_text(toml_text)
+        result = _parse_recipe_toml(str(recipe))
 
         assert "front" in result
         assert "detect_ai.person" in result["front"]
@@ -105,7 +102,7 @@ class TestApplyRecipe:
     """apply_recipe calls detect_ai_apply with correct args and returns results."""
 
     @patch("infra.reolink.ReolinkClient")
-    def test_apply_single_camera_match(self, mock_client_cls):
+    def test_apply_single_camera_match(self, mock_client_cls, tmp_path: Path):
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_client.detect_ai_apply.return_value = None
@@ -115,11 +112,10 @@ class TestApplyRecipe:
             stay_time = 2
             sensitivity = 50
         """)
-        with tempfile.NamedTemporaryFile(suffix=".toml", mode="w", delete=False) as f:
-            f.write(toml_text)
-            recipe_path = f.name
+        recipe = tmp_path / "recipe.toml"
+        recipe.write_text(toml_text)
 
-        results = apply_recipe(recipe_path)
+        results = apply_recipe(str(recipe))
 
         assert len(results) == 1
         assert results[0].camera == "front"
@@ -133,7 +129,7 @@ class TestApplyRecipe:
         assert call_kw.kwargs.get("sensitivity") == 50
 
     @patch("infra.reolink.ReolinkClient")
-    def test_apply_all_cameras(self, mock_client_cls):
+    def test_apply_all_cameras(self, mock_client_cls, tmp_path: Path):
         """All 6 cameras in recipe -> 6 results."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
@@ -159,15 +155,14 @@ class TestApplyRecipe:
             stay_time = 2
             sensitivity = 50
         """)
-        with tempfile.NamedTemporaryFile(suffix=".toml", mode="w", delete=False) as f:
-            f.write(toml_text)
-            recipe_path = f.name
+        recipe = tmp_path / "recipe.toml"
+        recipe.write_text(toml_text)
 
-        results = apply_recipe(recipe_path)
+        results = apply_recipe(str(recipe))
         assert len(results) == 6
 
     @patch("infra.reolink.ReolinkClient")
-    def test_apply_camera_failure(self, mock_client_cls):
+    def test_apply_camera_failure(self, mock_client_cls, tmp_path: Path):
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
         mock_client.detect_ai_apply.side_effect = ReolinkCommandError(
@@ -179,16 +174,15 @@ class TestApplyRecipe:
             stay_time = 2
             sensitivity = 50
         """)
-        with tempfile.NamedTemporaryFile(suffix=".toml", mode="w", delete=False) as f:
-            f.write(toml_text)
-            recipe_path = f.name
+        recipe = tmp_path / "recipe.toml"
+        recipe.write_text(toml_text)
 
-        results = apply_recipe(recipe_path)
+        results = apply_recipe(str(recipe))
         assert results[0].ok is False
         assert "apply failed" in results[0].diffs[0]
 
     @patch("infra.reolink.ReolinkClient")
-    def test_apply_filter_camera(self, mock_client_cls):
+    def test_apply_filter_camera(self, mock_client_cls, tmp_path: Path):
         """camera='front' skips back."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
@@ -202,16 +196,15 @@ class TestApplyRecipe:
             stay_time = 2
             sensitivity = 50
         """)
-        with tempfile.NamedTemporaryFile(suffix=".toml", mode="w", delete=False) as f:
-            f.write(toml_text)
-            recipe_path = f.name
+        recipe = tmp_path / "recipe.toml"
+        recipe.write_text(toml_text)
 
-        results = apply_recipe(recipe_path, camera="front")
+        results = apply_recipe(str(recipe), camera="front")
         assert len(results) == 1
         assert results[0].camera == "front"
 
     @patch("infra.reolink.ReolinkClient")
-    def test_apply_multiple_subcommands(self, mock_client_cls):
+    def test_apply_multiple_subcommands(self, mock_client_cls, tmp_path: Path):
         """Multiple subcommands per camera -> multiple detect_ai_apply calls."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
@@ -228,11 +221,10 @@ class TestApplyRecipe:
             stay_time = 2
             sensitivity = 30
         """)
-        with tempfile.NamedTemporaryFile(suffix=".toml", mode="w", delete=False) as f:
-            f.write(toml_text)
-            recipe_path = f.name
+        recipe = tmp_path / "recipe.toml"
+        recipe.write_text(toml_text)
 
-        results = apply_recipe(recipe_path)
+        results = apply_recipe(str(recipe))
         assert len(results) == 1
         assert mock_client.detect_ai_apply.call_count == 3
 
@@ -246,7 +238,7 @@ class TestVerifyRecipe:
     """verify_recipe reads live state, diffs against recipe, returns match."""
 
     @patch("infra.reolink.ReolinkClient")
-    def test_verify_match(self, mock_client_cls):
+    def test_verify_match(self, mock_client_cls, tmp_path: Path):
         """Live state matches recipe -> match=True, no diffs."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
@@ -263,11 +255,10 @@ class TestVerifyRecipe:
             stay_time = 2
             sensitivity = 50
         """)
-        with tempfile.NamedTemporaryFile(suffix=".toml", mode="w", delete=False) as f:
-            f.write(toml_text)
-            recipe_path = f.name
+        recipe = tmp_path / "recipe.toml"
+        recipe.write_text(toml_text)
 
-        results = verify_recipe(recipe_path)
+        results = verify_recipe(str(recipe))
 
         assert len(results) == 1
         assert results[0].camera == "front"
@@ -276,7 +267,7 @@ class TestVerifyRecipe:
         assert results[0].diffs == []
 
     @patch("infra.reolink.ReolinkClient")
-    def test_verify_mismatch(self, mock_client_cls):
+    def test_verify_mismatch(self, mock_client_cls, tmp_path: Path):
         """Live sensitivity=70, recipe=50 -> diff reported."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
@@ -291,18 +282,17 @@ class TestVerifyRecipe:
             stay_time = 2
             sensitivity = 50
         """)
-        with tempfile.NamedTemporaryFile(suffix=".toml", mode="w", delete=False) as f:
-            f.write(toml_text)
-            recipe_path = f.name
+        recipe = tmp_path / "recipe.toml"
+        recipe.write_text(toml_text)
 
-        results = verify_recipe(recipe_path)
+        results = verify_recipe(str(recipe))
 
         assert results[0].match is False
         assert results[0].ok is False
         assert any("sensitivity" in d for d in results[0].diffs)
 
     @patch("infra.reolink.ReolinkClient")
-    def test_verify_stay_time_mismatch(self, mock_client_cls):
+    def test_verify_stay_time_mismatch(self, mock_client_cls, tmp_path: Path):
         """Stay_time differs from recipe."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
@@ -317,16 +307,15 @@ class TestVerifyRecipe:
             stay_time = 2
             sensitivity = 50
         """)
-        with tempfile.NamedTemporaryFile(suffix=".toml", mode="w", delete=False) as f:
-            f.write(toml_text)
-            recipe_path = f.name
+        recipe = tmp_path / "recipe.toml"
+        recipe.write_text(toml_text)
 
-        results = verify_recipe(recipe_path)
+        results = verify_recipe(str(recipe))
         assert results[0].match is False
         assert any("stay_time" in d for d in results[0].diffs)
 
     @patch("infra.reolink.ReolinkClient")
-    def test_verify_filter_camera(self, mock_client_cls):
+    def test_verify_filter_camera(self, mock_client_cls, tmp_path: Path):
         """camera='back' only verifies back."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
@@ -344,16 +333,15 @@ class TestVerifyRecipe:
             stay_time = 2
             sensitivity = 50
         """)
-        with tempfile.NamedTemporaryFile(suffix=".toml", mode="w", delete=False) as f:
-            f.write(toml_text)
-            recipe_path = f.name
+        recipe = tmp_path / "recipe.toml"
+        recipe.write_text(toml_text)
 
-        results = verify_recipe(recipe_path, camera="back")
+        results = verify_recipe(str(recipe), camera="back")
         assert len(results) == 1
         assert results[0].camera == "back"
 
     @patch("infra.reolink.ReolinkClient")
-    def test_verify_all_cameras(self, mock_client_cls):
+    def test_verify_all_cameras(self, mock_client_cls, tmp_path: Path):
         """6 cameras in recipe -> 6 results."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
@@ -385,16 +373,15 @@ class TestVerifyRecipe:
             stay_time = 2
             sensitivity = 50
         """)
-        with tempfile.NamedTemporaryFile(suffix=".toml", mode="w", delete=False) as f:
-            f.write(toml_text)
-            recipe_path = f.name
+        recipe = tmp_path / "recipe.toml"
+        recipe.write_text(toml_text)
 
-        results = verify_recipe(recipe_path)
+        results = verify_recipe(str(recipe))
         assert len(results) == 6
         assert all(r.match for r in results)
 
     @patch("infra.reolink.ReolinkClient")
-    def test_verify_round_trip(self, mock_client_cls):
+    def test_verify_round_trip(self, mock_client_cls, tmp_path: Path):
         """apply then verify: live state changes to match recipe, verify returns match=True."""
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
@@ -424,14 +411,13 @@ class TestVerifyRecipe:
             stay_time = 2
             sensitivity = 30
         """)
-        with tempfile.NamedTemporaryFile(suffix=".toml", mode="w", delete=False) as f:
-            f.write(toml_text)
-            recipe_path = f.name
+        recipe = tmp_path / "recipe.toml"
+        recipe.write_text(toml_text)
 
         # Apply (succeeds)
-        apply_results = apply_recipe(recipe_path)
+        apply_results = apply_recipe(str(recipe))
         assert all(r.ok for r in apply_results)
 
         # Verify (mock returns matching state per-type)
-        verify_results = verify_recipe(recipe_path)
+        verify_results = verify_recipe(str(recipe))
         assert all(r.match for r in verify_results)
