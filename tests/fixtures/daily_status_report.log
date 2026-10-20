@@ -1,137 +1,152 @@
-2026-10-16 22:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=100000 reconnects=0
-2026-10-16 22:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=100000 reconnects=0
-2026-10-16 22:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=100000 reconnects=0
-2026-10-16 22:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=100000 reconnects=0
-2026-10-16 22:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=100000 reconnects=0
-2026-10-16 22:12:26 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=True secs_since_last_frame=0.6 frames=70000 reconnects=0
-2026-10-16 22:12:26 INFO listener: bootstrap starting
-2026-10-16 22:12:26 INFO listener: bootstrap ready
-2026-10-16 22:42:26 ERROR listener/daemon.py: pipeline.run failed
-2026-10-16 22:42:26 ERROR listener/daemon.py:     raise TimeoutError()
-2026-10-16 22:42:26 ERROR listener/daemon.py: TimeoutError
-2026-10-16 22:42:26 ERROR listener/daemon.py:     raise TimeoutError()
-2026-10-16 22:47:26 ERROR infra.vision_analyzer: vision call failed
-2026-10-16 22:47:26 ERROR infra.vision_analyzer: VisionAnalyzerError: llama-server connection failed: timed out
-2026-10-16 22:52:26 ERROR listener/telegram: send failed
-2026-10-16 22:52:26 ERROR listener/telegram: telegram.exceptions.TelemetryError: connection refused
-2026-10-16 22:57:26 ERROR infra.mcp_server: tool call failed
-2026-10-16 22:57:26 ERROR infra.mcp_server:     raise KeyError('missing_field')
-2026-10-16 22:57:26 ERROR infra.mcp_server: KeyError: missing_field
-2026-10-16 23:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=100500 reconnects=0
-2026-10-16 23:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=100500 reconnects=0
-2026-10-16 23:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=100500 reconnects=0
-2026-10-16 23:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=100500 reconnects=0
-2026-10-16 23:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=100500 reconnects=0
-2026-10-16 23:12:26 INFO httpx: HTTP Request: POST https://api.telegram.org/bot[REDACTED-BOT-TOKEN]/sendPhoto "HTTP/1.1 200 OK"
-2026-10-16 23:42:26 INFO httpx: HTTP Request: POST https://api.telegram.org/bot[REDACTED-BOT-TOKEN]/sendPhoto "HTTP/1.1 200 OK"
-2026-10-17 00:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=101000 reconnects=0
-2026-10-17 00:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=101000 reconnects=0
-2026-10-17 00:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=101000 reconnects=0
-2026-10-17 00:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=101000 reconnects=0
-2026-10-17 00:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=101000 reconnects=0
-2026-10-17 00:42:26 INFO listener: bootstrap restarting after crash
-2026-10-17 00:42:26 INFO listener: bootstrap ready
-2026-10-17 01:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=101500 reconnects=0
-2026-10-17 01:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=101500 reconnects=0
-2026-10-17 01:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=101500 reconnects=0
-2026-10-17 01:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=101500 reconnects=0
-2026-10-17 01:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=101500 reconnects=0
-2026-10-17 02:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=102000 reconnects=0
-2026-10-17 02:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=102000 reconnects=0
-2026-10-17 02:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=102000 reconnects=0
-2026-10-17 02:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=102000 reconnects=0
-2026-10-17 02:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=102000 reconnects=0
-2026-10-17 03:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=102500 reconnects=0
-2026-10-17 03:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=102500 reconnects=0
-2026-10-17 03:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=102500 reconnects=0
-2026-10-17 03:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=102500 reconnects=0
-2026-10-17 03:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=102500 reconnects=0
-2026-10-17 03:42:26 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=True secs_since_last_frame=0.6 frames=70500 reconnects=1
-2026-10-17 04:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=103000 reconnects=0
-2026-10-17 04:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=103000 reconnects=0
-2026-10-17 04:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=103000 reconnects=0
-2026-10-17 04:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=103000 reconnects=0
-2026-10-17 04:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=103000 reconnects=0
-2026-10-17 05:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=103500 reconnects=0
-2026-10-17 05:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=103500 reconnects=0
-2026-10-17 05:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=103500 reconnects=0
-2026-10-17 05:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=103500 reconnects=0
-2026-10-17 05:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=103500 reconnects=0
-2026-10-17 06:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=104000 reconnects=0
-2026-10-17 06:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=104000 reconnects=0
-2026-10-17 06:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=104000 reconnects=0
-2026-10-17 06:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=104000 reconnects=0
-2026-10-17 06:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=104000 reconnects=0
-2026-10-17 07:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=104500 reconnects=0
-2026-10-17 07:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=104500 reconnects=0
-2026-10-17 07:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=104500 reconnects=0
-2026-10-17 07:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=104500 reconnects=0
-2026-10-17 07:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=104500 reconnects=0
-2026-10-17 08:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=105000 reconnects=0
-2026-10-17 08:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=105000 reconnects=0
-2026-10-17 08:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=105000 reconnects=0
-2026-10-17 08:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=105000 reconnects=0
-2026-10-17 08:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=105000 reconnects=0
-2026-10-17 09:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=105500 reconnects=0
-2026-10-17 09:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=105500 reconnects=0
-2026-10-17 09:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=105500 reconnects=0
-2026-10-17 09:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=105500 reconnects=0
-2026-10-17 09:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=105500 reconnects=0
-2026-10-17 09:12:26 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=False secs_since_last_frame=0.6 frames=71000 reconnects=1
-2026-10-17 10:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=106000 reconnects=0
-2026-10-17 10:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=106000 reconnects=0
-2026-10-17 10:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=106000 reconnects=0
-2026-10-17 10:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=106000 reconnects=0
-2026-10-17 10:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=106000 reconnects=0
-2026-10-17 11:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=106500 reconnects=0
-2026-10-17 11:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=106500 reconnects=0
-2026-10-17 11:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=106500 reconnects=0
-2026-10-17 11:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=106500 reconnects=0
-2026-10-17 11:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=106500 reconnects=0
-2026-10-17 12:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=107000 reconnects=0
-2026-10-17 12:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=107000 reconnects=0
-2026-10-17 12:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=107000 reconnects=0
-2026-10-17 12:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=107000 reconnects=0
-2026-10-17 12:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=107000 reconnects=0
-2026-10-17 13:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=107500 reconnects=0
-2026-10-17 13:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=107500 reconnects=0
-2026-10-17 13:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=107500 reconnects=0
-2026-10-17 13:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=107500 reconnects=0
-2026-10-17 13:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=107500 reconnects=0
-2026-10-17 14:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=108000 reconnects=0
-2026-10-17 14:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=108000 reconnects=0
-2026-10-17 14:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=108000 reconnects=0
-2026-10-17 14:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=108000 reconnects=0
-2026-10-17 14:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=108000 reconnects=0
-2026-10-17 14:42:26 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=True secs_since_last_frame=0.6 frames=71500 reconnects=2
-2026-10-17 15:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=108500 reconnects=0
-2026-10-17 15:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=108500 reconnects=0
-2026-10-17 15:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=108500 reconnects=0
-2026-10-17 15:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=108500 reconnects=0
-2026-10-17 15:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=108500 reconnects=0
-2026-10-17 16:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=109000 reconnects=0
-2026-10-17 16:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=109000 reconnects=0
-2026-10-17 16:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=109000 reconnects=0
-2026-10-17 16:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=109000 reconnects=0
-2026-10-17 16:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=109000 reconnects=0
-2026-10-17 17:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=109500 reconnects=0
-2026-10-17 17:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=109500 reconnects=0
-2026-10-17 17:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=109500 reconnects=0
-2026-10-17 17:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=109500 reconnects=0
-2026-10-17 17:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=109500 reconnects=0
-2026-10-17 18:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=110000 reconnects=0
-2026-10-17 18:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=110000 reconnects=0
-2026-10-17 18:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=110000 reconnects=0
-2026-10-17 18:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=110000 reconnects=0
-2026-10-17 18:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=110000 reconnects=0
-2026-10-17 19:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=110500 reconnects=0
-2026-10-17 19:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=110500 reconnects=0
-2026-10-17 19:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=110500 reconnects=0
-2026-10-17 19:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=110500 reconnects=0
-2026-10-17 19:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=110500 reconnects=0
-2026-10-17 20:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=111000 reconnects=0
-2026-10-17 20:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=111000 reconnects=0
-2026-10-17 20:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=111000 reconnects=0
-2026-10-17 20:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=111000 reconnects=0
-2026-10-17 20:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=111000 reconnects=0
-2026-10-17 20:12:26 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=True secs_since_last_frame=0.6 frames=72000 reconnects=2
+2026-10-17 22:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=100000 reconnects=0
+2026-10-17 22:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=100000 reconnects=0
+2026-10-17 22:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=100000 reconnects=0
+2026-10-17 22:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=100000 reconnects=0
+2026-10-17 22:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=100000 reconnects=0
+2026-10-17 22:12:26 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=True secs_since_last_frame=0.6 frames=70000 reconnects=0
+2026-10-17 22:12:26 INFO listener: bootstrap starting
+2026-10-17 22:12:26 INFO listener: bootstrap ready
+2026-10-17 22:42:26 ERROR listener/daemon.py: pipeline.run failed
+2026-10-17 22:42:26 ERROR listener/daemon.py:     raise TimeoutError()
+2026-10-17 22:42:26 ERROR listener/daemon.py: TimeoutError
+2026-10-17 22:42:26 ERROR listener/daemon.py:     raise TimeoutError()
+2026-10-17 22:47:26 ERROR infra.vision_analyzer: vision call failed
+2026-10-17 22:47:26 ERROR infra.vision_analyzer: VisionAnalyzerError: llama-server connection failed: timed out
+2026-10-17 22:52:26 ERROR listener/telegram: send failed
+2026-10-17 22:52:26 ERROR listener/telegram: telegram.exceptions.TelemetryError: connection refused
+2026-10-17 22:57:26 ERROR infra.mcp_server: tool call failed
+2026-10-17 22:57:26 ERROR infra.mcp_server:     raise KeyError('missing_field')
+2026-10-17 22:57:26 ERROR infra.mcp_server: KeyError: missing_field
+2026-10-17 23:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=100500 reconnects=0
+2026-10-17 23:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=100500 reconnects=0
+2026-10-17 23:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=100500 reconnects=0
+2026-10-17 23:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=100500 reconnects=0
+2026-10-17 23:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=100500 reconnects=0
+2026-10-17 23:12:26 INFO httpx: HTTP Request: POST https://api.telegram.org/bot[REDACTED-BOT-TOKEN]/sendPhoto "HTTP/1.1 200 OK"
+2026-10-18 00:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=101000 reconnects=0
+2026-10-18 00:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=101000 reconnects=0
+2026-10-18 00:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=101000 reconnects=0
+2026-10-18 00:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=101000 reconnects=0
+2026-10-18 00:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=101000 reconnects=0
+2026-10-18 00:42:26 INFO listener: bootstrap restarting after crash
+2026-10-18 00:42:26 INFO listener: bootstrap ready
+2026-10-18 01:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=101500 reconnects=0
+2026-10-18 01:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=101500 reconnects=0
+2026-10-18 01:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=101500 reconnects=0
+2026-10-18 01:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=101500 reconnects=0
+2026-10-18 01:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=101500 reconnects=0
+2026-10-18 02:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=102000 reconnects=0
+2026-10-18 02:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=102000 reconnects=0
+2026-10-18 02:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=102000 reconnects=0
+2026-10-18 02:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=102000 reconnects=0
+2026-10-18 02:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=102000 reconnects=0
+2026-10-18 03:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=102500 reconnects=0
+2026-10-18 03:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=102500 reconnects=0
+2026-10-18 03:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=102500 reconnects=0
+2026-10-18 03:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=102500 reconnects=0
+2026-10-18 03:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=102500 reconnects=0
+2026-10-18 03:42:26 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=True secs_since_last_frame=0.6 frames=70500 reconnects=1
+2026-10-18 04:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=103000 reconnects=0
+2026-10-18 04:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=103000 reconnects=0
+2026-10-18 04:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=103000 reconnects=0
+2026-10-18 04:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=103000 reconnects=0
+2026-10-18 04:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=103000 reconnects=0
+2026-10-18 05:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=103500 reconnects=0
+2026-10-18 05:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=103500 reconnects=0
+2026-10-18 05:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=103500 reconnects=0
+2026-10-18 05:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=103500 reconnects=0
+2026-10-18 05:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=103500 reconnects=0
+2026-10-18 06:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=104000 reconnects=0
+2026-10-18 06:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=104000 reconnects=0
+2026-10-18 06:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=104000 reconnects=0
+2026-10-18 06:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=104000 reconnects=0
+2026-10-18 06:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=104000 reconnects=0
+2026-10-18 07:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=104500 reconnects=0
+2026-10-18 07:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=104500 reconnects=0
+2026-10-18 07:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=104500 reconnects=0
+2026-10-18 07:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=104500 reconnects=0
+2026-10-18 07:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=104500 reconnects=0
+2026-10-18 08:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=105000 reconnects=0
+2026-10-18 08:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=105000 reconnects=0
+2026-10-18 08:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=105000 reconnects=0
+2026-10-18 08:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=105000 reconnects=0
+2026-10-18 08:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=105000 reconnects=0
+2026-10-18 09:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=105500 reconnects=0
+2026-10-18 09:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=105500 reconnects=0
+2026-10-18 09:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=105500 reconnects=0
+2026-10-18 09:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=105500 reconnects=0
+2026-10-18 09:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=105500 reconnects=0
+2026-10-18 09:12:26 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=False secs_since_last_frame=0.6 frames=71000 reconnects=1
+2026-10-18 10:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=106000 reconnects=0
+2026-10-18 10:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=106000 reconnects=0
+2026-10-18 10:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=106000 reconnects=0
+2026-10-18 10:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=106000 reconnects=0
+2026-10-18 10:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=106000 reconnects=0
+2026-10-18 11:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=106500 reconnects=0
+2026-10-18 11:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=106500 reconnects=0
+2026-10-18 11:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=106500 reconnects=0
+2026-10-18 11:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=106500 reconnects=0
+2026-10-18 11:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=106500 reconnects=0
+2026-10-18 12:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=107000 reconnects=0
+2026-10-18 12:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=107000 reconnects=0
+2026-10-18 12:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=107000 reconnects=0
+2026-10-18 12:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=107000 reconnects=0
+2026-10-18 12:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=107000 reconnects=0
+2026-10-18 13:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=107500 reconnects=0
+2026-10-18 13:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=107500 reconnects=0
+2026-10-18 13:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=107500 reconnects=0
+2026-10-18 13:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=107500 reconnects=0
+2026-10-18 13:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=107500 reconnects=0
+2026-10-18 14:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=108000 reconnects=0
+2026-10-18 14:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=108000 reconnects=0
+2026-10-18 14:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=108000 reconnects=0
+2026-10-18 14:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=108000 reconnects=0
+2026-10-18 14:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=108000 reconnects=0
+2026-10-18 14:42:26 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=True secs_since_last_frame=0.6 frames=71500 reconnects=2
+2026-10-18 15:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=108500 reconnects=0
+2026-10-18 15:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=108500 reconnects=0
+2026-10-18 15:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=108500 reconnects=0
+2026-10-18 15:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=108500 reconnects=0
+2026-10-18 15:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=108500 reconnects=0
+2026-10-18 16:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=109000 reconnects=0
+2026-10-18 16:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=109000 reconnects=0
+2026-10-18 16:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=109000 reconnects=0
+2026-10-18 16:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=109000 reconnects=0
+2026-10-18 16:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=109000 reconnects=0
+2026-10-18 17:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=109500 reconnects=0
+2026-10-18 17:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=109500 reconnects=0
+2026-10-18 17:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=109500 reconnects=0
+2026-10-18 17:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=109500 reconnects=0
+2026-10-18 17:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=109500 reconnects=0
+2026-10-18 18:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=110000 reconnects=0
+2026-10-18 18:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=110000 reconnects=0
+2026-10-18 18:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=110000 reconnects=0
+2026-10-18 18:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=110000 reconnects=0
+2026-10-18 18:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=110000 reconnects=0
+2026-10-18 19:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=110500 reconnects=0
+2026-10-18 19:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=110500 reconnects=0
+2026-10-18 19:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=110500 reconnects=0
+2026-10-18 19:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=110500 reconnects=0
+2026-10-18 19:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=110500 reconnects=0
+2026-10-18 20:12:26 INFO camera_health: id=FRONT healthy=True secs_since_last_frame=0.5 frames=111000 reconnects=0
+2026-10-18 20:12:26 INFO camera_health: id=BACK healthy=True secs_since_last_frame=0.5 frames=111000 reconnects=0
+2026-10-18 20:12:26 INFO camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.5 frames=111000 reconnects=0
+2026-10-18 20:12:26 INFO camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.5 frames=111000 reconnects=0
+2026-10-18 20:12:26 INFO camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.5 frames=111000 reconnects=0
+2026-10-18 20:12:26 INFO camera_health: id=OUTSIDE_FRONT_POWER healthy=True secs_since_last_frame=0.6 frames=72000 reconnects=2
+2026-10-18 20:12:26 TRACE this line is NOT a heartbeat marker and should be dropped
+2026-10-18 20:12:26 ERROR listener/daemon.py: TimeoutError: request timed out
+2026-10-18 20:12:26 ERROR infra.vision_analyzer: VisionAnalyzerError: model unavailable
+2026-10-18 20:12:26 ERROR infra.mcp_server: KeyError: missing_field
+2026-10-18 20:12:26 INFO httpx: HTTP Request: POST https://api.telegram.org/bot[REDACTED-BOT-TOKEN]/sendPhoto "HTTP/1.1 200 OK"
+camera_health: id=FRONT healthy=True secs_since_last_frame=0.3 frames=112000 reconnects=0
+camera_health: id=BACK healthy=True secs_since_last_frame=0.3 frames=112000 reconnects=0
+camera_health: id=OUTSIDE_FRONT_GARAGE healthy=True secs_since_last_frame=0.3 frames=112000 reconnects=0
+camera_health: id=OUTSIDE_FRONT_SOLAR healthy=True secs_since_last_frame=0.3 frames=112000 reconnects=0
+camera_health: id=OUTSIDE_BACK_SOLAR healthy=True secs_since_last_frame=0.3 frames=112000 reconnects=0
+listener_health: uptime=24h+5m pid=7669 port=8090 env_total=118 plist_keepalive=True mcp_enabled=True alerts_last_10m=43
+telegram_health: configured=True bot_username=@jill_agent2_bot last_send_age_s=120 errors_last_hour=0
+vision_health: up=True model=qwen3-vl-8b base_url=http://localhost:8080 response_ms=4.2 last_call_age_s=30
+api_health: port=8092 bound=True uptime_seconds=86400 token_len=43 last_healthz=2026-10-17T09:22:27Z
+mcp_health: port=8091 bound=True uptime_seconds=86400 token_len=43 tools_count=18
+cleanup_health: alive=True last_tick_age_s=60 free_gb=145.79 cap_gb=20 bytes_reclaimed_last_run=22855316963

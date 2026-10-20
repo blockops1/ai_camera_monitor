@@ -212,31 +212,63 @@ _ALIAS_TO_HEALTH_ID: dict[str, str] = {
 }
 
 
-def _cut_lines(lines: list[str], hours: int = 24) -> list[str]:
-    """Return lines whose timestamp is within the last *hours* hours."""
-    cutoff = dt.datetime.now() - dt.timedelta(hours=hours)
+# Heartbeat marker prefixes whose lines may appear WITHOUT a timestamp.
+# These are written as single-line log.info blocks by the health reporter.
+_HEARTBEAT_MARKERS: tuple[str, ...] = (
+    "camera_health:",
+    "listener_health:",
+    "telegram_health:",
+    "vision_health:",
+    "api_health:",
+    "mcp_health:",
+    "cleanup_health:",
+    "alerts_last_10m:",
+)
+
+
+def _cut_lines(
+    lines: list[str], hours: int = 24, *, now: dt.datetime | None = None
+) -> list[str]:
+    """Return lines whose timestamp is within the last *hours* hours.
+
+    Untimestamped lines that match a known heartbeat marker prefix are kept
+    (the health reporter writes them as single-line log.info blocks).  All
+    other untimestamped lines (traceback continuations etc.) are dropped.
+
+    Args:
+        lines: Full log file lines (from tail).
+        hours: Window size in hours (default 24).
+        now: Override the current time for deterministic testing.
+    """
+    cutoff = (now or dt.datetime.now()) - dt.timedelta(hours=hours)
     out: list[str] = []
     for line in lines:
         m = re.match(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
-        if not m:
-            continue
-        try:
-            ts = dt.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            continue
-        if ts >= cutoff:
-            out.append(line)
+        if m:
+            try:
+                ts = dt.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue
+            if ts >= cutoff:
+                out.append(line)
+        else:
+            # Keep untimestamped lines only if they start with a known
+            # heartbeat marker prefix.
+            if any(line.startswith(mark) for mark in _HEARTBEAT_MARKERS):
+                out.append(line)
     return out
 
 
-def get_per_cam_24h(path: Path = DAEMON_LOG, hours: int = 24) -> dict[str, dict[str, Any]]:
+def get_per_cam_24h(
+    path: Path = DAEMON_LOG, hours: int = 24, now: dt.datetime | None = None
+) -> dict[str, dict[str, Any]]:
     """Parse camera_health lines for the last *hours* hours.
 
     Returns:
         {alias: {uptime_pct: float, reconnects: int, frames_processed: int}}
         uptime_pct is 0.0-100.0 based on healthy=True fraction.
     """
-    lines = _cut_lines(_read_log_tail(path), hours)
+    lines = _cut_lines(_read_log_tail(path), hours, now=now)
     # Per-health-id tracking.
     healthy: dict[str, int] = {}
     total: dict[str, int] = {}
@@ -278,13 +310,15 @@ def get_per_cam_24h(path: Path = DAEMON_LOG, hours: int = 24) -> dict[str, dict[
     return result
 
 
-def get_vision_24h(path: Path = DAEMON_LOG) -> dict[str, int]:
+def get_vision_24h(
+    path: Path = DAEMON_LOG, now: dt.datetime | None = None
+) -> dict[str, int]:
     """Count successful and failed vision_analyzer calls in the last 24h.
 
     Returns:
         {"ok": int, "timeout": int}
     """
-    lines = _cut_lines(_read_log_tail(path))
+    lines = _cut_lines(_read_log_tail(path), now=now)
     ok = 0
     timeout = 0
     for line in lines:
@@ -306,13 +340,15 @@ def get_vision_24h(path: Path = DAEMON_LOG) -> dict[str, int]:
     return {"ok": ok, "timeout": timeout}
 
 
-def get_telegram_24h(path: Path = DAEMON_LOG) -> dict[str, int]:
+def get_telegram_24h(
+    path: Path = DAEMON_LOG, now: dt.datetime | None = None
+) -> dict[str, int]:
     """Count telegram send successes and errors in the last 24h.
 
     Returns:
         {"success": int, "error": int}
     """
-    lines = _cut_lines(_read_log_tail(path))
+    lines = _cut_lines(_read_log_tail(path), now=now)
     success = 0
     error = 0
     for line in lines:
@@ -323,13 +359,15 @@ def get_telegram_24h(path: Path = DAEMON_LOG) -> dict[str, int]:
     return {"success": success, "error": error}
 
 
-def get_error_breakdown_24h(path: Path = DAEMON_LOG) -> dict[str, int]:
+def get_error_breakdown_24h(
+    path: Path = DAEMON_LOG, now: dt.datetime | None = None
+) -> dict[str, int]:
     """Categorize tracebacks by exception class in the last 24h.
 
     Returns:
         {ExceptionClassName: count}
     """
-    lines = _cut_lines(_read_log_tail(path))
+    lines = _cut_lines(_read_log_tail(path), now=now)
     counts: dict[str, int] = {}
     for line in lines:
         # Match lines like "ClassName: message" or "raise ClassName"
@@ -345,13 +383,15 @@ def get_error_breakdown_24h(path: Path = DAEMON_LOG) -> dict[str, int]:
     return counts
 
 
-def get_listener_restart_count_24h(path: Path = DAEMON_LOG) -> int:
+def get_listener_restart_count_24h(
+    path: Path = DAEMON_LOG, now: dt.datetime | None = None
+) -> int:
     """Count listener bootstrap/restart events in the last 24h.
 
     Returns count of lines matching 'listener: bootstrap' or 'bootstrap'
     markers in daemon.log.
     """
-    lines = _cut_lines(_read_log_tail(path))
+    lines = _cut_lines(_read_log_tail(path), now=now)
     count = 0
     for line in lines:
         if "bootstrap" in line.lower():

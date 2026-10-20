@@ -46,6 +46,41 @@ _av_stub.container = MagicMock()
 _av_stub.container.InputContainer = MagicMock
 _sys.modules.setdefault("av", _av_stub)
 
+# Patch datetime.UTC for Python < 3.11 compatibility.
+# infra/api_server.py uses datetime.UTC at module level which crashes on 3.9.
+# We add UTC to the datetime module namespace so `datetime.UTC` resolves.
+import sys  # noqa: E402
+import datetime  # noqa: E402
+
+_dt_mod = sys.modules["datetime"]
+if not hasattr(_dt_mod, "UTC"):
+    _dt_mod.UTC = datetime.timezone.utc  # type: ignore[attr-defined]
+
+# Stub suntime — time_of_day.py imports it but it's not in the test venv.
+# conftest.py runs before test collection so this patches before infra/time_of_day imports.
+import types as _types  # noqa: E402
+_suntime = _types.ModuleType("suntime")
+_suntime.Sun = MagicMock()
+sys.modules["suntime"] = _suntime
+
+# Stub infra.reolink — it uses Python 3.10+ union syntax (dict[...] | list[...])
+# which crashes on Python 3.9 at module import. Tests for daily_status_report
+# don't exercise reolink, so a stub is sufficient.
+# We must also remove 'infra' from sys.modules if already loaded, because
+# infra.__init__ imports reolink at module level.
+_infra = sys.modules.pop("infra", None)
+_infra_reolink = _types.ModuleType("infra.reolink")
+for name in [
+    "AudioConfig", "CapabilitiesResult", "DeviceInfo", "DeviceListEntry",
+    "EncodeConfig", "EventEntry", "ImageConfig", "LightConfig", "OsdConfig",
+    "PingResult", "PrivacyMask", "PTZAutotrack", "PTZGuard", "PTZPatrol",
+    "PTZPreset", "RecipeResult", "RecordSchedule", "ReolinkAuthError",
+    "ReolinkClient", "ReolinkCommandError", "ReolinkTimeoutError",
+    "UserEntry", "VodEntry", "apply_recipe", "verify_recipe",
+]:
+    setattr(_infra_reolink, name, MagicMock())
+sys.modules["infra.reolink"] = _infra_reolink
+
 # Directory for test data assets.
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 

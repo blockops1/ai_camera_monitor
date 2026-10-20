@@ -9,12 +9,15 @@ All tests mock _run / subprocess at the boundary — no real network calls.
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# infra/__init__ import fix lives in conftest.py (runs before test collection).
 
 # Test fixture IP for FRONT cam mocks. Override with FARM_TEST_FRONT_IP env var.
 # Default is RFC 5737 reserved range -- safe for any network.
@@ -192,7 +195,7 @@ class TestCamCssClass:
             "generated_at": "2026-10-12T08:00:00",
             "listener": {"pid": 75924, "uptime_s": 46800, "ports": {8090: True, 8091: True, 8092: True}, "all_ports_up": True},
             "cams": [
-                {"alias": "FRONT", "ip": _TEST_FRONT_IP, "label": "Front Door Outside", "model": "RLC-833A",
+                {"alias": "FRONT", "ip": _TEST_FRONT_IP, "label": "Front Door Inside", "model": "RLC-833A",
                  "rtsp_conns": 0, "cpu_pct": 32, "encode_main": "3840x2160@2fps H.265", "reachable": True},
             ],
             "webhooks_24h": {"FRONT": 5, "BACK": 2, "OFG": 1, "OFP": 0, "OFS": 0, "OBS": 0, "other": 1},
@@ -234,31 +237,36 @@ _FIXTURE_LOG = os.path.join(
 # -----------------------------------------------------------------------
 # 24h history parsing tests.
 # -----------------------------------------------------------------------
+# Shared time anchor for 24h parsing tests — fixture data spans 2026-10-17 22:12
+# to 2026-10-18 20:12, so a 24h window anchored here captures everything.
+_TEST_NOW = dt.datetime(2026, 10, 18, 21, 0, 0)
+
+
 class TestPerCam24h:
     def test_per_cam_24h_returns_six_cams(self):
         """Fixture log produces data for all 6 aliases."""
         from infra.daily_status_report import get_per_cam_24h
 
-        result = get_per_cam_24h(path=Path(_FIXTURE_LOG))
+        result = get_per_cam_24h(path=Path(_FIXTURE_LOG), now=_TEST_NOW)
 
         assert len(result) == 6
         for alias in ["FRONT", "BACK", "OFG", "OFP", "OFS", "OBS"]:
             assert alias in result
 
     def test_per_cam_24h_uptime_calculation(self):
-        """FRONT has 4 healthy=True out of 4 -> 100%. OFP has 3/4 -> 75%."""
+        """FRONT has 24 healthy=True out of 24 -> 100%. OFP has 4/5 -> 80%."""
         from infra.daily_status_report import get_per_cam_24h
 
-        result = get_per_cam_24h(path=Path(_FIXTURE_LOG))
+        result = get_per_cam_24h(path=Path(_FIXTURE_LOG), now=_TEST_NOW)
 
         assert result["FRONT"]["uptime_pct"] == 100.0
         assert result["OFP"]["uptime_pct"] == 80.0
 
     def test_per_cam_24h_reconnects_count(self):
-        """OFP has 1 reconnect (reconnects went 0->1->0)."""
+        """OFP has >= 1 reconnect (cumulative delta)."""
         from infra.daily_status_report import get_per_cam_24h
 
-        result = get_per_cam_24h(path=Path(_FIXTURE_LOG))
+        result = get_per_cam_24h(path=Path(_FIXTURE_LOG), now=_TEST_NOW)
 
         assert result["OFP"]["reconnects"] >= 1
         # Other cams have 0 reconnects
@@ -271,7 +279,7 @@ class TestVision24h:
         """Fixture log has 0 vision_analyzer 200 OK + 0 timeouts."""
         from infra.daily_status_report import get_vision_24h
 
-        result = get_vision_24h(path=Path(_FIXTURE_LOG))
+        result = get_vision_24h(path=Path(_FIXTURE_LOG), now=_TEST_NOW)
 
         assert isinstance(result, dict)
         assert "ok" in result
@@ -283,7 +291,7 @@ class TestTelegram24h:
         """Fixture log has 2 telegram 200 OK + 2 telegram ERROR lines."""
         from infra.daily_status_report import get_telegram_24h
 
-        result = get_telegram_24h(path=Path(_FIXTURE_LOG))
+        result = get_telegram_24h(path=Path(_FIXTURE_LOG), now=_TEST_NOW)
 
         assert result["success"] == 2
         assert result["error"] == 2
@@ -294,7 +302,7 @@ class TestErrorBreakdown24h:
         """Fixture log has TimeoutError, VisionAnalyzerError, KeyError."""
         from infra.daily_status_report import get_error_breakdown_24h
 
-        result = get_error_breakdown_24h(path=Path(_FIXTURE_LOG))
+        result = get_error_breakdown_24h(path=Path(_FIXTURE_LOG), now=_TEST_NOW)
 
         assert "TimeoutError" in result
         assert result["TimeoutError"] >= 2
@@ -308,7 +316,7 @@ class TestListenerRestartCount24h:
         """Fixture log has 4 lines containing 'bootstrap' (2 restarts x 2 lines each)."""
         from infra.daily_status_report import get_listener_restart_count_24h
 
-        count = get_listener_restart_count_24h(path=Path(_FIXTURE_LOG))
+        count = get_listener_restart_count_24h(path=Path(_FIXTURE_LOG), now=_TEST_NOW)
 
         assert count == 4
 
@@ -408,3 +416,66 @@ class TestHtmlSectionOrder:
         assert 'port-ok">:8090' in html
         # Port 8092 is down -> should have port-bad
         assert 'port-bad">:8092' in html
+
+
+# -----------------------------------------------------------------------
+# Untimestamped heartbeat markers (US-115b fix).
+# -----------------------------------------------------------------------
+class TestUntimestampedHeartbeatMarkers:
+    def test_cut_lines_keeps_untimestamped_marker_lines(self):
+        """_cut_lines retains untimestamped lines matching heartbeat markers."""
+        from infra.daily_status_report import _cut_lines, _HEARTBEAT_MARKERS
+
+        lines = [
+            "2026-10-18 20:12:26 INFO some regular line",
+            "camera_health: id=FRONT healthy=True secs_since_last_frame=0.3 frames=112000 reconnects=0",
+            "listener_health: uptime=24h+5m pid=7669 port=8090",
+            "telegram_health: configured=True bot_username=@jill_agent2_bot",
+            "vision_health: up=True model=qwen3-vl-8b",
+            "api_health: port=8092 bound=True",
+            "mcp_health: port=8091 bound=True",
+            "cleanup_health: alive=True",
+            "alerts_last_10m: count=43",
+            "TRACE traceback continuation: should be DROPPED",
+            "  File '/path/to/module.py', line 42: indented continuation",
+        ]
+
+        result = _cut_lines(lines, now=_TEST_NOW)
+
+        # All heartbeat markers kept
+        assert any("camera_health:" in l for l in result)
+        assert any("listener_health:" in l for l in result)
+        assert any("telegram_health:" in l for l in result)
+        assert any("vision_health:" in l for l in result)
+        assert any("api_health:" in l for l in result)
+        assert any("mcp_health:" in l for l in result)
+        assert any("cleanup_health:" in l for l in result)
+        assert any("alerts_last_10m:" in l for l in result)
+
+        # Non-marker untimestamped lines dropped
+        assert not any("TRACE traceback" in l for l in result)
+        assert not any("indented continuation" in l for l in result)
+
+        # Timestamped line within window kept
+        assert any("some regular line" in l for l in result)
+
+    def test_mixed_fixture_returns_nonzero_heartbeat_counts(self):
+        """Fixture with mixed timestamped + untimestamped markers returns > 0."""
+        from infra.daily_status_report import get_per_cam_24h, get_vision_24h, get_telegram_24h
+
+        per_cam = get_per_cam_24h(path=Path(_FIXTURE_LOG), now=_TEST_NOW)
+        # At least 4 of 6 aliases should have data (cameras with untimestamped
+        # entries at the end of the fixture)
+        cams_with_data = sum(
+            1 for a in ["FRONT", "BACK", "OFG", "OFP", "OFS", "OBS"]
+            if per_cam[a]["frames_processed"] > 0
+        )
+        assert cams_with_data >= 4, f"Expected >= 4 cams with data, got {cams_with_data}"
+
+        vision = get_vision_24h(path=Path(_FIXTURE_LOG), now=_TEST_NOW)
+        assert isinstance(vision["ok"], int)
+        assert isinstance(vision["timeout"], int)
+
+        telegram = get_telegram_24h(path=Path(_FIXTURE_LOG), now=_TEST_NOW)
+        assert telegram["success"] > 0
+        assert telegram["error"] > 0
