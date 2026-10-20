@@ -112,6 +112,6 @@ data/us-*snapshot*.json
 # Local render-test PNGs (Chrome headless scratch)
 docs/architecture/_*.png
 
-# Operator-only symlink for auto-injecting /Users/jill/AGENTS.md
+# Operator-only symlink for auto-injecting the operator-level AGENTS.md
 # (per-machine; the canonical rules file is above the project root)
 /AGENTS.override.md

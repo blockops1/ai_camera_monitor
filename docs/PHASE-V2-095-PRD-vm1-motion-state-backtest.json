@@ -75,7 +75,7 @@
     }
   ],
   "verification_recipe": [
-    "After US-095a: `uv run python -c 'import dotenv; dotenv.load_dotenv(\"infra/.env\"); import infra.backtest_vm1_motion as m; print(\"OK:\", m.run_backtest, m.BACKTEST_PROMPT, m.BACKTEST_SCHEMA, m.build_backtest_prompt if hasattr(m, \"build_backtest_prompt\") else m.PROMPT_TEXT)'` from /Users/jill/farm-surveillance-v2",
+    "After US-095a: `uv run python -c 'import dotenv; dotenv.load_dotenv(\"infra/.env\"); import infra.backtest_vm1_motion as m; print(\"OK:\", m.run_backtest, m.BACKTEST_PROMPT, m.BACKTEST_SCHEMA, m.build_backtest_prompt if hasattr(m, \"build_backtest_prompt\") else m.PROMPT_TEXT)'` from <INSTALL_DIR>",
     "After US-095a: verify `infra/backtest_vm1_prompt.py::build_backtest_prompt` and `infra/backtest_vm1_motion.py::BACKTEST_SCHEMA` exist by running: `uv run python -c 'import dotenv; dotenv.load_dotenv(\"~/.env\"); import infra.backtest_vm1_prompt; print(infra.backtest_vm1_prompt.build_backtest_prompt())'`",
     "After US-095b: `cat data/backtest/manifest.json | jq '. | length'` returns >=5; `ls data/backtest/*/composite_with_vm1_bboxes.png | wc -l` matches manifest count",
     "Operator reviews each PNG manually: does VM1's cyan bbox land on the moving subject (trees) or on the static parked object?"

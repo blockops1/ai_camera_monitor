@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<! TEMPLATE: replace every <INSTALL_DIR> with your absolute checkout path before
+     loading, e.g.:
+       sed "s|<INSTALL_DIR>|$HOME/farm-surveillance-v2|g" com.farm.surveillance.v2.plist > ~/Library/LaunchAgents/com.farm.surveillance.v2.plist
+       plutil -lint ~/Library/LaunchAgents/com.farm.surveillance.v2.plist
+       launchctl load ~/Library/LaunchAgents/com.farm.surveillance.v2.plist
+     (launchd does not expand ~ or env vars in plists — sed is required) --!>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -6,7 +12,7 @@
 	<string>com.farm.surveillance.v2</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Users/jill/farm-surveillance-v2/.venv/bin/python3.11</string>
+		<string><INSTALL_DIR>/.venv/bin/python3.11</string>
 		<string>-m</string>
 		<string>listener.daemon</string>
 	</array>
@@ -15,10 +21,10 @@
 	<key>SoftResourceLimits</key>
 	<integer>256</integer>
 	<key>StandardErrorPath</key>
-	<string>/Users/jill/farm-surveillance-v2/logs/daemon.log</string>
+	<string><INSTALL_DIR>/logs/daemon.log</string>
 	<key>StandardOutPath</key>
-	<string>/Users/jill/farm-surveillance-v2/logs/daemon.log</string>
+	<string><INSTALL_DIR>/logs/daemon.log</string>
 	<key>WorkingDirectory</key>
-	<string>/Users/jill/farm-surveillance-v2</string>
+	<string><INSTALL_DIR></string>
 </dict>
 </plist>

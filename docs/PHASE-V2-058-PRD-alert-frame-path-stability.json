@@ -42,7 +42,7 @@
         "AC5: .venv/bin/python3.11 -m pytest tests/ -q --no-header 2>&1 | tail -3 | grep -qE 'passed' AND no test imports `full_frame_path`.",
         "AC6: git grep -nE 'frame_paths\\[1\\]' -- ':!**/*.pyc' returns 0 matches.",
         "AC7: git grep -nE 'full_frame_path' -- ':!**/*.pyc' returns 0 matches (or only in dispatchers where it falls back to composite_path, with a comment explaining why).",
-        "AC8: cd /Users/jill/farm-surveillance-v2 && git merge-base --is-ancestor $(git rev-parse HEAD) main && echo OK || echo MISSING."
+        "AC8: cd <INSTALL_DIR> && git merge-base --is-ancestor $(git rev-parse HEAD) main && echo OK || echo MISSING."
       ]
     },
     {
@@ -56,7 +56,7 @@
       "acceptance": [
         "AC1: .venv/bin/python3.11 -m pytest tests/test_alert_frame_stability.py -q --no-header 2>&1 | tail -3 | grep -qE '[0-9]+ passed' AND all passed.",
         "AC2: The test's sha256 snapshots are taken AFTER motion_gate completes (i.e. simulates the original bug), and the alert's frame_001..004 mtimes are unchanged between webhook arrival and TG#1 dispatch.",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && git merge-base --is-ancestor $(git rev-parse HEAD) main && echo OK || echo MISSING."
+        "AC3: cd <INSTALL_DIR> && git merge-base --is-ancestor $(git rev-parse HEAD) main && echo OK || echo MISSING."
       ]
     }
   ],

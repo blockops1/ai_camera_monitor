@@ -15,9 +15,9 @@
   },
   "shipping_definition": "(a) Pipeline Stage 12 routes animal mode to animal_matcher (was: fell through silently). (b) infra/animal_embedder.py loads MegaDescriptor-L-384 via timm (module-level singleton, loaded ONCE), computes 768-dim embedding for any 384x384+ PIL/np.ndarray input. (c) data/known/animals/known_animals.json + data/known/animals/embeddings.npz store per-animal metadata + per-image 768-dim vectors + per-animal Tier-1 signature (species, size, color_patterns [set], distinctive_features [set]). (d) scripts/enroll_animal.py CLI: --name --id --species --breed --color-patterns --distinctive-features --images N jpegs saves entry + signature + averages embeddings. (e) animal_matcher.match_animal() ALWAYS runs MegaDescriptor cosine on every animal alert. Tier 1 feature scoring is advisory ranking among cosine-acceptable candidates. Returns matched candidate dict with cosine_score + tier1_score, or matched:False when no candidate has cosine >= 0.85. (f) US-044 match-alert pipeline reads animal matches correctly (depends on US-044c/d). (g) docs/animal-matching-design.md documents the tier-2-primary flow with worked example for Finnegan. (h) pytest green. (i) All six stories committed on main with US-045 in the message. Working tree clean.",
   "scope_exclusions": [
-    "Do NOT touch /Users/jill/farm-surveillance-refactor/. Frozen archive (read-only reference).",
-    "Do NOT touch /Users/jill/farm-surveillance-internal/. Frozen archive.",
-    "Do NOT touch /Users/jill/farm-surveillance/ (v1). OFF and stays OFF.",
+    "Do NOT touch ~/farm-surveillance-refactor/. Frozen archive (read-only reference).",
+    "Do NOT touch ~/farm-surveillance-internal/. Frozen archive.",
+    "Do NOT touch ~/farm-surveillance/ (v1). OFF and stays OFF.",
     "Do NOT git push to forgejo or GitHub. Operator reviews and pushes.",
     "Do NOT install new skills. Use existing skill set.",
     "Do NOT restart the daemon. Operator restarts manually after merge.",

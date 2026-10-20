@@ -57,7 +57,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Module-level constants — overridable via monkeypatch in tests.
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path("/Users/jill/farm-surveillance-v2")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LISTENER_PLIST = "com.farm.surveillance.v2"
 LISTENER_PID_FILE = Path.home() / "Library" / "LaunchAgents" / f"{LISTENER_PLIST}.plist"
 DAEMON_LOG = PROJECT_ROOT / "logs" / "daemon.log"

@@ -26,9 +26,9 @@ Each entry's full description (assigned-to, why-fallback, recommended-fix prose)
 ## Verification commands (copy-paste to re-verify)
 
 ```bash
-git -C /Users/jill/farm-surveillance-v2 grep -nE 'except (Exception|OSError):\s*(# noqa|pass)' -- infra/frame_capture.py
-git -C /Users/jill/farm-surveillance-v2 grep -nE '\.get\("(rtsp_url|prefix)",' -- infra/frame_capture.py
-git -C /Users/jill/farm-surveillance-v2 grep -nE 'arg_value: (float|int) \| None' -- infra/frame_capture.py
+git -C <INSTALL_DIR> grep -nE 'except (Exception|OSError):\s*(# noqa|pass)' -- infra/frame_capture.py
+git -C <INSTALL_DIR> grep -nE '\.get\("(rtsp_url|prefix)",' -- infra/frame_capture.py
+git -C <INSTALL_DIR> grep -nE 'arg_value: (float|int) \| None' -- infra/frame_capture.py
 ```
 
 All three commands should return empty output after US-024f merges to `main`.

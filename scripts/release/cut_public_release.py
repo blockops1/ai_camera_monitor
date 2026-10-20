@@ -56,9 +56,9 @@ RELATED:
     - docs/PIPELINE-SPEC-2026-09-10.md — kept-doc anchor
     - docs/PRIVACY.md — kept-doc anchor
 """
-# venv: /Users/jill/farm-surveillance-v2/.venv
+# venv: <INSTALL_DIR>/.venv
 # packages: PyYAML (>=6.0)
-# activate before running:  source /Users/jill/farm-surveillance-v2/.venv/bin/activate
+# activate before running:  source <INSTALL_DIR>/.venv/bin/activate
 #
 # Rollback: this script creates a new branch + tag; it does not delete operator data.
 # Recovery if a cut goes wrong:

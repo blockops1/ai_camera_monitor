@@ -256,7 +256,7 @@ committed). Template:
 
 ```bash
 # Front door camera
-FRONT_IP=192.168.1.50
+FRONT_IP=192.0.2.10  # example LAN address; use your camera's actual IP
 FRONT_HTTP_USER=admin
 FRONT_HTTP_PASS=<from-camera-web-ui>
 FRONT_RTSP_USER=admin

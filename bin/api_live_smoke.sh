@@ -34,8 +34,8 @@ if [ -f "$HOME/.env" ]; then
     fi
   done < "$HOME/.env"
 fi
-if [ "$_BIND_MODE" = "tailnet-only" ]; then
-  HOST="http://100.64.0.10:${FARMSURV_API_PORT}"
+if [ "$_BIND_MODE" = "tailnet-only" ] && [ -n "${FARMSURV_API_HOST:-${TAILNET_BIND_ADDR:-}}" ]; then
+  HOST="http://${FARMSURV_API_HOST:-${TAILNET_BIND_ADDR}}:${FARMSURV_API_PORT}"
 else
   HOST="http://127.0.0.1:${FARMSURV_API_PORT}"
 fi

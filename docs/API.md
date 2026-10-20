@@ -50,10 +50,10 @@ All API routes are GET-only. Every response wraps data in a JSON object with a
 ### Bind model
 
 Default: Tailscale-only. The server binds to the Tailscale CGNAT interface
-(100.64.0.1 by default). Configured via:
+(auto-detected tailnet address by default). Configured via:
 
 - **`FARMSURV_API_BIND`** (default: `tailnet-only`)
-  - `tailnet-only` -- binds to the Tailscale CGNAT address (100.64.0.1). This
+  - `tailnet-only` -- binds to the auto-detected Tailscale CGNAT address. This
     is the default and recommended mode. The API is reachable only from peers
     on the same Tailscale network.
   - `all` -- binds to `0.0.0.0` (all interfaces). Only use this on a trusted
@@ -195,7 +195,7 @@ Example (dropped alert):
 {
   "alert_id": "a1b2c3d4-...",
   "camera_id": "BACK",
-  "box_id": "jills-mac-mini",
+  "box_id": "farm-mac-mini",
   "started_at": "2026-09-22T20:51:31+00:00",
   "finished_at": "2026-09-22T20:51:33+00:00",
   "gate": {"class": "dog", "confidence": 0.35},

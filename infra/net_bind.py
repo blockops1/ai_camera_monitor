@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 
 # Tailscale CGNAT range: 100.64.0.0/10
 # Resolve from TAILNET_BIND_ADDR env var if set, else auto-detect the
-# first 100.x IP on the machine. Falls back to 100.64.0.1.
+# first 100.x IP on the machine. Falls back to 100.64.0.2 (a sample CGNAT host address; set TAILNET_BIND_ADDR explicitly if your topology differs).
 def _resolve_tailnet_ip() -> str:
     """Return the first 100.x.x.x IP found on the machine."""
     override = os.environ.get("TAILNET_BIND_ADDR")
@@ -63,7 +63,7 @@ def _resolve_tailnet_ip() -> str:
                             return ip
     except (subprocess.SubprocessError, FileNotFoundError, OSError):
         pass
-    return "100.64.0.1"
+    return "100.64.0.2"
 
 
 TAILNET_BIND = _resolve_tailnet_ip()

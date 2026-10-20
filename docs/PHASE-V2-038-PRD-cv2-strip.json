@@ -14,9 +14,9 @@
   },
   "shipping_definition": "(a) opencv-python-headless removed from pyproject.toml. (b) All cv2 imports removed from runtime modules. (c) All cv2 function calls replaced with numpy/PIL equivalents. (d) After strip, ls .venv/lib/python3.11/site-packages/cv2/ → directory does not exist. (e) Daemon stays unloaded. (f) All 313 existing tests still pass. (g) New unit tests cover the numpy/PIL replacements. (h) NO try/except ImportError cv2 fallback paths. NO optional cv2 use. (i) Every story has a commit on main with <story_id> in the message.",
   "scope_exclusions": [
-    "Do NOT touch /Users/jill/farm-surveillance-refactor/. Frozen archive.",
-    "Do NOT touch /Users/jill/farm-surveillance-internal/. Frozen archive.",
-    "Do NOT touch /Users/jill/farm-surveillance/ (v1). OFF and stays OFF.",
+    "Do NOT touch ~/farm-surveillance-refactor/. Frozen archive.",
+    "Do NOT touch ~/farm-surveillance-internal/. Frozen archive.",
+    "Do NOT touch ~/farm-surveillance/ (v1). OFF and stays OFF.",
     "Do NOT git push to forgejo or GitHub. Operator reviews and pushes.",
     "Do NOT install new skills. Use existing skill set.",
     "Do NOT replace PIL with anything else — keep PIL as the PIL backend.",
@@ -42,14 +42,14 @@
       "assignee": "coder",
       "depends_on": [],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'import infra.quick_classifier' → exit 0",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'from infra.quick_classifier import _nms; import numpy as np; boxes=np.array([[0,0,10,10,0.9],[5,5,15,15,0.8]],dtype=np.float32); scores=np.array([0.9,0.8]); out=_nms(boxes, scores, iou_threshold=0.5); assert len(out)==1 and int(out[0])==0' → exit 0 (overlapping boxes: only highest-score survives)",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'from infra.quick_classifier import _nms; import numpy as np; boxes=np.array([[0,0,10,10,0.9],[100,100,110,110,0.8]],dtype=np.float32); scores=np.array([0.9,0.8]); out=_nms(boxes, scores, iou_threshold=0.5); assert len(out)==2' → exit 0 (non-overlapping boxes: both survive)",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_quick_classifier.py -q --no-header 2>&1 | tail -3 → contains 'passed'",
-        "AC5: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 → contains 'passed' with N ≥ 313 (full suite still green)",
-        "RESIDUE: git -C /Users/jill/farm-surveillance-v2 grep -nE 'cv2|opencv|try:.*import cv2|except ImportError.*cv2' -- infra/quick_classifier.py | wc -l → 0 (no cv2/opencv residue in infra/quick_classifier.py)",
-        "GIT-1: cd /Users/jill/farm-surveillance-v2 && git status --porcelain | wc -l → 0 (working tree clean)",
-        "GIT-2: cd /Users/jill/farm-surveillance-v2 && git log --oneline main -10 | grep -iE 'us-038a' | wc -l → ≥ 1 (commit with story id on main)"
+        "AC1: cd <INSTALL_DIR> && .venv/bin/python -c 'import infra.quick_classifier' → exit 0",
+        "AC2: cd <INSTALL_DIR> && .venv/bin/python -c 'from infra.quick_classifier import _nms; import numpy as np; boxes=np.array([[0,0,10,10,0.9],[5,5,15,15,0.8]],dtype=np.float32); scores=np.array([0.9,0.8]); out=_nms(boxes, scores, iou_threshold=0.5); assert len(out)==1 and int(out[0])==0' → exit 0 (overlapping boxes: only highest-score survives)",
+        "AC3: cd <INSTALL_DIR> && .venv/bin/python -c 'from infra.quick_classifier import _nms; import numpy as np; boxes=np.array([[0,0,10,10,0.9],[100,100,110,110,0.8]],dtype=np.float32); scores=np.array([0.9,0.8]); out=_nms(boxes, scores, iou_threshold=0.5); assert len(out)==2' → exit 0 (non-overlapping boxes: both survive)",
+        "AC4: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/test_quick_classifier.py -q --no-header 2>&1 | tail -3 → contains 'passed'",
+        "AC5: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 → contains 'passed' with N ≥ 313 (full suite still green)",
+        "RESIDUE: git -C <INSTALL_DIR> grep -nE 'cv2|opencv|try:.*import cv2|except ImportError.*cv2' -- infra/quick_classifier.py | wc -l → 0 (no cv2/opencv residue in infra/quick_classifier.py)",
+        "GIT-1: cd <INSTALL_DIR> && git status --porcelain | wc -l → 0 (working tree clean)",
+        "GIT-2: cd <INSTALL_DIR> && git log --oneline main -10 | grep -iE 'us-038a' | wc -l → ≥ 1 (commit with story id on main)"
       ],
       "files_modified": [
         "infra/quick_classifier.py",
@@ -67,13 +67,13 @@
       "assignee": "coder",
       "depends_on": [],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'import infra.gate' → exit 0",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'from infra.gate import _load_frame_as_pil; from PIL import Image; import tempfile; p = tempfile.NamedTemporaryFile(suffix=\".png\", delete=False).name; Image.new(\"RGB\",(20,20),(255,0,0)).save(p); img = _load_frame_as_pil(p); assert img.size == (20, 20) and img.getpixel((10,10)) == (255, 0, 0)' → exit 0",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_gate.py -q --no-header 2>&1 | tail -3 → contains 'passed'",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 → contains 'passed' with N ≥ 313",
-        "RESIDUE: git -C /Users/jill/farm-surveillance-v2 grep -nE 'cv2|opencv|try:.*import cv2|except ImportError.*cv2' -- infra/gate.py | wc -l → 0 (no cv2/opencv residue in infra/gate.py)",
-        "GIT-1: cd /Users/jill/farm-surveillance-v2 && git status --porcelain | wc -l → 0 (working tree clean)",
-        "GIT-2: cd /Users/jill/farm-surveillance-v2 && git log --oneline main -10 | grep -iE 'us-038b' | wc -l → ≥ 1 (commit with story id on main)"
+        "AC1: cd <INSTALL_DIR> && .venv/bin/python -c 'import infra.gate' → exit 0",
+        "AC2: cd <INSTALL_DIR> && .venv/bin/python -c 'from infra.gate import _load_frame_as_pil; from PIL import Image; import tempfile; p = tempfile.NamedTemporaryFile(suffix=\".png\", delete=False).name; Image.new(\"RGB\",(20,20),(255,0,0)).save(p); img = _load_frame_as_pil(p); assert img.size == (20, 20) and img.getpixel((10,10)) == (255, 0, 0)' → exit 0",
+        "AC3: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/test_gate.py -q --no-header 2>&1 | tail -3 → contains 'passed'",
+        "AC4: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 → contains 'passed' with N ≥ 313",
+        "RESIDUE: git -C <INSTALL_DIR> grep -nE 'cv2|opencv|try:.*import cv2|except ImportError.*cv2' -- infra/gate.py | wc -l → 0 (no cv2/opencv residue in infra/gate.py)",
+        "GIT-1: cd <INSTALL_DIR> && git status --porcelain | wc -l → 0 (working tree clean)",
+        "GIT-2: cd <INSTALL_DIR> && git log --oneline main -10 | grep -iE 'us-038b' | wc -l → ≥ 1 (commit with story id on main)"
       ],
       "files_modified": [
         "infra/gate.py",
@@ -91,13 +91,13 @@
       "assignee": "coder",
       "depends_on": [],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'import infra.frame_diff' → exit 0",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'import numpy as np; from infra.frame_diff import compute_diff_bbox; from PIL import Image; import tempfile; a = np.zeros((100,100,3),dtype=np.uint8); b = a.copy(); b[40:60,40:60,:] = 255; p1 = tempfile.NamedTemporaryFile(suffix=\".png\", delete=False).name; p2 = tempfile.NamedTemporaryFile(suffix=\".png\", delete=False).name; Image.fromarray(a).save(p1); Image.fromarray(b).save(p2); x,y,w,h = compute_diff_bbox(p1, p2, threshold=30, min_area=10); assert 40 <= x <= 50 and 40 <= y <= 50 and w >= 10 and h >= 10' → exit 0",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_frame_diff.py -q --no-header 2>&1 | tail -3 → contains 'passed'",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 → contains 'passed' with N ≥ 313",
-        "RESIDUE: git -C /Users/jill/farm-surveillance-v2 grep -nE 'cv2|opencv|try:.*import cv2|except ImportError.*cv2' -- infra/frame_diff.py | wc -l → 0 (no cv2/opencv residue in infra/frame_diff.py)",
-        "GIT-1: cd /Users/jill/farm-surveillance-v2 && git status --porcelain | wc -l → 0 (working tree clean)",
-        "GIT-2: cd /Users/jill/farm-surveillance-v2 && git log --oneline main -10 | grep -iE 'us-038c' | wc -l → ≥ 1 (commit with story id on main)"
+        "AC1: cd <INSTALL_DIR> && .venv/bin/python -c 'import infra.frame_diff' → exit 0",
+        "AC2: cd <INSTALL_DIR> && .venv/bin/python -c 'import numpy as np; from infra.frame_diff import compute_diff_bbox; from PIL import Image; import tempfile; a = np.zeros((100,100,3),dtype=np.uint8); b = a.copy(); b[40:60,40:60,:] = 255; p1 = tempfile.NamedTemporaryFile(suffix=\".png\", delete=False).name; p2 = tempfile.NamedTemporaryFile(suffix=\".png\", delete=False).name; Image.fromarray(a).save(p1); Image.fromarray(b).save(p2); x,y,w,h = compute_diff_bbox(p1, p2, threshold=30, min_area=10); assert 40 <= x <= 50 and 40 <= y <= 50 and w >= 10 and h >= 10' → exit 0",
+        "AC3: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/test_frame_diff.py -q --no-header 2>&1 | tail -3 → contains 'passed'",
+        "AC4: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 → contains 'passed' with N ≥ 313",
+        "RESIDUE: git -C <INSTALL_DIR> grep -nE 'cv2|opencv|try:.*import cv2|except ImportError.*cv2' -- infra/frame_diff.py | wc -l → 0 (no cv2/opencv residue in infra/frame_diff.py)",
+        "GIT-1: cd <INSTALL_DIR> && git status --porcelain | wc -l → 0 (working tree clean)",
+        "GIT-2: cd <INSTALL_DIR> && git log --oneline main -10 | grep -iE 'us-038c' | wc -l → ≥ 1 (commit with story id on main)"
       ],
       "files_modified": [
         "infra/frame_diff.py",
@@ -115,12 +115,12 @@
       "assignee": "coder",
       "depends_on": [],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'import infra.motion_visualization' → exit 0",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_motion_visualization.py -q --no-header 2>&1 | tail -3 → contains 'passed' (OR skipped if test file does not exist on main; AC1+AC3 still bind)",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 → contains 'passed' with N ≥ 313",
-        "RESIDUE: git -C /Users/jill/farm-surveillance-v2 grep -nE 'cv2|opencv|try:.*import cv2|except ImportError.*cv2' -- infra/motion_visualization.py | wc -l → 0 (no cv2/opencv residue in infra/motion_visualization.py)",
-        "GIT-1: cd /Users/jill/farm-surveillance-v2 && git status --porcelain | wc -l → 0 (working tree clean)",
-        "GIT-2: cd /Users/jill/farm-surveillance-v2 && git log --oneline main -10 | grep -iE 'us-038d' | wc -l → ≥ 1 (commit with story id on main)"
+        "AC1: cd <INSTALL_DIR> && .venv/bin/python -c 'import infra.motion_visualization' → exit 0",
+        "AC2: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/test_motion_visualization.py -q --no-header 2>&1 | tail -3 → contains 'passed' (OR skipped if test file does not exist on main; AC1+AC3 still bind)",
+        "AC3: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 → contains 'passed' with N ≥ 313",
+        "RESIDUE: git -C <INSTALL_DIR> grep -nE 'cv2|opencv|try:.*import cv2|except ImportError.*cv2' -- infra/motion_visualization.py | wc -l → 0 (no cv2/opencv residue in infra/motion_visualization.py)",
+        "GIT-1: cd <INSTALL_DIR> && git status --porcelain | wc -l → 0 (working tree clean)",
+        "GIT-2: cd <INSTALL_DIR> && git log --oneline main -10 | grep -iE 'us-038d' | wc -l → ≥ 1 (commit with story id on main)"
       ],
       "files_modified": [
         "infra/motion_visualization.py"
@@ -144,15 +144,15 @@
       "operator_approval_required": true,
       "approval_reason": "Includes `.venv/bin/pip uninstall opencv-python-headless -y` — destructive. Worker will pause and request operator approval via kanban_comment before running the uninstall.",
       "acceptance": [
-        "AC1: git -C /Users/jill/farm-surveillance-v2 grep -n 'opencv' -- pyproject.toml | wc -l → 0",
-        "AC2: git -C /Users/jill/farm-surveillance-v2 grep -rn 'opencv' -- pyproject.toml requirements*.txt 2>/dev/null | wc -l → 0",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pip show opencv-python-headless 2>&1 | tail -3 → 'WARNING: Package(s) not found: opencv-python-headless'",
-        "AC4: ls /Users/jill/farm-surveillance-v2/.venv/lib/python3.11/site-packages/cv2/ 2>&1 | head -1 → 'No such file or directory'",
-        "AC5: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 → contains 'passed' with N ≥ 313",
-        "AC6: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'import importlib.util; assert not importlib.util.find_spec(\"cv2\")' → exit 0",
-        "RESIDUE: git -C /Users/jill/farm-surveillance-v2 grep -rnE 'import cv2|from cv2|cv2\\.|try:.*import cv2|except ImportError.*cv2' -- infra/ listener/ telegram_formatter/ vehicle_matcher/ | wc -l → 0 (no cv2 anywhere in runtime tree)",
-        "GIT-1: cd /Users/jill/farm-surveillance-v2 && git status --porcelain | wc -l → 0 (working tree clean)",
-        "GIT-2: cd /Users/jill/farm-surveillance-v2 && git log --oneline main -10 | grep -iE 'us-038e' | wc -l → ≥ 1 (commit with story id on main)"
+        "AC1: git -C <INSTALL_DIR> grep -n 'opencv' -- pyproject.toml | wc -l → 0",
+        "AC2: git -C <INSTALL_DIR> grep -rn 'opencv' -- pyproject.toml requirements*.txt 2>/dev/null | wc -l → 0",
+        "AC3: cd <INSTALL_DIR> && .venv/bin/python -m pip show opencv-python-headless 2>&1 | tail -3 → 'WARNING: Package(s) not found: opencv-python-headless'",
+        "AC4: ls <INSTALL_DIR>/.venv/lib/python3.11/site-packages/cv2/ 2>&1 | head -1 → 'No such file or directory'",
+        "AC5: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 → contains 'passed' with N ≥ 313",
+        "AC6: cd <INSTALL_DIR> && .venv/bin/python -c 'import importlib.util; assert not importlib.util.find_spec(\"cv2\")' → exit 0",
+        "RESIDUE: git -C <INSTALL_DIR> grep -rnE 'import cv2|from cv2|cv2\\.|try:.*import cv2|except ImportError.*cv2' -- infra/ listener/ telegram_formatter/ vehicle_matcher/ | wc -l → 0 (no cv2 anywhere in runtime tree)",
+        "GIT-1: cd <INSTALL_DIR> && git status --porcelain | wc -l → 0 (working tree clean)",
+        "GIT-2: cd <INSTALL_DIR> && git log --oneline main -10 | grep -iE 'us-038e' | wc -l → ≥ 1 (commit with story id on main)"
       ],
       "files_modified": [
         "pyproject.toml"
@@ -170,13 +170,13 @@
         "US-038e"
       ],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_cv2_strip.py -q --no-header 2>&1 | tail -3 → contains 'passed' with N ≥ 4",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'import importlib.util; assert not importlib.util.find_spec(\"cv2\")' → exit 0",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'import importlib.util; mods=[\"av\",\"cv2\",\"PIL\",\"numpy\",\"onnxruntime\",\"flask\"]; result={m: (\"present\" if importlib.util.find_spec(m) else \"absent\") for m in mods}; assert result[\"av\"]==\"present\" and result[\"cv2\"]==\"absent\"' → exit 0",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'from infra.frame_capture import PersistentRTSPReader' → exit 0 (PyAV binding still resolves cleanly post-strip)",
-        "RESIDUE: git -C /Users/jill/farm-surveillance-v2 grep -rnE 'import cv2|from cv2|cv2\\.|try:.*import cv2|except ImportError.*cv2' -- infra/ listener/ telegram_formatter/ vehicle_matcher/ | wc -l → 0 (no cv2 anywhere in runtime tree)",
-        "GIT-1: cd /Users/jill/farm-surveillance-v2 && git status --porcelain | wc -l → 0 (working tree clean)",
-        "GIT-2: cd /Users/jill/farm-surveillance-v2 && git log --oneline main -10 | grep -iE 'us-038f' | wc -l → ≥ 1 (commit with story id on main)"
+        "AC1: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/test_cv2_strip.py -q --no-header 2>&1 | tail -3 → contains 'passed' with N ≥ 4",
+        "AC2: cd <INSTALL_DIR> && .venv/bin/python -c 'import importlib.util; assert not importlib.util.find_spec(\"cv2\")' → exit 0",
+        "AC3: cd <INSTALL_DIR> && .venv/bin/python -c 'import importlib.util; mods=[\"av\",\"cv2\",\"PIL\",\"numpy\",\"onnxruntime\",\"flask\"]; result={m: (\"present\" if importlib.util.find_spec(m) else \"absent\") for m in mods}; assert result[\"av\"]==\"present\" and result[\"cv2\"]==\"absent\"' → exit 0",
+        "AC4: cd <INSTALL_DIR> && .venv/bin/python -c 'from infra.frame_capture import PersistentRTSPReader' → exit 0 (PyAV binding still resolves cleanly post-strip)",
+        "RESIDUE: git -C <INSTALL_DIR> grep -rnE 'import cv2|from cv2|cv2\\.|try:.*import cv2|except ImportError.*cv2' -- infra/ listener/ telegram_formatter/ vehicle_matcher/ | wc -l → 0 (no cv2 anywhere in runtime tree)",
+        "GIT-1: cd <INSTALL_DIR> && git status --porcelain | wc -l → 0 (working tree clean)",
+        "GIT-2: cd <INSTALL_DIR> && git log --oneline main -10 | grep -iE 'us-038f' | wc -l → ≥ 1 (commit with story id on main)"
       ],
       "files_modified": [
         "tests/test_cv2_strip.py"
@@ -194,11 +194,11 @@
         "US-038e"
       ],
       "acceptance": [
-        "AC1: git -C /Users/jill/farm-surveillance-v2 grep -n 'TBD' -- docs/PHASE-V2-016-PRD-diagnostic-visibility-and-boot-hardening.json | wc -l → 0",
-        "AC2: git -C /Users/jill/farm-surveillance-v2 grep -rn 'opencv\\|cv2' -- docs/FALLBACK-INVENTORY.md | grep -iE 'IDENTIFIED|OPEN|TODO|PENDING' | wc -l → 0 (any cv2/opencv entry must be RESOLVED, not IDENTIFIED)",
+        "AC1: git -C <INSTALL_DIR> grep -n 'TBD' -- docs/PHASE-V2-016-PRD-diagnostic-visibility-and-boot-hardening.json | wc -l → 0",
+        "AC2: git -C <INSTALL_DIR> grep -rn 'opencv\\|cv2' -- docs/FALLBACK-INVENTORY.md | grep -iE 'IDENTIFIED|OPEN|TODO|PENDING' | wc -l → 0 (any cv2/opencv entry must be RESOLVED, not IDENTIFIED)",
         "AC3: head -3 docs/PHASE-V2-016-PRD-diagnostic-visibility-and-boot-hardening.json → status field is 'closed' or 'resolved' (operator choice — 'active' acceptable)",
-        "GIT-1: cd /Users/jill/farm-surveillance-v2 && git status --porcelain | wc -l → 0 (working tree clean)",
-        "GIT-2: cd /Users/jill/farm-surveillance-v2 && git log --oneline main -10 | grep -iE 'us-038g' | wc -l → ≥ 1 (commit with story id on main)"
+        "GIT-1: cd <INSTALL_DIR> && git status --porcelain | wc -l → 0 (working tree clean)",
+        "GIT-2: cd <INSTALL_DIR> && git log --oneline main -10 | grep -iE 'us-038g' | wc -l → ≥ 1 (commit with story id on main)"
       ],
       "files_modified": [
         "docs/FALLBACK-INVENTORY.md",

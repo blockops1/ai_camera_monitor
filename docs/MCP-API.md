@@ -61,7 +61,7 @@ Healthz endpoint (`GET /healthz`) does NOT require auth.
 ```json
 {
   "ok": true,
-  "box_id": "jills-mac-mini",
+  "box_id": "farm-mac-mini",
   "uptime_seconds": 1420.5,
   "mcp_enabled": true
 }
@@ -205,7 +205,7 @@ outer-loop repo, not in this server.
 | Variable | Default | Description |
 |---|---|---|
 | `FARMSURV_MCP_ENABLED` | `0` | `1`=ON, `0`=OFF (default). Server does not start when 0. |
-| `FARMSURV_MCP_BIND` | `tailnet-only` | `tailnet-only` (100.64.0.1), `all` (0.0.0.0), or specific IP |
+| `FARMSURV_MCP_BIND` | `tailnet-only` | `tailnet-only` (auto-detected tailnet IP), `all` (0.0.0.0), or specific IP |
 | `FARMSURV_MCP_TOKEN` | (required) | Bearer token, 32+ chars. Server aborts if missing or weak. |
 | `FARMSURV_MCP_PORT` | `8091` | TCP port to listen on |
 | `FARMSURV_BOX_ID` | `$(hostname)` | Box identifier in MCP responses |
@@ -214,7 +214,7 @@ All knobs declared in `.env.example`.
 
 ## Binding security
 
-`tailnet-only` (default) binds to `100.64.0.1` (Tailscale CGNAT range).
+`tailnet-only` (default) binds to the auto-detected Tailscale CGNAT address.
 The server is unreachable from the local LAN unless the operator
 explicitly sets `FARMSURV_MCP_BIND=all`, which logs a loud warning at
 startup.

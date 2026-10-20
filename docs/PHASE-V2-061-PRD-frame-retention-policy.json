@@ -18,9 +18,9 @@
   },
   "shipping_definition": "(a) infra/cleanup.py FRAME_MAX_BYTES raised from 10 GB to 20 GB (single constant). (b) listener/daemon.py: every N minutes (default 60), call infra.cleanup.run() from a daemon thread (NOT from the RTSP callback thread). (c) infra/cleanup.py emits a Telegram alert to TELEGRAM_HOME_CHAT_ID via existing infra.telegram_alerts when frames_dir post-cleanup size exceeds 20 GB (a safety net -- means either the cap is wrong or cleanup is broken). (d) infra/launchd/com.farm.surveillance.v2-cleanup.plist committed with StartInterval=3600 (hourly) and FARMSURV_CLEANUP_DISABLED=0. (e) FARMSURV_CLEANUP_DISABLED env var (default 0): when 1, cleanup.run() returns immediately with {deleted_dirs: 0, freed_bytes: 0, errors: 0}. (f) Single commit per story on main with US-061x in the message. Working tree clean. (g) NO fallback paths in any file. (h) NO leftover TODO comments. (i) docs/cleanup-policy.md documents the policy, the run frequency, the kill switch, and how to interpret the Telegram alert.",
   "scope_exclusions": [
-    "Do NOT touch /Users/jill/farm-surveillance-refactor/. Frozen archive (read-only reference).",
-    "Do NOT touch /Users/jill/farm-surveillance-internal/. Frozen archive.",
-    "Do NOT touch /Users/jill/farm-surveillance/ (v1). OFF and stays OFF.",
+    "Do NOT touch ~/farm-surveillance-refactor/. Frozen archive (read-only reference).",
+    "Do NOT touch ~/farm-surveillance-internal/. Frozen archive.",
+    "Do NOT touch ~/farm-surveillance/ (v1). OFF and stays OFF.",
     "Do NOT git push to forgejo or GitHub. Operator reviews and pushes.",
     "Do NOT install new skills.",
     "Do NOT restart the daemon. Operator restarts manually after merge.",
@@ -132,7 +132,7 @@
       "id": "US-061d",
       "title": "infra/launchd/com.farm.surveillance.v2-cleanup.plist: hourly backup cleanup (StartInterval=3600, disabled=0)",
       "story_type": "code",
-      "scope": "infra/launchd/com.farm.surveillance.v2-cleanup.plist. New file. Pattern: standard launchd plist with StartInterval=3600, ProgramArguments pointing at /Users/jill/farm-surveillance-v2/.venv/bin/python -m infra.cleanup, EnvironmentVariables FARMSURV_CLEANUP_DISABLED=0, RunAtLoad=false, StandardOutPath/StandardErrorPath pointing at logs/cleanup-stdout.log and logs/cleanup-stderr.log (the operator will need to ensure logs/ exists). The plist is committed; installation is operator-direct via launchctl load. Add a README paragraph at the top of the plist as a comment explaining: (a) this is a BACKUP -- the daemon thread is the primary cleanup surface; (b) load with `launchctl load ~/Library/LaunchAgents/com.farm.surveillance.v2-cleanup.plist`; (c) unload with `launchctl unload ...`; (d) kill switch via `launchctl setenv FARMSURV_CLEANUP_DISABLED 1` followed by `launchctl stop com.farm.surveillance.v2-cleanup`. Tests: tests/test_cleanup_plist.py -- validate plist XML parses, contains StartInterval=3600, contains ProgramArguments with infra.cleanup module.",
+      "scope": "infra/launchd/com.farm.surveillance.v2-cleanup.plist. New file. Pattern: standard launchd plist with StartInterval=3600, ProgramArguments pointing at <INSTALL_DIR>/.venv/bin/python -m infra.cleanup, EnvironmentVariables FARMSURV_CLEANUP_DISABLED=0, RunAtLoad=false, StandardOutPath/StandardErrorPath pointing at logs/cleanup-stdout.log and logs/cleanup-stderr.log (the operator will need to ensure logs/ exists). The plist is committed; installation is operator-direct via launchctl load. Add a README paragraph at the top of the plist as a comment explaining: (a) this is a BACKUP -- the daemon thread is the primary cleanup surface; (b) load with `launchctl load ~/Library/LaunchAgents/com.farm.surveillance.v2-cleanup.plist`; (c) unload with `launchctl unload ...`; (d) kill switch via `launchctl setenv FARMSURV_CLEANUP_DISABLED 1` followed by `launchctl stop com.farm.surveillance.v2-cleanup`. Tests: tests/test_cleanup_plist.py -- validate plist XML parses, contains StartInterval=3600, contains ProgramArguments with infra.cleanup module.",
       "assignee": "coder",
       "depends_on": ["US-061b"],
       "acceptance": [
@@ -150,7 +150,7 @@
         "infra/launchd/com.farm.surveillance.v2-cleanup.plist",
         "tests/test_cleanup_plist.py"
       ],
-      "notes": "Worker MUST validate the plist XML with plutil before claiming done. Worker MUST NOT auto-launchctl-load the plist. The plist is a BACKUP, not the primary surface -- this should be clear in the README header comment so future readers don't accidentally disable the daemon thread. Path to python is /Users/jill/farm-surveillance-v2/.venv/bin/python (the same venv the daemon uses).",
+      "notes": "Worker MUST validate the plist XML with plutil before claiming done. Worker MUST NOT auto-launchctl-load the plist. The plist is a BACKUP, not the primary surface -- this should be clear in the README header comment so future readers don't accidentally disable the daemon thread. Path to python is <INSTALL_DIR>/.venv/bin/python (the same venv the daemon uses).",
       "status": "proposal",
       "completed_at": null
     },

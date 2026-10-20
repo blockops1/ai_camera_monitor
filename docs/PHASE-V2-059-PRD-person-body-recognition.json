@@ -15,9 +15,9 @@
   },
   "shipping_definition": "(a) Person Tier-2 cosine matching wired into pipeline stage 12 (was: text-only tag+Jaccard). (b) infra/person_embedder.py CLIP-ViT-B/32 loads and computes 512-dim embedding for any 224x224+ RGB input (already done, verify). (c) data/known/people/known_people.json + data/known/people/embeddings.npz store per-person metadata + per-image 512-dim vectors + per-person Tier-1 signature (identity_markers). (d) scripts/enroll_person.py CLI produces embeddings.npz alongside known_people.json for Tier-2 matching. (e) person_matcher/match.py implements Tier-2 cosine (PRIMARY, always runs) + Tier-1 tag+Jaccard (advisory ranking) flow. Returns matched candidate dict with cosine_score + tier1_score. (f) TG#3 person-aware caption shows embedding match confidence: 'Recognized: <label> (cosine=<score>)' for recognized, 'unrecognized person' for unrecognized. (g) docs/person-recognition-design.md documents the tier-2-primary flow with worked example. (h) pytest green. (i) All stories committed on main with US-059 in the message. Working tree clean.",
   "scope_exclusions": [
-    "Do NOT touch /Users/jill/farm-surveillance-refactor/. Frozen archive (read-only reference).",
-    "Do NOT touch /Users/jill/farm-surveillance-internal/. Frozen archive.",
-    "Do NOT touch /Users/jill/farm-surveillance/ (v1). OFF and stays OFF.",
+    "Do NOT touch ~/farm-surveillance-refactor/. Frozen archive (read-only reference).",
+    "Do NOT touch ~/farm-surveillance-internal/. Frozen archive.",
+    "Do NOT touch ~/farm-surveillance/ (v1). OFF and stays OFF.",
     "Do NOT git push to forgejo or GitHub. Operator reviews and pushes.",
     "Do NOT install new skills. Use existing skill set.",
     "Do NOT restart the daemon. Operator restarts manually after merge.",

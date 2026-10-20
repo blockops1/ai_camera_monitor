@@ -18,9 +18,9 @@
   },
   "shipping_definition": "(a) .env contains VISION_LLM_URL, LISTEN_HOST, LISTEN_PORT with real values. (b) .env.example documents all three keys with placeholders + comments. (c) Plist contains only PATH + GATE_KEEP_DISK_ARTIFACTS in EnvironmentVariables (or also empty, see US-047d). (d) Each story lands as its own commit on main. (e) Daemon boots cleanly after each plist change with `launchctl unload && launchctl load`. (f) No camera-side changes.",
   "scope_exclusions": [
-    "Do NOT touch /Users/jill/farm-surveillance-refactor/. Frozen archive.",
-    "Do NOT touch /Users/jill/farm-surveillance-internal/. Frozen archive.",
-    "Do NOT touch /Users/jill/farm-surveillance/ (v1). OFF and stays OFF.",
+    "Do NOT touch ~/farm-surveillance-refactor/. Frozen archive.",
+    "Do NOT touch ~/farm-surveillance-internal/. Frozen archive.",
+    "Do NOT touch ~/farm-surveillance/ (v1). OFF and stays OFF.",
     "Do NOT git push to forgejo or GitHub. Operator reviews and pushes.",
     "Do NOT install new skills. Use existing skill set.",
     "Do NOT touch any Reolink camera web-UI. Cameras OFF-LIMITS.",
@@ -47,10 +47,10 @@
       "assignee": "coder",
       "depends_on": [],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -E '^VISION_LLM_URL=http' .env | wc -l -> 1 (.env contains the LLM URL)",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -E 'VISION_LLM_URL' .env.example | wc -l -> 1 (.env.example documents the key)",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && plutil -extract EnvironmentVariables.VISION_LLM_URL raw ~/Library/LaunchAgents/com.farm.surveillance.v2.plist 2>&1 | grep -q 'plutil: cannot extract' && echo 'plist cleaned' (plist does NOT contain VISION_LLM_URL)",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from dotenv import dotenv_values; print(dotenv_values(\".env\").get(\"VISION_LLM_URL\", \"\"))' | grep -qE '^http' (dotenv parses the value correctly)"
+        "AC1: cd <INSTALL_DIR> && grep -E '^VISION_LLM_URL=http' .env | wc -l -> 1 (.env contains the LLM URL)",
+        "AC2: cd <INSTALL_DIR> && grep -E 'VISION_LLM_URL' .env.example | wc -l -> 1 (.env.example documents the key)",
+        "AC3: cd <INSTALL_DIR> && plutil -extract EnvironmentVariables.VISION_LLM_URL raw ~/Library/LaunchAgents/com.farm.surveillance.v2.plist 2>&1 | grep -q 'plutil: cannot extract' && echo 'plist cleaned' (plist does NOT contain VISION_LLM_URL)",
+        "AC4: cd <INSTALL_DIR> && python3 -c 'from dotenv import dotenv_values; print(dotenv_values(\".env\").get(\"VISION_LLM_URL\", \"\"))' | grep -qE '^http' (dotenv parses the value correctly)"
       ],
       "files_modified": [
         ".env",
@@ -70,10 +70,10 @@
       "assignee": "coder",
       "depends_on": [],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -E '^LISTEN_HOST=0\\.0\\.0\\.0$' .env | wc -l -> 1",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -E 'LISTEN_HOST' .env.example | wc -l -> 1",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && plutil -extract EnvironmentVariables.LISTEN_HOST raw ~/Library/LaunchAgents/com.farm.surveillance.v2.plist 2>&1 | grep -q 'plutil: cannot extract' && echo 'plist cleaned'",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from dotenv import dotenv_values; assert dotenv_values(\".env\")[\"LISTEN_HOST\"] == \"0.0.0.0\"' -> exit 0"
+        "AC1: cd <INSTALL_DIR> && grep -E '^LISTEN_HOST=0\\.0\\.0\\.0$' .env | wc -l -> 1",
+        "AC2: cd <INSTALL_DIR> && grep -E 'LISTEN_HOST' .env.example | wc -l -> 1",
+        "AC3: cd <INSTALL_DIR> && plutil -extract EnvironmentVariables.LISTEN_HOST raw ~/Library/LaunchAgents/com.farm.surveillance.v2.plist 2>&1 | grep -q 'plutil: cannot extract' && echo 'plist cleaned'",
+        "AC4: cd <INSTALL_DIR> && python3 -c 'from dotenv import dotenv_values; assert dotenv_values(\".env\")[\"LISTEN_HOST\"] == \"0.0.0.0\"' -> exit 0"
       ],
       "files_modified": [
         ".env",
@@ -93,10 +93,10 @@
       "assignee": "coder",
       "depends_on": [],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -E '^LISTEN_PORT=8090$' .env | wc -l -> 1",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -E 'LISTEN_PORT' .env.example | wc -l -> 1",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && plutil -extract EnvironmentVariables.LISTEN_PORT raw ~/Library/LaunchAgents/com.farm.surveillance.v2.plist 2>&1 | grep -q 'plutil: cannot extract' && echo 'plist cleaned'",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from dotenv import dotenv_values; assert int(dotenv_values(\".env\")[\"LISTEN_PORT\"]) == 8090' -> exit 0"
+        "AC1: cd <INSTALL_DIR> && grep -E '^LISTEN_PORT=8090$' .env | wc -l -> 1",
+        "AC2: cd <INSTALL_DIR> && grep -E 'LISTEN_PORT' .env.example | wc -l -> 1",
+        "AC3: cd <INSTALL_DIR> && plutil -extract EnvironmentVariables.LISTEN_PORT raw ~/Library/LaunchAgents/com.farm.surveillance.v2.plist 2>&1 | grep -q 'plutil: cannot extract' && echo 'plist cleaned'",
+        "AC4: cd <INSTALL_DIR> && python3 -c 'from dotenv import dotenv_values; assert int(dotenv_values(\".env\")[\"LISTEN_PORT\"]) == 8090' -> exit 0"
       ],
       "files_modified": [
         ".env",
@@ -116,9 +116,9 @@
       "assignee": "coder",
       "depends_on": [],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && plutil -extract EnvironmentVariables.GATE_KEEP_DISK_ARTIFACTS raw ~/Library/LaunchAgents/com.farm.surveillance.v2.plist 2>&1 || echo 'NOT IN PLIST' (the key's location is documented one way or the other)",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -E 'GATE_KEEP_DISK_ARTIFACTS' .env .env.example 2>/dev/null | wc -l -> >= 0 (consistent with placement choice)",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && [ -f docs/PHASE-V2-047-DECISION-gate-keep-disk.md ] && wc -l docs/PHASE-V2-047-DECISION-gate-keep-disk.md | awk '{exit ($1 >= 10)}' (decision doc exists, >=10 lines)"
+        "AC1: cd <INSTALL_DIR> && plutil -extract EnvironmentVariables.GATE_KEEP_DISK_ARTIFACTS raw ~/Library/LaunchAgents/com.farm.surveillance.v2.plist 2>&1 || echo 'NOT IN PLIST' (the key's location is documented one way or the other)",
+        "AC2: cd <INSTALL_DIR> && grep -E 'GATE_KEEP_DISK_ARTIFACTS' .env .env.example 2>/dev/null | wc -l -> >= 0 (consistent with placement choice)",
+        "AC3: cd <INSTALL_DIR> && [ -f docs/PHASE-V2-047-DECISION-gate-keep-disk.md ] && wc -l docs/PHASE-V2-047-DECISION-gate-keep-disk.md | awk '{exit ($1 >= 10)}' (decision doc exists, >=10 lines)"
       ],
       "files_modified": [
         ".env (if moved)",
@@ -148,11 +148,11 @@
         "US-047c"
       ],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -nE 'VISION_LLM_URL|LISTEN_HOST|LISTEN_PORT' listener/daemon.py | grep -v '^\\s*#' | grep -v '^\\s*\"' | wc -l -> 0 (the moved keys are NOT hardcoded in generate_plist())",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from listener.daemon import generate_plist; x = generate_plist(); assert \"VISION_LLM_URL\" not in x and \"LISTEN_HOST\" not in x and \"LISTEN_PORT\" not in x' -> exit 0",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from listener.daemon import generate_plist; x = generate_plist(); assert \"PATH\" in x' -> exit 0 (PATH still present \u2014 required by launchd)",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && python3 -m pytest tests/ -k 'daemon or plist or generate_plist' --tb=short 2>&1 | tail -5 (existing plist/daemon tests pass)",
-        "AC5: cd /Users/jill/farm-surveillance-v2 && plutil -lint listener/daemon.py 2>&1 | head (daemon.py still parses \u2014 sanity)"
+        "AC1: cd <INSTALL_DIR> && grep -nE 'VISION_LLM_URL|LISTEN_HOST|LISTEN_PORT' listener/daemon.py | grep -v '^\\s*#' | grep -v '^\\s*\"' | wc -l -> 0 (the moved keys are NOT hardcoded in generate_plist())",
+        "AC2: cd <INSTALL_DIR> && python3 -c 'from listener.daemon import generate_plist; x = generate_plist(); assert \"VISION_LLM_URL\" not in x and \"LISTEN_HOST\" not in x and \"LISTEN_PORT\" not in x' -> exit 0",
+        "AC3: cd <INSTALL_DIR> && python3 -c 'from listener.daemon import generate_plist; x = generate_plist(); assert \"PATH\" in x' -> exit 0 (PATH still present \u2014 required by launchd)",
+        "AC4: cd <INSTALL_DIR> && python3 -m pytest tests/ -k 'daemon or plist or generate_plist' --tb=short 2>&1 | tail -5 (existing plist/daemon tests pass)",
+        "AC5: cd <INSTALL_DIR> && plutil -lint listener/daemon.py 2>&1 | head (daemon.py still parses \u2014 sanity)"
       ],
       "files_modified": [
         "listener/daemon.py"

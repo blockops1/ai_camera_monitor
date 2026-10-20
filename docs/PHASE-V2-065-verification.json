@@ -1,7 +1,7 @@
 {
   "prd": "PHASE-V2-065",
   "ran_at": "2026-09-22T01:10:09.033479+00:00",
-  "recipe_path": "/Users/jill/farm-surveillance-v2/config/camera_recipes.toml",
+  "recipe_path": "<INSTALL_DIR>/config/camera_recipes.toml",
   "cameras": [
     {
       "camera": "front",

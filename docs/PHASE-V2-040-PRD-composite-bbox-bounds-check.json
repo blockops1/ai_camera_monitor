@@ -14,9 +14,9 @@
   },
   "shipping_definition": "(a) _native_bbox_to_corners clamps y1 against H-1 (not W-1). (b) _draw_rectangle clamps all four edges against arr.shape before writing. (c) New edge-case test in tests/test_motion_visualization.py covers a 1920x1080-frame bbox where y0+h > H_orig (the production failure mode). (d) `python -c 'import infra.motion_visualization'` exits 0. (e) `pytest tests/test_motion_visualization.py` passes including the new edge-case test. (f) Full pytest still green. (g) commit on main with US-040 in the message. Working tree clean.",
   "scope_exclusions": [
-    "Do NOT touch /Users/jill/farm-surveillance-refactor/. Frozen archive.",
-    "Do NOT touch /Users/jill/farm-surveillance-internal/. Frozen archive.",
-    "Do NOT touch /Users/jill/farm-surveillance/ (v1). OFF and stays OFF.",
+    "Do NOT touch ~/farm-surveillance-refactor/. Frozen archive.",
+    "Do NOT touch ~/farm-surveillance-internal/. Frozen archive.",
+    "Do NOT touch ~/farm-surveillance/ (v1). OFF and stays OFF.",
     "Do NOT git push to forgejo or GitHub. Operator reviews and pushes.",
     "Do NOT install new skills. Use existing skill set.",
     "Do NOT touch infra/gate.py. The motion_gate 'classification=vehicle / top_class=dog' mislabel on large bbox is a separate, non-actionable bug — listener.pipeline corrects it before Telegram. Out of scope here.",
@@ -41,15 +41,15 @@
       "assignee": "coder",
       "depends_on": [],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'import infra.motion_visualization' \u2192 exit 0",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'from infra.motion_visualization import _native_bbox_to_corners; corners=_native_bbox_to_corners((0, 1000, 100, 200), W=1920, H=1080); assert corners is None or corners[3] < 1080, f\"y1 not clamped against H: {corners}\"' \u2192 exit 0",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'from infra.motion_visualization import _native_bbox_to_corners; corners=_native_bbox_to_corners((1900, 1000, 100, 200), W=1920, H=1080); assert corners is None or corners[2] < 1920 and corners[3] < 1080, f\"y1/x1 not clamped: {corners}\"' \u2192 exit 0",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c 'from infra.motion_visualization import render_motion_composite; from PIL import Image; import numpy as np, tempfile, os; f=[Image.fromarray(np.full((1080, 1920, 3), 50, dtype=np.uint8), mode=\"RGB\") for _ in range(4)]; f[2]=Image.fromarray(np.full((1080, 1920, 3), 200, dtype=np.uint8), mode=\"RGB\"); f[3]=Image.fromarray(np.full((1080, 1920, 3), 50, dtype=np.uint8), mode=\"RGB\"); d=tempfile.mkdtemp(); p=render_motion_composite(f, bbox_a=(1700, 900, 200, 300), bbox_b=(1700, 900, 200, 300), output_dir=d); assert p and os.path.exists(p), \"render failed on 1920x1080 bbox with y+h > H\"' \u2192 exit 0",
-        "AC5: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_motion_visualization.py -v --no-header 2>&1 | tail -20 \u2192 contains 'passed' with the new test name visible (test name should reference 'edge' or 'wide' or '1920x1080')",
-        "AC6: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 \u2192 contains 'passed' (full suite green, N \u2265 339)",
-        "RESIDUE: git -C /Users/jill/farm-surveillance-v2 grep -n 'min(W - 1, y1)' -- infra/motion_visualization.py | wc -l \u2192 0 (the old buggy clamp is gone)",
-        "GIT-1: cd /Users/jill/farm-surveillance-v2 && git status --porcelain | wc -l \u2192 0 (working tree clean)",
-        "GIT-2: cd /Users/jill/farm-surveillance-v2 && git log --oneline main -10 | grep -iE 'us-040' | wc -l \u2192 \u2265 1 (commit with story id on main)"
+        "AC1: cd <INSTALL_DIR> && .venv/bin/python -c 'import infra.motion_visualization' \u2192 exit 0",
+        "AC2: cd <INSTALL_DIR> && .venv/bin/python -c 'from infra.motion_visualization import _native_bbox_to_corners; corners=_native_bbox_to_corners((0, 1000, 100, 200), W=1920, H=1080); assert corners is None or corners[3] < 1080, f\"y1 not clamped against H: {corners}\"' \u2192 exit 0",
+        "AC3: cd <INSTALL_DIR> && .venv/bin/python -c 'from infra.motion_visualization import _native_bbox_to_corners; corners=_native_bbox_to_corners((1900, 1000, 100, 200), W=1920, H=1080); assert corners is None or corners[2] < 1920 and corners[3] < 1080, f\"y1/x1 not clamped: {corners}\"' \u2192 exit 0",
+        "AC4: cd <INSTALL_DIR> && .venv/bin/python -c 'from infra.motion_visualization import render_motion_composite; from PIL import Image; import numpy as np, tempfile, os; f=[Image.fromarray(np.full((1080, 1920, 3), 50, dtype=np.uint8), mode=\"RGB\") for _ in range(4)]; f[2]=Image.fromarray(np.full((1080, 1920, 3), 200, dtype=np.uint8), mode=\"RGB\"); f[3]=Image.fromarray(np.full((1080, 1920, 3), 50, dtype=np.uint8), mode=\"RGB\"); d=tempfile.mkdtemp(); p=render_motion_composite(f, bbox_a=(1700, 900, 200, 300), bbox_b=(1700, 900, 200, 300), output_dir=d); assert p and os.path.exists(p), \"render failed on 1920x1080 bbox with y+h > H\"' \u2192 exit 0",
+        "AC5: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/test_motion_visualization.py -v --no-header 2>&1 | tail -20 \u2192 contains 'passed' with the new test name visible (test name should reference 'edge' or 'wide' or '1920x1080')",
+        "AC6: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 \u2192 contains 'passed' (full suite green, N \u2265 339)",
+        "RESIDUE: git -C <INSTALL_DIR> grep -n 'min(W - 1, y1)' -- infra/motion_visualization.py | wc -l \u2192 0 (the old buggy clamp is gone)",
+        "GIT-1: cd <INSTALL_DIR> && git status --porcelain | wc -l \u2192 0 (working tree clean)",
+        "GIT-2: cd <INSTALL_DIR> && git log --oneline main -10 | grep -iE 'us-040' | wc -l \u2192 \u2265 1 (commit with story id on main)"
       ],
       "files_modified": [
         "infra/motion_visualization.py",

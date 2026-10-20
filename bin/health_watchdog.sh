@@ -313,8 +313,12 @@ FARMSURV_API_TOKEN="${FARMSURV_API_TOKEN:-}"
 # Determine API host address.
 # FARMSURV_API_BIND can be "loopback" or "tailnet-only".
 # Default to loopback (127.0.0.1) since the API may bind there.
-if [ "$FARMSURV_API_BIND" = "tailnet-only" ]; then
-  _API_HOST="http://100.64.0.10:${FARMSURV_API_PORT}"
+# Tailnet address comes from env (TAILNET_BIND_ADDR, or the API host
+# override FARMSURV_API_HOST) — never hardcoded, so this script is safe
+# to publish. If unset while tailnet-only, the probe below falls through
+# to loopback and self-heals via the alternate-host retry.
+if [ "$FARMSURV_API_BIND" = "tailnet-only" ] && [ -n "${FARMSURV_API_HOST:-${TAILNET_BIND_ADDR:-}}" ]; then
+  _API_HOST="http://${FARMSURV_API_HOST:-${TAILNET_BIND_ADDR}}:${FARMSURV_API_PORT}"
 else
   _API_HOST="http://127.0.0.1:${FARMSURV_API_PORT}"
 fi
@@ -325,8 +329,8 @@ if [ -n "$FARMSURV_API_TOKEN" ]; then
     -H "Authorization: Bearer ${FARMSURV_API_TOKEN}" \
     "${_API_HOST}/api/v1/listener/status" 2>/dev/null || echo "000")
   if [ "$_PROBE" != "200" ]; then
-    if [[ "$_API_HOST" == *"127.0.0.1"* ]]; then
-      _API_HOST="http://100.64.0.10:${FARMSURV_API_PORT}"
+    if [[ "$_API_HOST" == *"127.0.0.1"* && -n "${FARMSURV_API_HOST:-${TAILNET_BIND_ADDR:-}}" ]]; then
+      _API_HOST="http://${FARMSURV_API_HOST:-${TAILNET_BIND_ADDR}}:${FARMSURV_API_PORT}"
     else
       _API_HOST="http://127.0.0.1:${FARMSURV_API_PORT}"
     fi

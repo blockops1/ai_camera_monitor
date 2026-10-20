@@ -7,7 +7,7 @@
 # Exit 0 when the config is valid; exit 1 and print errors to stderr.
 #
 # Usage:
-#   cd /Users/jill/farm-surveillance-v2 && bin/check_motion_gate_config.py
+#   cd <INSTALL_DIR> && bin/check_motion_gate_config.py
 #
 # Called by: bin/preflight_v2_only.sh (pre-commit guard)
 

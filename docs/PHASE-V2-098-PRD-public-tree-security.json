@@ -79,6 +79,6 @@
       "no_go": "worker does not add FARMSURV_LAT/LON to ~/.env (orchestrator activation)"
     }
   ],
-  "verification_recipe": "cd /Users/jill/farm-surveillance-v2 && git ls-files '*.example' | wc -l && python3 scripts/check_no_private_data.py --history; echo rc=$?",
+  "verification_recipe": "cd <INSTALL_DIR> && git ls-files '*.example' | wc -l && python3 scripts/check_no_private_data.py --history; echo rc=$?",
   "results_interpretation": "After all four: fresh clone has working templates, pre-push catches history leaks, model download is pinned/verified, property coordinates no longer ship in code. Credential rotation remains operator-scheduled; history scrub (filter-repo) is orchestrator-side after US-110b lands."
 }

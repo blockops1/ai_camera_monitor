@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<! TEMPLATE: replace every <INSTALL_DIR> with your absolute checkout path before
+     loading, e.g.:
+       sed "s|<INSTALL_DIR>|$HOME/farm-surveillance-v2|g" com.farm.surveillance.v2.smoke.plist > ~/Library/LaunchAgents/com.farm.surveillance.v2.smoke.plist
+       plutil -lint ~/Library/LaunchAgents/com.farm.surveillance.v2.smoke.plist
+       launchctl load ~/Library/LaunchAgents/com.farm.surveillance.v2.smoke.plist
+     (launchd does not expand ~ or env vars in plists — sed is required) --!>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -8,7 +14,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/jill/farm-surveillance-v2/bin/mcp_smoke_listener.sh</string>
+        <string><INSTALL_DIR>/bin/mcp_smoke_listener.sh</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -18,12 +24,12 @@
     <false/>
 
     <key>StandardErrorPath</key>
-    <string>/Users/jill/farm-surveillance-v2/logs/smoke.log</string>
+    <string><INSTALL_DIR>/logs/smoke.log</string>
 
     <key>StandardOutPath</key>
-    <string>/Users/jill/farm-surveillance-v2/logs/smoke.log</string>
+    <string><INSTALL_DIR>/logs/smoke.log</string>
 
     <key>WorkingDirectory</key>
-    <string>/Users/jill/farm-surveillance-v2</string>
+    <string><INSTALL_DIR></string>
 </dict>
 </plist>

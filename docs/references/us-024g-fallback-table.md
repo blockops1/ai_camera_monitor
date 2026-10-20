@@ -18,8 +18,8 @@ All 4 entries are inside `infra/cleanup.py`'s best-effort cleanup loops. The rec
 ## Verification commands (copy-paste to re-verify)
 
 ```bash
-git -C /Users/jill/farm-surveillance-v2 grep -nE 'except OSError:\s*$' -- infra/cleanup.py
-git -C /Users/jill/farm-surveillance-v2 show main:infra/cleanup.py | awk 'NR==126 || NR==140 || NR==142 || NR==209'
+git -C <INSTALL_DIR> grep -nE 'except OSError:\s*$' -- infra/cleanup.py
+git -C <INSTALL_DIR> show main:infra/cleanup.py | awk 'NR==126 || NR==140 || NR==142 || NR==209'
 ```
 
 After US-024g merges:

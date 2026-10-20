@@ -64,7 +64,7 @@ class TestGetLiveSnapshot:
 
         mock_cam = {
             "prefix": "FRONT",
-            "gateway": "100.64.0.1",
+            "gateway": "100.64.0.2",
             "ip": os.environ.get("FARM_TEST_FRONT_IP", "10.0.0.39"),
         }
 

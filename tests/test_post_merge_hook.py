@@ -48,7 +48,7 @@ def _setup_work_repo(td):
 def _install_hook_and_scripts(work, fake_push_script="#!/bin/sh\necho 'FAKE PUSH: ok'\nexit 0\n"):
     """Install the real post-merge hook and a fake push_to_forgejo.sh."""
     # Install the real post-merge hook
-    src_hook = Path("/Users/jill/farm-surveillance-v2/.git/hooks/post-merge")
+    src_hook = Path(__file__).resolve().parent.parent / ".git" / "hooks" / "post-merge"
     dst_hook = work / ".git" / "hooks" / "post-merge"
     dst_hook.write_text(src_hook.read_text())
     dst_hook.chmod(0o755)

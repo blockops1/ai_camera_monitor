@@ -3,7 +3,7 @@
 > Auto-injected into the agent system prompt whenever workdir = this repo.
 > Follow on EVERY session, including compaction-restore sessions.
 >
-> **Cross-project operator rules** live in `/Users/jill/AGENTS.md` (above this repo's git root). They are auto-injected via the `AGENTS.override.md` symlink at the project root, so any session that opens with cwd in this repo will see them. To change operator-level rules, edit `/Users/jill/AGENTS.md` directly (the symlink follows it).
+> **Cross-project operator rules** live in `~/AGENTS.md` (above this repo's git root). They are auto-injected via the `AGENTS.override.md` symlink at the project root, so any session that opens with cwd in this repo will see them. To change operator-level rules, edit `~/AGENTS.md` directly (the symlink follows it).
 > **Cross-session per-user facts** live in `~/.hermes/memories/MEMORY.md` and `USER.md`.
 > **Project-specific rules** live here. Don't duplicate.
 
@@ -30,11 +30,11 @@ If a task says "v2" and you're in another farm-surveillance-* directory, exit an
 
 **Project binding (operator 2026-09-20):**
 
-- **Primary folder:** `/Users/jill/farm-surveillance-v2` (`label v2`).
-- **Secondary folder:** `/Users/jill/farm-surveillance-refactor` (`label refactor`, read-only reference).
+- **Primary folder:** `<INSTALL_DIR>` (`label v2`).
+- **Secondary folder:** `~/farm-surveillance-refactor` (`label refactor`, read-only reference).
 - **NOT siblings to touch:** `farm-surveillance-internal`, `farm-surveillance-prototype`, original `farm-surveillance` (v1) — preserved per operator 2026-09-20 "No deletions" rule.
 
-Before authoring any kanban card: `hermes project show farm-surveillance | grep primary_folder` MUST return `/Users/jill/farm-surveillance-v2`. If it points at refactor, all cards dispatch to the wrong repo. Fix: `hermes project add-folder farm-surveillance /Users/jill/farm-surveillance-v2 --primary --label v2`.
+Before authoring any kanban card: `hermes project show farm-surveillance | grep primary_folder` MUST return `<INSTALL_DIR>`. If it points at refactor, all cards dispatch to the wrong repo. Fix: `hermes project add-folder farm-surveillance <INSTALL_DIR> --primary --label v2`.
 
 ## Step 1 — load skills + read the plan (do this FIRST, no exceptions)
 
@@ -75,7 +75,7 @@ This rule lives in three places for redundancy: MEMORY.md (cross-project), the `
 
 ### Step 2.1 — Forgejo recovery mirror (operator 2026-09-22, NEW)
 
-The Forgejo mirror at `deruyter:3000/jill/farm-surveillance-v2` is the recovery boundary, not a release gate. If this Mac dies, the work must survive there. The push is part of "done," not a separate step.
+The Forgejo mirror (remote `forgejo`; host/port live in `.git/config`, not in docs) is the recovery boundary, not a release gate. If this Mac dies, the work must survive there. The push is part of "done," not a separate step.
 
 **Push after every merge to `main`.** Push is automatic. `--no-verify --force-with-lease` is the standard tool when the pre-push hook flags legitimate code (the JPEG scanner matches `.jpg` literals in source, the IP scanner matches PRD evidence). Bypass without asking. The hooks are a recovery story bug to file separately, not a blocker on local work.
 
@@ -176,7 +176,7 @@ git status --porcelain | wc -l
 # Expected: 0 (or only intentional untracked like AGENTS.md)
 
 # Worker preflight MUST pass before commit
-cd /Users/jill/farm-surveillance-v2 && bin/preflight_v2_only.sh
+cd <INSTALL_DIR> && bin/preflight_v2_only.sh
 ```
 
 If any check fails, STOP and diagnose. Do not assume past success = current success.
@@ -200,23 +200,23 @@ If any check fails, STOP and diagnose. Do not assume past success = current succ
 
 ```bash
 # Worker preflight (asserts cwd = v2, NOT refactor/v1)
-cd /Users/jill/farm-surveillance-v2 && bin/preflight_v2_only.sh
+cd <INSTALL_DIR> && bin/preflight_v2_only.sh
 
 # Run all tests
-cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/ -q
+cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/ -q
 
 # Run tests for ONE module
-cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_camera_creds.py -v
+cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/test_camera_creds.py -v
 
 # Lint
-cd /Users/jill/farm-surveillance-v2 && uv run ruff check .
+cd <INSTALL_DIR> && uv run ruff check .
 
 # Check for cross-repo coupling (must be zero hits into refactor/v1/internal)
-grep -rn "/Users/jill/farm-surveillance-refactor\|/Users/jill/farm-surveillance-internal" /Users/jill/farm-surveillance-v2/ \
+grep -rn "~/farm-surveillance-refactor\|~/farm-surveillance-internal" <INSTALL_DIR>/ \
     --include="*.py" --exclude-dir=__pycache__ --exclude-dir=.git
 
 # View PRD for current arc
-jq . /Users/jill/farm-surveillance-v2/docs/PHASE-V2-NNN-PRD-*.json | head -50
+jq . <INSTALL_DIR>/docs/PHASE-V2-NNN-PRD-*.json | head -50
 
 # Quiet hours today (suntime + 30-min buffer)
 .venv/bin/python3.11 -c "
@@ -238,15 +238,15 @@ python3 -c "from infra._telegram_origin import origin_prefix; print(origin_prefi
 
 - venv: `~/farm-surveillance-v2/.venv/` (Python 3.11)
 - Listener: **RUNNING** as of 2026-10-04 18:50 EDT (PID **44470**, `com.farm.surveillance.v2`, `kickstart -k` rotated from 15465). All three processes (listener :8090, MCP :8091, API :8092) live in one PID. Listener bytecode includes: US-069 (`09d93e8`+`0835952`), US-074 HTML parse_mode (`ba2ff5f`+`1d7ac37`), US-074b per-InputMedia parse_mode (`c843a8b`), US-075 bold labels (`637f7fc`), US-076 API/MCP enablement (`722ee2b`+`0f09fc6`), US-079 heartbeat API/MCP lines (`b332500`), US-080 E2E test coverage, US-081 animal embedder live, US-082 E2E animal test, US-084 timestamp cosmetic, US-091 VM1 routing override (`eefe5f03`), US-059a/b/d/e person recognition wiring, US-092a/b/c/d (TG-on-fail + watchdog + scheduler + person gate), US-093a (vision_health reset), US-096a/b/c (frame-geometry auto-subscribe + 4K noise filter), US-097a/b (socket-leak fix in `PersistentRTSPReader.stop()` + demux normal-exit close), **US-098x (`fa32aeea`)** env-tunable RTSP thresholds, **US-099x (`t_9648b2bf` done 2026-10-04)** 43-char API/MCP tokens, **US-100x (`d93d2fb7`)** FRONT-cam socket-leak fix in `_reconnect_loop` swap path + `camera_health.reconnects` counter carry-over (operator-verified at runtime 2026-10-04 19:00 EDT: 4 reader-swap events in 2 min, FRONT socket count 1 not 36). US-073h `HealthReporter` (10-min cadence) emitting `listener_health` + `camera_health` + `api_health` + `mcp_health` to daemon.log.
-- Active board: `coder-farm-surveillance` (kanban). 0 ready, 1 review (US-100x `t_e3b36e70` -- FRONT cam socket leak fix, **commit `d93d2fb7` on main, work verified at runtime, but card assignee=qa stuck in chronic `blocker_auth` respawn loop since 2026-10-04 09:56:19** -- see Open work below), 1 blocked (US-094b `t_cc46f691` -- motion-off firmware limitation), 0 running. 188 cards done. **V2-094 SHIPPED 2026-09-30** (`6fb4979d`, forgejo in sync): US-094a (BEFORE snapshot, `t_e72debae` done), US-094b (`t_cc46f691` blocked at Reolink firmware SetMotion rejection), US-094c (encode_set to H.265 + 2fps + native res, `t_13a41934` done -- 3840x2160 on RLC-833A, 2560x1920 on RLC-510A, all 6 cams), US-094d (RTSP URL fix + listener restart, `t_cdb6c624` done), US-094e (`t_83c4ef05` ready -- 5-day observation arc starts 2026-09-30 17:24 EDT, due 2026-10-05 17:24 EDT). Operator pre-deconfigured rule: "no custom code in v2; all changes flow through the open-source Reolink MCP at /Users/jill/reolink-cli/". **V2-099 done 2026-10-04** (43-char API/MCP tokens, listener restarted, API/MCP `bound=True` on Tailscale `100.64.0.10`). **V2-100 done 2026-10-04** (FRONT cam socket leak in `_reconnect_loop` swap path, runtime-verified: 36 -> 1 ESTABLISHED sockets).
-- **Three-process deployment (2026-09-25, US-076):** listener :8090 + MCP :8091 + API :8092 all spawned by `listener/daemon.py` daemon-thread hooks (`_start_mcp_server` line 1014, `_start_api_server` line 1073, called before `app.run()` at line 1196). Gated by `FARMSURV_MCP_ENABLED=1` + `FARMSURV_API_ENABLED=1` in `~/.env`. Tokens >=32 chars, bind to Tailscale (100.64.0.10).
+- Active board: `coder-farm-surveillance` (kanban). 0 ready, 1 review (US-100x `t_e3b36e70` -- FRONT cam socket leak fix, **commit `d93d2fb7` on main, work verified at runtime, but card assignee=qa stuck in chronic `blocker_auth` respawn loop since 2026-10-04 09:56:19** -- see Open work below), 1 blocked (US-094b `t_cc46f691` -- motion-off firmware limitation), 0 running. 188 cards done. **V2-094 SHIPPED 2026-09-30** (`6fb4979d`, forgejo in sync): US-094a (BEFORE snapshot, `t_e72debae` done), US-094b (`t_cc46f691` blocked at Reolink firmware SetMotion rejection), US-094c (encode_set to H.265 + 2fps + native res, `t_13a41934` done -- 3840x2160 on RLC-833A, 2560x1920 on RLC-510A, all 6 cams), US-094d (RTSP URL fix + listener restart, `t_cdb6c624` done), US-094e (`t_83c4ef05` ready -- 5-day observation arc starts 2026-09-30 17:24 EDT, due 2026-10-05 17:24 EDT). Operator pre-deconfigured rule: "no custom code in v2; all changes flow through the open-source Reolink MCP at ~/reolink-cli/". **V2-099 done 2026-10-04** (43-char API/MCP tokens, listener restarted, API/MCP `bound=True` on the machine tailnet IP). **V2-100 done 2026-10-04** (FRONT cam socket leak in `_reconnect_loop` swap path, runtime-verified: 36 -> 1 ESTABLISHED sockets).
+- **Three-process deployment (2026-09-25, US-076):** listener :8090 + MCP :8091 + API :8092 all spawned by `listener/daemon.py` daemon-thread hooks (`_start_mcp_server` line 1014, `_start_api_server` line 1073, called before `app.run()` at line 1196). Gated by `FARMSURV_MCP_ENABLED=1` + `FARMSURV_API_ENABLED=1` in `~/.env`. Tokens >=32 chars, bind to the machine tailnet IP.
 - **Local Qwen context (2026-09-24 ~18:25 EDT):** llama-server `-c 196608`, `-np 2`, `--kv-unified`. `model.context_length: 196608` in `~/.hermes/config.yaml`. RSS ~25.7 GB. PID 24330 on :8093. Vision endpoint at `:8080` healthy (HTTP 200 on `/v1/chat/completions`, ~1.8s response).
 - **Per-camera night suppress (V2-069):** `FARMSURV_NIGHT_SUPPRESS_CAMERAS=OUTSIDE_BACK_SOLAR` + `FARMSURV_NIGHT_SUPPRESS_CLASSES=car,truck,bicycle,motorcycle,bus` active. Confirmed live in boot log.
 - **Telegram caption format (US-074+074b+075):** HTML parse_mode (`<b>`+`<code>` allowed via `escape_html` allowlist). `sendMessage`/`sendPhoto` honor top-level `parse_mode`; `sendMediaGroup` requires parse_mode per InputMedia (US-074b fix, was top-level-silently-ignored bug). Bold-label rule: word-before-colon bold, word-after plain. Bold `<b>...</b>` for section labels, `<code>...</code>` for timestamps/IDs. Em-dash between attributes removed in US-075.
 - **Animal recognition (V2-045, COMPLETE 2026-09-25):** US-045a/b/c/d/e/f all done. MegaDescriptor-L-384 wrapper at `infra/animal_embedder.py`. Animal branch wired into pipeline Stage 12+13. `scripts/enroll_animal.py` CLI. Tier-2 cosine + Tier-1 Jaccard matching at `animal_matcher/match.py`. **Finnegan enrolled** 2026-09-25 19:24 EDT — labeled "Finnegan" (species dog, breed goldendoodle, distinctive: black collar, curly coat, white patch). 2 individual crop embeddings + 1 averaged stored in `data/known/animals/embeddings.npz` under keys `finnegan__crop_a.png`, `finnegan__crop_b.png`, `finnegan__avg`.
 - **Animal embedder live mode (US-081):** `ANIMAL_EMBEDDER_LIVE=1` set in `~/.env` (variable added to `.env.example` with comment). MegaDescriptor-L-384 weights cached at `~/Library/Caches/huggingface/hub/`. Live embeddings used for Finnegan enrollment.
 - **Person recognition (V2-059, IN PROGRESS):** US-059a/b/d/e shipped (person_embedder.py via CLIP-ViT-B/32, person_matcher with CLIP cosine + Tier-1 Jaccard, person branch in pipeline Stage 12+13, TG#3 wiring). US-059c (enrollment CLI + initial enrollment) not yet dispatched. Jeremiah enrollment pending operator action.
-- **Forgejo recovery mirror (US-068e):** `.git/hooks/post-merge` wired. **IN SYNC 2026-09-30 17:25 EDT** -- local `6fb4979d` = forgejo `6fb4979d`. Earlier 2026-09-29 20:57 EDT drift (local `85dfaf9` != forgejo `50e7afff`) resolved by `bash scripts/push_to_forgejo.sh` once `deruyter:3000` (and Tailscale 100.64.0.1) became reachable. Push-log exit=128 (75s TLS) on 2026-09-28 16:34 was a separate transient that recovered without intervention.
+- **Forgejo recovery mirror (US-068e):** `.git/hooks/post-merge` wired. **IN SYNC 2026-09-30 17:25 EDT** -- local `6fb4979d` = forgejo `6fb4979d`. Earlier 2026-09-29 20:57 EDT drift (local `85dfaf9` != forgejo `50e7afff`) resolved by `bash scripts/push_to_forgejo.sh` once the forgejo host and NAS tailnet IP became reachable. Push-log exit=128 (75s TLS) on 2026-09-28 16:34 was a separate transient that recovered without intervention.
 - **Worktree reap (2026-09-29):** 48 stale worktrees reaped (~9 GB -> 17 MB on `.worktrees/`). All work preserved via `archive/<branch>-<sha>` tags. 6 merged branches with no worktree deleted. 3 exceptions handled: US-067d/US-068b7 original branches tagged-archived (remediation on main); US-060b tagged-archived (officially superseded per US-087 triage).
 - Disk: ~224 GiB free / 460 GiB (5% used).
 - **Last commits on main:**
@@ -270,7 +270,7 @@ python3 -c "from infra._telegram_origin import origin_prefix; print(origin_prefi
 | V2-069 | Per-camera + per-class night suppress | DONE — US-069a/b/c/d done; import-order bug fixed at `09d93e8`; fail-loud at `0835952` |
 | V2-080 | Unit-test audit + E2E-first convention | DONE — US-080a audit + US-080b delete classified DELETE + US-080c REPLACE-WITH-E2E + US-080e/f E2E tests for farm_api + alert_route (71 tests) |
 | **V2-091** | VM1 owns routing decision (gate drops, VM1 classifies) | DONE -- `eefe5f03` on main; 233 runtime override events since 14:03 EDT 2026-09-29 (gate=md -> vm1=vehicle/person) |
-| **V2-094** | Reolink AI-only alerting + H.265 main stream + native 4K resolution (via open-source MCP) | SHIPPED 2026-09-30 (`6fb4979d`) -- US-094a/c/d done, US-094b blocked at firmware, US-094e ready (5-day observation arc starts 2026-09-30 17:24 EDT, due 2026-10-05 17:24 EDT). No custom code in v2; all changes via `/Users/jill/.local/bin/reolink-cli` mcp-server. Listener restarted at PID 14330 (~14h uptime, all 6 cams healthy at native 4K/5MP H.265 2fps). RTSP URL paths fixed from `h264Preview_01_main` to `Preview_01_main` for OUTSIDE cams; FRONT/BACK got path appended. `.env` placeholders `__float__` for MOTION_GATE_NIGHT_CONF_FLOOR + MOTION_GATE_NIGHT_BRIGHTNESS_RATIO fixed to module defaults (pre-existing bug masked until listener restart). |
+| **V2-094** | Reolink AI-only alerting + H.265 main stream + native 4K resolution (via open-source MCP) | SHIPPED 2026-09-30 (`6fb4979d`) -- US-094a/c/d done, US-094b blocked at firmware, US-094e ready (5-day observation arc starts 2026-09-30 17:24 EDT, due 2026-10-05 17:24 EDT). No custom code in v2; all changes via `~/.local/bin/reolink-cli` mcp-server. Listener restarted at PID 14330 (~14h uptime, all 6 cams healthy at native 4K/5MP H.265 2fps). RTSP URL paths fixed from `h264Preview_01_main` to `Preview_01_main` for OUTSIDE cams; FRONT/BACK got path appended. `.env` placeholders `__float__` for MOTION_GATE_NIGHT_CONF_FLOOR + MOTION_GATE_NIGHT_BRIGHTNESS_RATIO fixed to module defaults (pre-existing bug masked until listener restart). |
 | **V2-092** | Heartbeat TG-on-fail + watchdog restart ladder + in-listener scheduling | SHIPPED -- US-092a (`fabe1f88`), US-092b (`653ce6db`), US-092c (`50e7afff`), US-092d (`bfdec91c` -- added during compaction pause: gate person detection to FRONT/BACK only). Listener bytecode reloaded at 2026-09-30 17:24 EDT via `launchctl kickstart -k` (PID 14330). |
 | **V2-093** | vision_health last_call_age_s reset on successful /v1/chat/completions | SHIPPED -- US-093a (`d46c34e4`). Listener bytecode reloaded 2026-09-30 17:24 EDT. `vision_health: up=False` still observed at boot -- pre-existing issue, may need separate diagnostic if it persists >24h after reload. |
 | **V2-045** | **Animal body recognition (MegaDescriptor-L-384)** | **DONE** — US-045a-f all done; Finnegan enrolled; live embeddings active |

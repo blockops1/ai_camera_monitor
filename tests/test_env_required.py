@@ -14,6 +14,10 @@ import importlib
 import os
 import subprocess
 import sys
+from pathlib import Path
+
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+_REPO_ROOT_LIT = repr(_REPO_ROOT)  # interpolated into embedded -c snippets
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -98,7 +102,7 @@ def _import_via_subprocess(
         capture_output=True,
         text=True, check=False,
         env=env,
-        cwd="/Users/jill/farm-surveillance-v2",
+        cwd=_REPO_ROOT,
     )
     return result.returncode, result.stdout + result.stderr
 
@@ -122,7 +126,7 @@ def _import_via_subprocess_clear_var(
         capture_output=True,
         text=True, check=False,
         env=env,
-        cwd="/Users/jill/farm-surveillance-v2",
+        cwd=_REPO_ROOT,
     )
     return result.returncode, result.stdout + result.stderr
 
@@ -145,11 +149,11 @@ def test_require_env_raises_when_unset() -> None:
             "          'TELEGRAM_BOT_TOKEN', 'TELEGRAM_HOME_CHAT_ID']:\n"
             "    os.environ.pop(v, None)\n"
             "os.environ['TEST_UNSET_VAR'] = 'still_set'\n"
-            "import sys; sys.path.insert(0, '/Users/jill/farm-surveillance-v2')\n"
+            "import sys; sys.path.insert(0, " + _REPO_ROOT_LIT + ")\n"
             "import importlib.util\n"
             "spec = importlib.util.spec_from_file_location(\n"
             "    'env_required',\n"
-            "    '/Users/jill/farm-surveillance-v2/infra/env_required.py'\n"
+            "    " + _REPO_ROOT_LIT + " + '/infra/env_required.py'\n"
             ")\n"
             "mod = importlib.util.module_from_spec(spec)\n"
             "spec.loader.exec_module(mod)\n"
@@ -163,7 +167,7 @@ def test_require_env_raises_when_unset() -> None:
             "    print('FAIL'); import sys; sys.exit(1)\n"
         )],
         capture_output=True, text=True, check=False,
-        cwd="/Users/jill/farm-surveillance-v2",
+        cwd=_REPO_ROOT,
     )
     assert result.returncode == 0, f"expected exit 0: {result.stdout}{result.stderr}"
     assert "OK" in result.stdout
@@ -184,11 +188,11 @@ def test_require_env_returns_value_when_set() -> None:
             "          'TELEGRAM_BOT_TOKEN', 'TELEGRAM_HOME_CHAT_ID']:\n"
             "    os.environ.setdefault(v, 'placeholder')\n"
             "os.environ['TEST_RETURN_VAR'] = 'hello'\n"
-            "import sys; sys.path.insert(0, '/Users/jill/farm-surveillance-v2')\n"
+            "import sys; sys.path.insert(0, " + _REPO_ROOT_LIT + ")\n"
             "import importlib.util\n"
             "spec = importlib.util.spec_from_file_location(\n"
             "    'env_required',\n"
-            "    '/Users/jill/farm-surveillance-v2/infra/env_required.py'\n"
+            "    " + _REPO_ROOT_LIT + " + '/infra/env_required.py'\n"
             ")\n"
             "mod = importlib.util.module_from_spec(spec)\n"
             "spec.loader.exec_module(mod)\n"
@@ -197,7 +201,7 @@ def test_require_env_returns_value_when_set() -> None:
             "print('OK')\n"
         )],
         capture_output=True, text=True, check=False,
-        cwd="/Users/jill/farm-surveillance-v2",
+        cwd=_REPO_ROOT,
     )
     assert result.returncode == 0, f"expected exit 0: {result.stderr}"
     assert "OK" in result.stdout
@@ -218,11 +222,11 @@ def test_require_env_raises_on_empty_string() -> None:
             "          'TELEGRAM_BOT_TOKEN', 'TELEGRAM_HOME_CHAT_ID']:\n"
             "    os.environ.setdefault(v, 'placeholder')\n"
             "os.environ['TEST_EMPTY_VAR'] = ''\n"
-            "import sys; sys.path.insert(0, '/Users/jill/farm-surveillance-v2')\n"
+            "import sys; sys.path.insert(0, " + _REPO_ROOT_LIT + ")\n"
             "import importlib.util\n"
             "spec = importlib.util.spec_from_file_location(\n"
             "    'env_required',\n"
-            "    '/Users/jill/farm-surveillance-v2/infra/env_required.py'\n"
+            "    " + _REPO_ROOT_LIT + " + '/infra/env_required.py'\n"
             ")\n"
             "mod = importlib.util.module_from_spec(spec)\n"
             "spec.loader.exec_module(mod)\n"
@@ -235,7 +239,7 @@ def test_require_env_raises_on_empty_string() -> None:
             "    print('FAIL'); import sys; sys.exit(1)\n"
         )],
         capture_output=True, text=True, check=False,
-        cwd="/Users/jill/farm-surveillance-v2",
+        cwd=_REPO_ROOT,
     )
     assert result.returncode == 0, f"expected exit 0: {result.stderr}"
     assert "OK" in result.stdout
@@ -256,11 +260,11 @@ def test_require_env_lower_bool_true_values() -> None:
                 "          'FARMSURV_MCP_TOKEN',\n"
                 "          'TELEGRAM_BOT_TOKEN', 'TELEGRAM_HOME_CHAT_ID']:\n"
                 "    os.environ.setdefault(v, 'placeholder')\n"
-                "import sys; sys.path.insert(0, '/Users/jill/farm-surveillance-v2')\n"
+                "import sys; sys.path.insert(0, " + _REPO_ROOT_LIT + ")\n"
                 "import importlib.util\n"
                 "spec = importlib.util.spec_from_file_location(\n"
                 "    'env_required',\n"
-                "    '/Users/jill/farm-surveillance-v2/infra/env_required.py'\n"
+                "    " + _REPO_ROOT_LIT + " + '/infra/env_required.py'\n"
                 ")\n"
                 "mod = importlib.util.module_from_spec(spec)\n"
                 "spec.loader.exec_module(mod)\n"
@@ -269,7 +273,7 @@ def test_require_env_lower_bool_true_values() -> None:
                 "print('OK')\n"
             )],
             capture_output=True, text=True, check=False,
-            cwd="/Users/jill/farm-surveillance-v2",
+            cwd=_REPO_ROOT,
         )
         assert result.returncode == 0, f"expected exit 0 for {val!r}: {result.stderr}"
         assert "OK" in result.stdout
@@ -290,11 +294,11 @@ def test_require_env_lower_bool_false_values() -> None:
                 "          'FARMSURV_MCP_TOKEN',\n"
                 "          'TELEGRAM_BOT_TOKEN', 'TELEGRAM_HOME_CHAT_ID']:\n"
                 "    os.environ.setdefault(v, 'placeholder')\n"
-                "import sys; sys.path.insert(0, '/Users/jill/farm-surveillance-v2')\n"
+                "import sys; sys.path.insert(0, " + _REPO_ROOT_LIT + ")\n"
                 "import importlib.util\n"
                 "spec = importlib.util.spec_from_file_location(\n"
                 "    'env_required',\n"
-                "    '/Users/jill/farm-surveillance-v2/infra/env_required.py'\n"
+                "    " + _REPO_ROOT_LIT + " + '/infra/env_required.py'\n"
                 ")\n"
                 "mod = importlib.util.module_from_spec(spec)\n"
                 "spec.loader.exec_module(mod)\n"
@@ -303,7 +307,7 @@ def test_require_env_lower_bool_false_values() -> None:
                 "print('OK')\n"
             )],
             capture_output=True, text=True, check=False,
-            cwd="/Users/jill/farm-surveillance-v2",
+            cwd=_REPO_ROOT,
         )
         assert result.returncode == 0, f"expected exit 0 for {val!r}: {result.stderr}"
         assert "OK" in result.stdout
@@ -323,11 +327,11 @@ def test_require_env_lower_bool_raises_when_unset() -> None:
             "          'TELEGRAM_BOT_TOKEN', 'TELEGRAM_HOME_CHAT_ID']:\n"
             "    os.environ.setdefault(v, 'placeholder')\n"
             "os.environ.pop('UNSET_BOOL_TEST', None)\n"
-            "import sys; sys.path.insert(0, '/Users/jill/farm-surveillance-v2')\n"
+            "import sys; sys.path.insert(0, " + _REPO_ROOT_LIT + ")\n"
             "import importlib.util\n"
             "spec = importlib.util.spec_from_file_location(\n"
             "    'env_required',\n"
-            "    '/Users/jill/farm-surveillance-v2/infra/env_required.py'\n"
+            "    " + _REPO_ROOT_LIT + " + '/infra/env_required.py'\n"
             ")\n"
             "mod = importlib.util.module_from_spec(spec)\n"
             "spec.loader.exec_module(mod)\n"
@@ -339,7 +343,7 @@ def test_require_env_lower_bool_raises_when_unset() -> None:
             "    print('FAIL'); import sys; sys.exit(1)\n"
         )],
         capture_output=True, text=True, check=False,
-        cwd="/Users/jill/farm-surveillance-v2",
+        cwd=_REPO_ROOT,
     )
     assert result.returncode == 0, f"expected exit 0: {result.stderr}"
     assert "OK" in result.stdout
@@ -359,11 +363,11 @@ def test_require_csv_env_returns_list_when_set() -> None:
             "          'FARMSURV_MCP_TOKEN',\n"
             "          'TELEGRAM_BOT_TOKEN', 'TELEGRAM_HOME_CHAT_ID']:\n"
             "    os.environ.setdefault(v, 'placeholder')\n"
-            "import sys; sys.path.insert(0, '/Users/jill/farm-surveillance-v2')\n"
+            "import sys; sys.path.insert(0, " + _REPO_ROOT_LIT + ")\n"
             "import importlib.util\n"
             "spec = importlib.util.spec_from_file_location(\n"
             "    'env_required',\n"
-            "    '/Users/jill/farm-surveillance-v2/infra/env_required.py'\n"
+            "    " + _REPO_ROOT_LIT + " + '/infra/env_required.py'\n"
             ")\n"
             "mod = importlib.util.module_from_spec(spec)\n"
             "spec.loader.exec_module(mod)\n"
@@ -372,7 +376,7 @@ def test_require_csv_env_returns_list_when_set() -> None:
             "print('OK')\n"
         )],
         capture_output=True, text=True, check=False,
-        cwd="/Users/jill/farm-surveillance-v2",
+        cwd=_REPO_ROOT,
     )
     assert result.returncode == 0, f"expected exit 0: {result.stderr}"
     assert "OK" in result.stdout
@@ -392,11 +396,11 @@ def test_require_csv_env_returns_empty_when_blank() -> None:
             "          'FARMSURV_MCP_TOKEN',\n"
             "          'TELEGRAM_BOT_TOKEN', 'TELEGRAM_HOME_CHAT_ID']:\n"
             "    os.environ.setdefault(v, 'placeholder')\n"
-            "import sys; sys.path.insert(0, '/Users/jill/farm-surveillance-v2')\n"
+            "import sys; sys.path.insert(0, " + _REPO_ROOT_LIT + ")\n"
             "import importlib.util\n"
             "spec = importlib.util.spec_from_file_location(\n"
             "    'env_required',\n"
-            "    '/Users/jill/farm-surveillance-v2/infra/env_required.py'\n"
+            "    " + _REPO_ROOT_LIT + " + '/infra/env_required.py'\n"
             ")\n"
             "mod = importlib.util.module_from_spec(spec)\n"
             "spec.loader.exec_module(mod)\n"
@@ -405,7 +409,7 @@ def test_require_csv_env_returns_empty_when_blank() -> None:
             "print('OK')\n"
         )],
         capture_output=True, text=True, check=False,
-        cwd="/Users/jill/farm-surveillance-v2",
+        cwd=_REPO_ROOT,
     )
     assert result.returncode == 0, f"expected exit 0: {result.stderr}"
     assert "OK" in result.stdout
@@ -433,11 +437,11 @@ def test_require_csv_env_returns_empty_when_empty_string() -> None:
             "          'FARMSURV_MCP_TOKEN',\n"
             "          'TELEGRAM_BOT_TOKEN', 'TELEGRAM_HOME_CHAT_ID']:\n"
             "    os.environ.setdefault(v, 'placeholder')\n"
-            "import sys; sys.path.insert(0, '/Users/jill/farm-surveillance-v2')\n"
+            "import sys; sys.path.insert(0, " + _REPO_ROOT_LIT + ")\n"
             "import importlib.util\n"
             "spec = importlib.util.spec_from_file_location(\n"
             "    'env_required',\n"
-            "    '/Users/jill/farm-surveillance-v2/infra/env_required.py'\n"
+            "    " + _REPO_ROOT_LIT + " + '/infra/env_required.py'\n"
             ")\n"
             "mod = importlib.util.module_from_spec(spec)\n"
             "spec.loader.exec_module(mod)\n"
@@ -446,7 +450,7 @@ def test_require_csv_env_returns_empty_when_empty_string() -> None:
             "print('OK')\n"
         )],
         capture_output=True, text=True, check=False,
-        cwd="/Users/jill/farm-surveillance-v2",
+        cwd=_REPO_ROOT,
     )
     assert result.returncode == 0, f"expected exit 0: {result.stderr}"
     assert "OK" in result.stdout
@@ -473,11 +477,11 @@ def test_require_csv_env_returns_empty_when_unset() -> None:
             "          'TELEGRAM_BOT_TOKEN', 'TELEGRAM_HOME_CHAT_ID']:\n"
             "    os.environ.setdefault(v, 'placeholder')\n"
             "os.environ.pop('UNSET_CSV_TEST', None)\n"
-            "import sys; sys.path.insert(0, '/Users/jill/farm-surveillance-v2')\n"
+            "import sys; sys.path.insert(0, " + _REPO_ROOT_LIT + ")\n"
             "import importlib.util\n"
             "spec = importlib.util.spec_from_file_location(\n"
             "    'env_required',\n"
-            "    '/Users/jill/farm-surveillance-v2/infra/env_required.py'\n"
+            "    " + _REPO_ROOT_LIT + " + '/infra/env_required.py'\n"
             ")\n"
             "mod = importlib.util.module_from_spec(spec)\n"
             "spec.loader.exec_module(mod)\n"
@@ -486,7 +490,7 @@ def test_require_csv_env_returns_empty_when_unset() -> None:
             "print('OK')\n"
         )],
         capture_output=True, text=True, check=False,
-        cwd="/Users/jill/farm-surveillance-v2",
+        cwd=_REPO_ROOT,
     )
     assert result.returncode == 0, f"expected exit 0: {result.stderr}"
     assert "OK" in result.stdout
@@ -560,7 +564,7 @@ def test_quiet_hours_gate_requires_flag() -> None:
         )],
         capture_output=True, text=True, check=False,
         env=_set_all_required(),
-        cwd="/Users/jill/farm-surveillance-v2",
+        cwd=_REPO_ROOT,
     )
     assert result.returncode == 0, f"expected exit 0: {result.stdout}{result.stderr}"
     assert "OK:" in result.stdout
@@ -597,7 +601,7 @@ def test_mcp_auth_validate_token_requires_32_chars() -> None:
         )],
         capture_output=True, text=True, check=False,
         env=_set_all_required(),
-        cwd="/Users/jill/farm-surveillance-v2",
+        cwd=_REPO_ROOT,
     )
     assert result.returncode == 0, f"expected exit 0: {result.stdout}{result.stderr}"
     assert "OK" in result.stdout

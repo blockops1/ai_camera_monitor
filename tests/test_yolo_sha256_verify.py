@@ -156,7 +156,7 @@ class TestExtraShaEnvVar:
             env=env,
             capture_output=True,
             text=True,
-            cwd="/Users/jill/farm-surveillance-v2",
+            cwd=str(Path(__file__).resolve().parent.parent),
         )
         assert result.returncode != 0
         assert "must be 64 lowercase hex chars" in result.stderr

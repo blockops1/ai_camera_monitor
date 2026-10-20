@@ -18,9 +18,9 @@
   },
   "shipping_definition": "(a) infra/gate.py contains _read_global_change_max_pct(), _bbox_area_pct(), and the suppression block that returns GateVerdict(reason='global_change'). (b) .env.example documents FARMSURV_GLOBAL_CHANGE_MAX_PCT with calibration comment. (c) tests/test_gate_global_change_suppress.py has 5+ tests covering: 60% default suppresses 67% bbox, 25% bbox not suppressed, 50% bbox at 40% threshold suppressed, 0 disables, env-var loader handles garbage. (d) Full pytest suite stays green (regression guard). (e) git commit on main with US-063 prefix. (f) Working tree clean. (g) Listener restart deferred to operator ack post-merge per AGENTS.md Step 2 #4 (in-flight kanban US-061d/062b/c/d/e currently running, do not disrupt).",
   "scope_exclusions": [
-    "Do NOT touch /Users/jill/farm-surveillance-refactor/. Frozen archive.",
-    "Do NOT touch /Users/jill/farm-surveillance-internal/. Frozen archive.",
-    "Do NOT touch /Users/jill/farm-surveillance/ (v1). OFF and stays OFF.",
+    "Do NOT touch ~/farm-surveillance-refactor/. Frozen archive.",
+    "Do NOT touch ~/farm-surveillance-internal/. Frozen archive.",
+    "Do NOT touch ~/farm-surveillance/ (v1). OFF and stays OFF.",
     "Do NOT git push to forgejo or GitHub. Operator reviews and pushes.",
     "Do NOT install new skills. Use existing skill set.",
     "Do NOT touch any Reolink camera web-UI. Cameras OFF-LIMITS.",
@@ -50,18 +50,18 @@
       "depends_on": [],
       "rationale": "All fix logic lives here. Insertion point chosen because the existing no_server_motion check is the closest analogue (same return shape, same log style) and gates BEFORE YOLO runs \u2014 exactly where global-change detection belongs.",
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -nE '^def _read_global_change_max_pct' infra/gate.py | wc -l -> 1 (helper function exists).",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -nE '^def _bbox_area_pct' infra/gate.py | wc -l -> 1 (second helper function exists).",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && grep -nE 'os\\.environ\\.get\\([\"\\']FARMSURV_GLOBAL_CHANGE_MAX_PCT[\"\\']' infra/gate.py | wc -l -> 1 (env var name is wired through, no hardcoded threshold).",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && grep -cE 'GLOBAL_CHANGE_MAX_PCT\\s*=' infra/gate.py -> 0 hardcoded assignment to GLOBAL_CHANGE_MAX_PCT (proves env-driven, not hardcoded constant).",
-        "AC5: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from infra.gate import _read_global_change_max_pct, _bbox_area_pct; import os; os.environ[\"FARMSURV_GLOBAL_CHANGE_MAX_PCT\"]=\"42\"; assert _read_global_change_max_pct()==42.0, _read_global_change_max_pct(); del os.environ[\"FARMSURV_GLOBAL_CHANGE_MAX_PCT\"]; assert _read_global_change_max_pct()==60.0, _read_global_change_max_pct(); os.environ[\"FARMSURV_GLOBAL_CHANGE_MAX_PCT\"]=\"garbage\"; assert _read_global_change_max_pct()==60.0, _read_global_change_max_pct(); del os.environ[\"FARMSURV_GLOBAL_CHANGE_MAX_PCT\"]; os.environ[\"FARMSURV_GLOBAL_CHANGE_MAX_PCT\"]=\"0\"; assert _read_global_change_max_pct()==0.0, _read_global_change_max_pct(); del os.environ[\"FARMSURV_GLOBAL_CHANGE_MAX_PCT\"]; assert _bbox_area_pct((0,0,2304,1120),2304,1296) == 100.0*2304*1120/(2304*1296); assert _bbox_area_pct(None,2304,1296)==0.0' -> exit 0 (helper behavior: env honored, default=60, garbage falls back, 0 disables, helper math correct).",
-        "AC6: cd /Users/jill/farm-surveillance-v2 && grep -nE 'reason=[\"\\']global_change[\"\\']' infra/gate.py | wc -l -> >= 1 (GateVerdict returned with reason='global_change').",
-        "AC7: cd /Users/jill/farm-surveillance-v2 && grep -B2 -A2 'reason=[\"\\']global_change[\"\\']' infra/gate.py | grep -cE 'classification=\"none\"' -> >= 1 (suppression returns classification='none').",
-        "AC8: cd /Users/jill/farm-surveillance-v2 && python3 -c 'from infra.gate import GateVerdict; v = GateVerdict(classification=\"none\", class_label=None, confidence=0.0, top_class=\"\", top_confidence=0.0, frames=[], bbox_a=None, bbox_b=None, crop_bbox_a=None, crop_bbox_b=None, reason=\"global_change\"); assert v.classification == \"none\" and v.reason == \"global_change\" and v.is_none()' -> exit 0 (returned GateVerdict is well-formed).",
-        "AC9: cd /Users/jill/farm-surveillance-v2 && bash bin/preflight_v2_only.sh && git add infra/gate.py && git diff --cached --name-only | grep -E 'farm-surveillance-refactor|farm-surveillance-internal|farm-surveillance/' | wc -l -> 0 (no files from refactor/v1/internal accidentally staged).",
-        "RESIDUE: cd /Users/jill/farm-surveillance-v2 && git status --porcelain | wc -l -> 0 before commit (working tree clean of unrelated edits).",
-        "GIT-1: cd /Users/jill/farm-surveillance-v2 && git log --oneline main -10 | grep -iE 'US-063a' | wc -l -> >= 1 (commit with story id on main).",
-        "GIT-2: cd /Users/jill/farm-surveillance-v2 && git show main:infra/gate.py | grep -cE 'global_change|FARMSURV_GLOBAL_CHANGE_MAX_PCT' -> >= 2 (commit on main contains both the reason string and the env var name)."
+        "AC1: cd <INSTALL_DIR> && grep -nE '^def _read_global_change_max_pct' infra/gate.py | wc -l -> 1 (helper function exists).",
+        "AC2: cd <INSTALL_DIR> && grep -nE '^def _bbox_area_pct' infra/gate.py | wc -l -> 1 (second helper function exists).",
+        "AC3: cd <INSTALL_DIR> && grep -nE 'os\\.environ\\.get\\([\"\\']FARMSURV_GLOBAL_CHANGE_MAX_PCT[\"\\']' infra/gate.py | wc -l -> 1 (env var name is wired through, no hardcoded threshold).",
+        "AC4: cd <INSTALL_DIR> && grep -cE 'GLOBAL_CHANGE_MAX_PCT\\s*=' infra/gate.py -> 0 hardcoded assignment to GLOBAL_CHANGE_MAX_PCT (proves env-driven, not hardcoded constant).",
+        "AC5: cd <INSTALL_DIR> && python3 -c 'from infra.gate import _read_global_change_max_pct, _bbox_area_pct; import os; os.environ[\"FARMSURV_GLOBAL_CHANGE_MAX_PCT\"]=\"42\"; assert _read_global_change_max_pct()==42.0, _read_global_change_max_pct(); del os.environ[\"FARMSURV_GLOBAL_CHANGE_MAX_PCT\"]; assert _read_global_change_max_pct()==60.0, _read_global_change_max_pct(); os.environ[\"FARMSURV_GLOBAL_CHANGE_MAX_PCT\"]=\"garbage\"; assert _read_global_change_max_pct()==60.0, _read_global_change_max_pct(); del os.environ[\"FARMSURV_GLOBAL_CHANGE_MAX_PCT\"]; os.environ[\"FARMSURV_GLOBAL_CHANGE_MAX_PCT\"]=\"0\"; assert _read_global_change_max_pct()==0.0, _read_global_change_max_pct(); del os.environ[\"FARMSURV_GLOBAL_CHANGE_MAX_PCT\"]; assert _bbox_area_pct((0,0,2304,1120),2304,1296) == 100.0*2304*1120/(2304*1296); assert _bbox_area_pct(None,2304,1296)==0.0' -> exit 0 (helper behavior: env honored, default=60, garbage falls back, 0 disables, helper math correct).",
+        "AC6: cd <INSTALL_DIR> && grep -nE 'reason=[\"\\']global_change[\"\\']' infra/gate.py | wc -l -> >= 1 (GateVerdict returned with reason='global_change').",
+        "AC7: cd <INSTALL_DIR> && grep -B2 -A2 'reason=[\"\\']global_change[\"\\']' infra/gate.py | grep -cE 'classification=\"none\"' -> >= 1 (suppression returns classification='none').",
+        "AC8: cd <INSTALL_DIR> && python3 -c 'from infra.gate import GateVerdict; v = GateVerdict(classification=\"none\", class_label=None, confidence=0.0, top_class=\"\", top_confidence=0.0, frames=[], bbox_a=None, bbox_b=None, crop_bbox_a=None, crop_bbox_b=None, reason=\"global_change\"); assert v.classification == \"none\" and v.reason == \"global_change\" and v.is_none()' -> exit 0 (returned GateVerdict is well-formed).",
+        "AC9: cd <INSTALL_DIR> && bash bin/preflight_v2_only.sh && git add infra/gate.py && git diff --cached --name-only | grep -E 'farm-surveillance-refactor|farm-surveillance-internal|farm-surveillance/' | wc -l -> 0 (no files from refactor/v1/internal accidentally staged).",
+        "RESIDUE: cd <INSTALL_DIR> && git status --porcelain | wc -l -> 0 before commit (working tree clean of unrelated edits).",
+        "GIT-1: cd <INSTALL_DIR> && git log --oneline main -10 | grep -iE 'US-063a' | wc -l -> >= 1 (commit with story id on main).",
+        "GIT-2: cd <INSTALL_DIR> && git show main:infra/gate.py | grep -cE 'global_change|FARMSURV_GLOBAL_CHANGE_MAX_PCT' -> >= 2 (commit on main contains both the reason string and the env var name)."
       ],
       "files_touched": [
         "infra/gate.py"
@@ -83,17 +83,17 @@
       ],
       "rationale": "Each gate suppression path needs a regression test so future changes to infra/gate.py cannot silently break the suppression. Mirrors the established V2-046 test_gate_routing_classification pattern.",
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && test -f tests/test_gate_global_change_suppress.py && wc -l tests/test_gate_global_change_suppress.py -> >= 150 lines (test file exists, sized for 5 tests with helpers).",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -cE '^def test_' tests/test_gate_global_change_suppress.py -> >= 5 (at least 5 test functions).",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && grep -E 'def test_' tests/test_gate_global_change_suppress.py | grep -iE 'global_change|suppress|threshold|disable|helper' | wc -l -> >= 5 (tests cover: suppression, pass-through, threshold, kill-switch, helper math).",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python3 -m pytest tests/test_gate_global_change_suppress.py -v --tb=short 2>&1 | tail -20 -> all tests pass (the file's tests actually run and pass).",
-        "AC5: cd /Users/jill/farm-surveillance-v2 && grep -cE 'FakeClassifier|classify_frame' tests/test_gate_global_change_suppress.py -> >= 1 (uses FakeClassifier pattern, no real YOLO dependency).",
-        "AC6: cd /Users/jill/farm-surveillance-v2 && grep -nE 'import.*llama|llama_server|VISION_LLM_URL' tests/test_gate_global_change_suppress.py | wc -l -> 0 (no llama-server imports \u2014 must run in unit-test env without GPU).",
-        "AC7: cd /Users/jill/farm-surveillance-v2 && grep -nE 'reason=[\"\\']global_change[\"\\']|reason==[\"\\']global_change[\"\\']' tests/test_gate_global_change_suppress.py | wc -l -> >= 1 (tests assert the specific reason string).",
-        "AC8: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python3 -m pytest tests/ -q --tb=short 2>&1 | tail -3 -> 'X passed' where X is the total across all tests/ (regression guard: existing 55+ tests still pass).",
-        "AC9: cd /Users/jill/farm-surveillance-v2 && bash bin/preflight_v2_only.sh && git add tests/test_gate_global_change_suppress.py && git diff --cached --name-only | grep -vE '^tests/test_gate_global_change_suppress\\.py$' | wc -l -> 0 (no files other than the new test file staged in this commit).",
-        "RESIDUE: cd /Users/jill/farm-surveillance-v2 && git status --porcelain | wc -l -> 0 before commit.",
-        "GIT-1: cd /Users/jill/farm-surveillance-v2 && git log --oneline main -10 | grep -iE 'US-063b' | wc -l -> >= 1 (commit with story id on main)."
+        "AC1: cd <INSTALL_DIR> && test -f tests/test_gate_global_change_suppress.py && wc -l tests/test_gate_global_change_suppress.py -> >= 150 lines (test file exists, sized for 5 tests with helpers).",
+        "AC2: cd <INSTALL_DIR> && grep -cE '^def test_' tests/test_gate_global_change_suppress.py -> >= 5 (at least 5 test functions).",
+        "AC3: cd <INSTALL_DIR> && grep -E 'def test_' tests/test_gate_global_change_suppress.py | grep -iE 'global_change|suppress|threshold|disable|helper' | wc -l -> >= 5 (tests cover: suppression, pass-through, threshold, kill-switch, helper math).",
+        "AC4: cd <INSTALL_DIR> && .venv/bin/python3 -m pytest tests/test_gate_global_change_suppress.py -v --tb=short 2>&1 | tail -20 -> all tests pass (the file's tests actually run and pass).",
+        "AC5: cd <INSTALL_DIR> && grep -cE 'FakeClassifier|classify_frame' tests/test_gate_global_change_suppress.py -> >= 1 (uses FakeClassifier pattern, no real YOLO dependency).",
+        "AC6: cd <INSTALL_DIR> && grep -nE 'import.*llama|llama_server|VISION_LLM_URL' tests/test_gate_global_change_suppress.py | wc -l -> 0 (no llama-server imports \u2014 must run in unit-test env without GPU).",
+        "AC7: cd <INSTALL_DIR> && grep -nE 'reason=[\"\\']global_change[\"\\']|reason==[\"\\']global_change[\"\\']' tests/test_gate_global_change_suppress.py | wc -l -> >= 1 (tests assert the specific reason string).",
+        "AC8: cd <INSTALL_DIR> && .venv/bin/python3 -m pytest tests/ -q --tb=short 2>&1 | tail -3 -> 'X passed' where X is the total across all tests/ (regression guard: existing 55+ tests still pass).",
+        "AC9: cd <INSTALL_DIR> && bash bin/preflight_v2_only.sh && git add tests/test_gate_global_change_suppress.py && git diff --cached --name-only | grep -vE '^tests/test_gate_global_change_suppress\\.py$' | wc -l -> 0 (no files other than the new test file staged in this commit).",
+        "RESIDUE: cd <INSTALL_DIR> && git status --porcelain | wc -l -> 0 before commit.",
+        "GIT-1: cd <INSTALL_DIR> && git log --oneline main -10 | grep -iE 'US-063b' | wc -l -> >= 1 (commit with story id on main)."
       ],
       "files_touched": [
         "tests/test_gate_global_change_suppress.py"
@@ -116,13 +116,13 @@
       ],
       "rationale": "Without the .env.example doc, the next operator will not know what the knob does or what the calibration context is. The .env.example is the canonical home for runtime feature flag documentation per US-017b + AGENTS.md Step 4.",
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -cE '^FARMSURV_GLOBAL_CHANGE_MAX_PCT=' .env.example -> 1 (env var declared in .env.example).",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -B5 '^FARMSURV_GLOBAL_CHANGE_MAX_PCT=' .env.example | grep -ciE '60.*false.*positive|calibrat' -> >= 1 (calibration comment is present, matches the d54d3b29 / 6-FP / 60% threshold context).",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && grep -B2 '^FARMSURV_GLOBAL_CHANGE_MAX_PCT=' .env.example | grep -ciE 'set to 0 to disable' -> >= 1 (kill-switch behavior documented, matches AGENTS.md no-override rule).",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && bash bin/preflight_v2_only.sh && git add .env.example && git diff --cached --name-only | grep -vE '^\\.env\\.example$' | wc -l -> 0 (only .env.example staged in this commit, no incidental changes).",
-        "AC5: cd /Users/jill/farm-surveillance-v2 && grep -nE 'FARMSURV_GLOBAL_CHANGE_MAX_PCT' ~/Library/LaunchAgents/com.farm.surveillance.v2.plist | wc -l -> 0 (NOT in plist per AGENTS.md Step 4, US-017b).",
-        "RESIDUE: cd /Users/jill/farm-surveillance-v2 && git status --porcelain | wc -l -> 0 before commit.",
-        "GIT-1: cd /Users/jill/farm-surveillance-v2 && git log --oneline main -10 | grep -iE 'US-063c' | wc -l -> >= 1 (commit with story id on main)."
+        "AC1: cd <INSTALL_DIR> && grep -cE '^FARMSURV_GLOBAL_CHANGE_MAX_PCT=' .env.example -> 1 (env var declared in .env.example).",
+        "AC2: cd <INSTALL_DIR> && grep -B5 '^FARMSURV_GLOBAL_CHANGE_MAX_PCT=' .env.example | grep -ciE '60.*false.*positive|calibrat' -> >= 1 (calibration comment is present, matches the d54d3b29 / 6-FP / 60% threshold context).",
+        "AC3: cd <INSTALL_DIR> && grep -B2 '^FARMSURV_GLOBAL_CHANGE_MAX_PCT=' .env.example | grep -ciE 'set to 0 to disable' -> >= 1 (kill-switch behavior documented, matches AGENTS.md no-override rule).",
+        "AC4: cd <INSTALL_DIR> && bash bin/preflight_v2_only.sh && git add .env.example && git diff --cached --name-only | grep -vE '^\\.env\\.example$' | wc -l -> 0 (only .env.example staged in this commit, no incidental changes).",
+        "AC5: cd <INSTALL_DIR> && grep -nE 'FARMSURV_GLOBAL_CHANGE_MAX_PCT' ~/Library/LaunchAgents/com.farm.surveillance.v2.plist | wc -l -> 0 (NOT in plist per AGENTS.md Step 4, US-017b).",
+        "RESIDUE: cd <INSTALL_DIR> && git status --porcelain | wc -l -> 0 before commit.",
+        "GIT-1: cd <INSTALL_DIR> && git log --oneline main -10 | grep -iE 'US-063c' | wc -l -> >= 1 (commit with story id on main)."
       ],
       "files_touched": [
         ".env.example"

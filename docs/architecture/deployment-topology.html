@@ -176,8 +176,8 @@
 
           <!-- Mac mini Tailscale side -->
           <rect x="680" y="100" width="600" height="160" rx="6" fill="rgba(210,168,255,0.10)" stroke="#d2a8ff" stroke-width="2"/>
-          <text x="700" y="122" class="label" fill="#d2a8ff">Mac mini — Tailscale interface (100.64.0.10)</text>
-          <text x="700" y="138" class="anno">bound to 100.64.0.10:8091 (MCP) + 100.64.0.10:8092 (API)</text>
+          <text x="700" y="122" class="label" fill="#d2a8ff">Mac mini — Tailscale interface (<MAC_TAILNET_IP>)</text>
+          <text x="700" y="138" class="anno">bound to <MAC_TAILNET_IP>:8091 (MCP) + <MAC_TAILNET_IP>:8092 (API)</text>
           <text x="700" y="153" class="anno">bearer token auth (FARMSURV_MCP_TOKEN, FARMSURV_API_TOKEN)</text>
 
           <rect x="700" y="166" width="280" height="36" rx="4" fill="rgba(210,168,255,0.18)" stroke="#d2a8ff" stroke-width="1.5"/>
@@ -405,7 +405,7 @@
 
         <text x="680" y="1110" class="title">Hostnames (operator's actual box)</text>
         <g>
-          <text x="680" y="1132" class="anno">Mac mini Tailscale IP:    100.64.0.10</text>
+          <text x="680" y="1132" class="anno">Mac mini Tailscale IP:    <MAC_TAILNET_IP></text>
           <text x="680" y="1150" class="anno">Mac mini LAN IP:          192.168.1.&lt;MAC_LAN_IP&gt;  (interface, not 0.0.0.0)</text>
           <text x="680" y="1168" class="anno">Mac mini localhost:       127.0.0.1 (Qwen3-VL binds here)</text>
           <text x="680" y="1186" class="anno">launchd agent:            com.farm.surveillance.v2</text>

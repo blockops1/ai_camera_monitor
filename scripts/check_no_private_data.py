@@ -54,6 +54,43 @@ PRODUCTION_IP_PATTERNS: list[str] = [
     r"192\.168\.[1-9]\d?\.1[0-9]{2}",  # farm production /24 range
 ]
 
+# Category 1b: Tailscale CGNAT host addresses (100.64.0.0/10 with a
+# non-zero host part). The /10 range itself and 100.64.0.0 are fine to
+# mention in docs; concrete host addresses (100.64.0.N, 100.65.x.x, ...)
+# identify a specific tailnet member and must not ship publicly.
+# Exempt: RFC-style placeholder octets used in docs (x/Y placeholders are
+# not IP literals anyway, so nothing to exempt — only real octets match).
+TAILNET_HOST_IP_PATTERNS: list[str] = [
+    # concrete host addresses only: not followed by a CIDR suffix, and the
+    # last octet is non-zero (100.64.x.0 is network/broadcast-ish, fine to cite)
+    r"\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.(?!0\b)[1-9]\d{0,2}\b(?!\s*/\d)",
+]
+
+# Sample CGNAT host addresses used in code docs and unit tests. These are
+# NOT leaked — they are the project's documented placeholders. Operators
+# must not assign these octets to real tailnet hosts (current deployment
+# avoids them). Anything else in 100.64.0.0/10 with a non-zero host octet
+# is treated as a concrete member of a real tailnet and flagged.
+SAMPLE_CGNAT_HOSTS: set[str] = {
+    "100.64.0.2",
+    "100.64.0.5",
+    "100.127.255.255",
+}
+
+# Category 1c: Infrastructure hostnames/ports of the operator's private
+# services (recovery mirror, NAS, personal machine names). Loaded from
+# data/private_identifiers.json -> infra_hosts (gitignored) so the
+# scanner source stays publishable.
+INFRA_HOSTS: list[str] = []
+
+# Category 1d: Operator home-directory paths — /Users/<name>, /home/<name>.
+# Leak the OS username of the deployment box. Repo-templated paths use
+# <INSTALL_DIR>; anything absolute under a home dir is a finding.
+HOME_PATH_PATTERNS: list[str] = [
+    r"/Users/[A-Za-z0-9._-]+",
+    r"/home/[A-Za-z0-9._-]+",
+]
+
 # Category 2: Telegram home chat ID — digits that match the runtime value.
 # The exact value is environment-specific; we look for the pattern used in
 # telegram-creds.env and matching literal references.
@@ -222,6 +259,10 @@ def _should_exclude(filepath: str, repo_root: Path) -> bool:
     if str(rel) == "scripts/check_no_private_data.py":
         return True
 
+    # Exclude test that ASSERTS no literal home paths exist (describes the rule)
+    if str(rel) == "tests/test_plist_no_literal_home.py":
+        return True
+
     # Exclude PRIVACY.md (discusses what to look for)
     if str(rel) == "docs/PRIVACY.md":
         return True
@@ -252,7 +293,7 @@ def _load_private_identifiers(repo_root: Path) -> None:
     empty defaults. Operators who want full leak detection create the
     config file at their deployment site.
     """
-    global OPERATOR_HANDLES, HELPER_HANDLES
+    global OPERATOR_HANDLES, HELPER_HANDLES, INFRA_HOSTS
     config_path = repo_root / "data" / "private_identifiers.json"
     if not config_path.is_file():
         return
@@ -266,6 +307,7 @@ def _load_private_identifiers(repo_root: Path) -> None:
         return
     OPERATOR_HANDLES = list(cfg.get("operator_handles", []) or [])
     HELPER_HANDLES = list(cfg.get("helper_handles", []) or [])
+    INFRA_HOSTS = list(cfg.get("infra_hosts", []) or [])
 
 
 def _compile_patterns():
@@ -275,6 +317,20 @@ def _compile_patterns():
     # Production IPs
     for p in PRODUCTION_IP_PATTERNS:
         patterns.append((re.compile(p), "production IP literal", p))
+
+    # Tailscale CGNAT concrete host IPs
+    for p in TAILNET_HOST_IP_PATTERNS:
+        patterns.append((re.compile(p), "tailnet host IP literal", p))
+
+    # Infrastructure hostnames (private services), incl. host:port forms
+    for h in INFRA_HOSTS:
+        patterns.append(
+            (re.compile(rf"\b{re.escape(h)}(?::\d+)?\b"), f"infra host '{h}'", h)
+        )
+
+    # Operator home-directory paths
+    for p in HOME_PATH_PATTERNS:
+        patterns.append((re.compile(p), "home-directory path", p))
 
     # Chat ID
     if CHAT_ID_PATTERN:
@@ -560,7 +616,11 @@ def main() -> int:
 
         for regex, category, pattern_text in patterns:
             for line_no, line_text in enumerate(text.splitlines(), start=1):
-                if regex.search(line_text):
+                m = regex.search(line_text)
+                if m:
+                    # Documented sample CGNAT hosts are placeholders, not leaks.
+                    if category == "tailnet host IP literal" and m.group(0) in SAMPLE_CGNAT_HOSTS:
+                        continue
                     rel = Path(filepath).relative_to(repo_root)
                     leaks.append(f"{rel}:{line_no} [{category}] {line_text.strip()}")
 

@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<! TEMPLATE: replace every <INSTALL_DIR> with your absolute checkout path before
+     loading, e.g.:
+       sed "s|<INSTALL_DIR>|$HOME/farm-surveillance-v2|g" gc-stale-tmp.plist > ~/Library/LaunchAgents/com.farmsurveillance.gc-stale-tmp.plist
+       plutil -lint ~/Library/LaunchAgents/com.farmsurveillance.gc-stale-tmp.plist
+       launchctl load ~/Library/LaunchAgents/com.farmsurveillance.gc-stale-tmp.plist
+     (launchd does not expand ~ or env vars in plists — sed is required) --!>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -6,17 +12,17 @@
     <string>com.farmsurveillance.gc-stale-tmp</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/jill/farm-surveillance-v2/.venv/bin/python3.11</string>
-        <string>/Users/jill/farm-surveillance-v2/scripts/gc_stale_tmp.py</string>
+        <string><INSTALL_DIR>/.venv/bin/python3.11</string>
+        <string><INSTALL_DIR>/scripts/gc_stale_tmp.py</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>StartInterval</key>
     <integer>86400</integer>
     <key>StandardErrorPath</key>
-    <string>/Users/jill/farm-surveillance-v2/logs/gc-stale-tmp.log</string>
+    <string><INSTALL_DIR>/logs/gc-stale-tmp.log</string>
     <key>StandardOutPath</key>
-    <string>/Users/jill/farm-surveillance-v2/logs/gc-stale-tmp.log</string>
+    <string><INSTALL_DIR>/logs/gc-stale-tmp.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>FARMSURV_GC_TMP_TTL_H</key>

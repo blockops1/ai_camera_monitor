@@ -4,7 +4,7 @@
   "status": "draft",
   "created": "2026-09-30",
   "owner": "jill (orchestrator)",
-  "operator_objective": "Reduce false-positive motion alerts (trees-in-wind, shadow movement) by relying on Reolink's on-device AI detection (person/vehicle/animal) rather than raw motion. Bump image quality for downstream gate decisions by switching the main stream to its native sensor resolution (currently the cameras are H.265 + 2 fps already, but resolution is below sensor max). No custom code in farm-surveillance-v2; all changes flow through the existing open-source Reolink MCP server at /Users/jill/reolink-cli/, called via the harness MCP client.",
+  "operator_objective": "Reduce false-positive motion alerts (trees-in-wind, shadow movement) by relying on Reolink's on-device AI detection (person/vehicle/animal) rather than raw motion. Bump image quality for downstream gate decisions by switching the main stream to its native sensor resolution (currently the cameras are H.265 + 2 fps already, but resolution is below sensor max). No custom code in farm-surveillance-v2; all changes flow through the existing open-source Reolink MCP server at ~/reolink-cli/, called via the harness MCP client.",
   "current_state": {
     "cameras": {
       "front": {
@@ -109,7 +109,7 @@
       "_operator_correction": "Operator 2026-09-30: 'two Frames per second for the RTSP stream that goes to the listener' \u2014 already satisfied (main stream at 2 fps). Operator: 'change the image to the maximum resolution it's capable of sending' \u2014 NOT yet satisfied (cams at 2304x1296, below native max). Operator: 'change the RTSP stream to H.265' \u2014 already satisfied.",
       "_net_remaining_change": "Bump main-stream resolution only. H.265 + 2fps already in place."
     },
-    "mcp_server": "/Users/jill/reolink-cli/ (Apache-2.0, on-disk clone). Binary at /Users/jill/.local/bin/reolink-cli v0.19.1. Long-lived gateway at 127.0.0.1:9000 (currently PID 12130 in detached-shell mode \u2014 see launchd_network_workaround below). 49 MCP tools exposed (all camera_*). Harness integration: harness/mcp_client.py spawns reolink-cli mcp-server per session over stdio; mutating calls gated by harness/config.py:reolink_default_confirm() (requires operator confirm: true to commit).",
+    "mcp_server": "~/reolink-cli/ (Apache-2.0, on-disk clone). Binary at ~/.local/bin/reolink-cli v0.19.1. Long-lived gateway at 127.0.0.1:9000 (currently PID 12130 in detached-shell mode \u2014 see launchd_network_workaround below). 49 MCP tools exposed (all camera_*). Harness integration: harness/mcp_client.py spawns reolink-cli mcp-server per session over stdio; mutating calls gated by harness/config.py:reolink_default_confirm() (requires operator confirm: true to commit).",
     "before_snapshot_file": "data/us-094-before-snapshot.json (49.5 KB, captured 2026-09-30 18:55 EDT)",
     "launchd_network_workaround": "BUG 2026-09-30: launchd-managed gateway (com.farm.reolink.gateway via launchctl bootstrap) cannot reach 192.168.1.X on port 554 (os error 65 'No route to host'), while a shell-managed gateway (same binary, same UID) CAN. Currently running a detached shell-managed gateway (subprocess.Popen start_new_session=True) on PID 12130. ROOT CAUSE TBD \u2014 likely macOS app-level networking differs between launchd domain and the user's bash session. Not blocking V2-094 but needs separate investigation. Workaround: until fixed, keep the detached gateway running across sessions (it survives my session, dies on reboot).",
     "deprecated_skill_warning": "skills/local-ai/reolink-camera-config is deprecated (replaced by infra/reolink.py::apply_recipe) and is browser-automation-heavy (52 browser-automation mentions including playwright:9, cam_browser:12). Per operator 2026-09-30: NEVER use browser automation for camera work; only the open-source Reolink MCP. PRD explicitly excludes any cam_browser / playwright path."
@@ -136,7 +136,7 @@
         "Per cam (6 calls), invoke MCP tool camera_detect_motion_set with {alias: <name>, enable: false, sensitivity: 0}. This is the operator ask #1: only push a webhook alert when AI detection fires, not on raw motion.",
         "Do NOT touch AI detection. Existing AI sensitivities (50/50/30 for person/vehicle/dog_cat from the recipe) stay as-is unless US-094a shows different current state, in which case US-094b preserves observed state rather than the recipe value.",
         "Verification: per cam, re-call camera_detect_motion_get and confirm motion.enabled=false. Update docs/V2-094-CAMERA-STATE-AFTER.md (or extend BEFORE doc) with the after-state row.",
-        "Confirm-gated: this is a mutating call. Operator must type confirm: true in harness chat, or operator runs /Users/jill/.local/bin/reolink-cli mcp-server interactively with explicit operator eyes on each result.",
+        "Confirm-gated: this is a mutating call. Operator must type confirm: true in harness chat, or operator runs ~/.local/bin/reolink-cli mcp-server interactively with explicit operator eyes on each result.",
         "Expected runtime effect: within ~30 seconds, no pure-motion webhook events should arrive at /alert (listener/daemon.py:594). AI webhooks continue. Verify via tail logs/daemon.log | grep event_type for 10 minutes."
       ],
       "files": [
@@ -156,7 +156,7 @@
         "Verify via camera_encode_capability that the (resolution, codec, bitrate, fps) tuple is in the accepted matrix BEFORE calling encode_set. Per the 2026-09-30 probe, both models accept {h264, h265} at native res with fps options 25/22/20/18/16/15/12/10/8/6/4/2.",
         "DO NOT change fps or codec \u2014 both already correct on all 6 cams (verified 2026-09-30). Only resolution is being bumped.",
         "Verification: per cam, re-call camera_encode_get and confirm main.{width,height} = (3840, 2160) for RLC-833A and (2560, 1920) for RLC-510A. Record in docs/V2-094-CAMERA-STATE-AFTER.md.",
-        "Confirm-gated: this is a mutating call. Operator must type confirm: true in harness chat, or run /Users/jill/.local/bin/reolink-cli mcp-server interactively with explicit eyes on each result.",
+        "Confirm-gated: this is a mutating call. Operator must type confirm: true in harness chat, or run ~/.local/bin/reolink-cli mcp-server interactively with explicit eyes on each result.",
         "Expected runtime effect: subsequent decode of the main stream will produce larger frames (1.45x for RLC-833A 3840/2304, 1.30x for RLC-510A 1920/1296 by height). Disk usage per-frame rises proportionally. Frame capture at 2 fps means +1 alert's pre/post window will be ~30-50% larger on disk. Spot-check disk utilization for 24 hours post-change (no code change needed; data/frames/<cam>/<alert_id>/ dir size tells the story)."
       ],
       "files": [

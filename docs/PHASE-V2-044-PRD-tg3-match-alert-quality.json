@@ -14,9 +14,9 @@
   },
   "shipping_definition": "(a) Vehicle + animal schemas include 'better_crop: enum[crop_a|crop_b|neither]' (mirrors person schema). (b) Pipeline propagates vm2_result.better_crop into TG#3. (c) TG#3 send_photo with the chosen crop, falling back to crop_a when 'neither' or field absent. (d) TG#3 body shows matched label (or top candidates if no-match) with confidence + runner-ups. (e) Person path uses person label/owner, not 'vehicle'. (f) Full pytest green. (g) All four stories committed on main with US-044 in the message. Working tree clean.",
   "scope_exclusions": [
-    "Do NOT touch /Users/jill/farm-surveillance-refactor/. Frozen archive (read-only reference).",
-    "Do NOT touch /Users/jill/farm-surveillance-internal/. Frozen archive.",
-    "Do NOT touch /Users/jill/farm-surveillance/ (v1). OFF and stays OFF.",
+    "Do NOT touch ~/farm-surveillance-refactor/. Frozen archive (read-only reference).",
+    "Do NOT touch ~/farm-surveillance-internal/. Frozen archive.",
+    "Do NOT touch ~/farm-surveillance/ (v1). OFF and stays OFF.",
     "Do NOT git push to forgejo or GitHub. Operator reviews and pushes.",
     "Do NOT install new skills. Use existing skill set.",
     "Do NOT restart the daemon. Operator restarts manually after merge.",
@@ -40,13 +40,13 @@
       "assignee": "coder",
       "depends_on": [],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c \"import infra.vehicle_prompt; s=infra.vehicle_prompt.SCHEMA_JSON; assert 'better_crop' in s['properties']; assert 'better_crop' in s['required']; assert s['properties']['better_crop']['enum'] == ['crop_a','crop_b','neither']\" -> exit 0",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c \"import infra.animal_prompt; s=infra.animal_prompt.SCHEMA_JSON; assert 'better_crop' in s['properties']; assert 'better_crop' in s['required']; assert s['properties']['better_crop']['enum'] == ['crop_a','crop_b','neither']\" -> exit 0",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && grep -E 'better_crop' infra/vehicle_prompt.py infra/animal_prompt.py | wc -l >= 4 (property + required + enum + prompt mention in each file)",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_vision_analyzer_schemas.py -v --no-header 2>&1 | tail -5 -> contains 'passed' with new test for better_crop visible",
-        "AC5: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 -> contains 'passed' (full suite green, N >= 339)",
-        "GIT-1: git -C /Users/jill/farm-surveillance-v2 status --porcelain | wc -l -> 0",
-        "GIT-2: git -C /Users/jill/farm-surveillance-v2 log --oneline main -10 | grep -iE 'us-044a' | wc -l -> >= 1"
+        "AC1: cd <INSTALL_DIR> && .venv/bin/python -c \"import infra.vehicle_prompt; s=infra.vehicle_prompt.SCHEMA_JSON; assert 'better_crop' in s['properties']; assert 'better_crop' in s['required']; assert s['properties']['better_crop']['enum'] == ['crop_a','crop_b','neither']\" -> exit 0",
+        "AC2: cd <INSTALL_DIR> && .venv/bin/python -c \"import infra.animal_prompt; s=infra.animal_prompt.SCHEMA_JSON; assert 'better_crop' in s['properties']; assert 'better_crop' in s['required']; assert s['properties']['better_crop']['enum'] == ['crop_a','crop_b','neither']\" -> exit 0",
+        "AC3: cd <INSTALL_DIR> && grep -E 'better_crop' infra/vehicle_prompt.py infra/animal_prompt.py | wc -l >= 4 (property + required + enum + prompt mention in each file)",
+        "AC4: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/test_vision_analyzer_schemas.py -v --no-header 2>&1 | tail -5 -> contains 'passed' with new test for better_crop visible",
+        "AC5: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 -> contains 'passed' (full suite green, N >= 339)",
+        "GIT-1: git -C <INSTALL_DIR> status --porcelain | wc -l -> 0",
+        "GIT-2: git -C <INSTALL_DIR> log --oneline main -10 | grep -iE 'us-044a' | wc -l -> >= 1"
       ],
       "files_modified": [
         "infra/vehicle_prompt.py",
@@ -69,12 +69,12 @@
         "US-044a"
       ],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && grep -n 'send_photo\\|better_crop' telegram_formatter/match_alert.py | wc -l >= 3 (function reads better_crop, branches on crop_a/crop_b/neither, calls send_photo)",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c \"from telegram_formatter.match_alert import pick_alert_image_path; assert pick_alert_image_path({'better_crop':'crop_a'}, '/a.jpg', '/b.jpg') == '/a.jpg'; assert pick_alert_image_path({'better_crop':'crop_b'}, '/a.jpg', '/b.jpg') == '/b.jpg'; assert pick_alert_image_path({'better_crop':'neither'}, '/a.jpg', '/b.jpg') == '/a.jpg'; assert pick_alert_image_path({}, '/a.jpg', '/b.jpg') == '/a.jpg'\" -> exit 0",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_match_alert_send.py -v --no-header 2>&1 | tail -10 -> contains 'passed' with at least 4 test cases (crop_a, crop_b, neither, missing)",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 -> contains 'passed'",
-        "GIT-1: git -C /Users/jill/farm-surveillance-v2 status --porcelain | wc -l -> 0",
-        "GIT-2: git -C /Users/jill/farm-surveillance-v2 log --oneline main -10 | grep -iE 'us-044b' | wc -l -> >= 1"
+        "AC1: cd <INSTALL_DIR> && grep -n 'send_photo\\|better_crop' telegram_formatter/match_alert.py | wc -l >= 3 (function reads better_crop, branches on crop_a/crop_b/neither, calls send_photo)",
+        "AC2: cd <INSTALL_DIR> && .venv/bin/python -c \"from telegram_formatter.match_alert import pick_alert_image_path; assert pick_alert_image_path({'better_crop':'crop_a'}, '/a.jpg', '/b.jpg') == '/a.jpg'; assert pick_alert_image_path({'better_crop':'crop_b'}, '/a.jpg', '/b.jpg') == '/b.jpg'; assert pick_alert_image_path({'better_crop':'neither'}, '/a.jpg', '/b.jpg') == '/a.jpg'; assert pick_alert_image_path({}, '/a.jpg', '/b.jpg') == '/a.jpg'\" -> exit 0",
+        "AC3: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/test_match_alert_send.py -v --no-header 2>&1 | tail -10 -> contains 'passed' with at least 4 test cases (crop_a, crop_b, neither, missing)",
+        "AC4: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 -> contains 'passed'",
+        "GIT-1: git -C <INSTALL_DIR> status --porcelain | wc -l -> 0",
+        "GIT-2: git -C <INSTALL_DIR> log --oneline main -10 | grep -iE 'us-044b' | wc -l -> >= 1"
       ],
       "files_modified": [
         "telegram_formatter/match_alert.py",
@@ -95,12 +95,12 @@
       "assignee": "coder",
       "depends_on": [],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c \"from telegram_formatter.match_alert import build_match_alert_body; body = build_match_alert_body({'matched': True, 'known_vehicle': {'id':'v_test','label':'Test car','color':'red','make':'Ford','model':'F150'}}, vm2_result={'better_crop':'crop_a','confidence':0.85}, score=8.5, gap=3.0, runner_ups=[('v_other',2.0),('v_third',1.0)]); assert 'Matched: Test car' in body; assert 'Confidence: 0.85' in body or 'Confidence: 8.5' in body; assert 'Runner-ups' in body or 'Runner up' in body; assert 'v_other' in body\" -> exit 0",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && grep -nE 'Recognized:.*license_plate|vm2_result..license_plate' telegram_formatter/match_alert.py | wc -l -> 0 (old plate-only path is gone — we use kv.label as primary, plate as secondary only if present)",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_match_alert_body.py -v --no-header 2>&1 | tail -10 -> contains 'passed' with at least 3 test cases (matched high-confidence, matched low-confidence with gap=0, matched with no plate)",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 -> contains 'passed'",
-        "GIT-1: git -C /Users/jill/farm-surveillance-v2 status --porcelain | wc -l -> 0",
-        "GIT-2: git -C /Users/jill/farm-surveillance-v2 log --oneline main -10 | grep -iE 'us-044c' | wc -l -> >= 1"
+        "AC1: cd <INSTALL_DIR> && .venv/bin/python -c \"from telegram_formatter.match_alert import build_match_alert_body; body = build_match_alert_body({'matched': True, 'known_vehicle': {'id':'v_test','label':'Test car','color':'red','make':'Ford','model':'F150'}}, vm2_result={'better_crop':'crop_a','confidence':0.85}, score=8.5, gap=3.0, runner_ups=[('v_other',2.0),('v_third',1.0)]); assert 'Matched: Test car' in body; assert 'Confidence: 0.85' in body or 'Confidence: 8.5' in body; assert 'Runner-ups' in body or 'Runner up' in body; assert 'v_other' in body\" -> exit 0",
+        "AC2: cd <INSTALL_DIR> && grep -nE 'Recognized:.*license_plate|vm2_result..license_plate' telegram_formatter/match_alert.py | wc -l -> 0 (old plate-only path is gone — we use kv.label as primary, plate as secondary only if present)",
+        "AC3: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/test_match_alert_body.py -v --no-header 2>&1 | tail -10 -> contains 'passed' with at least 3 test cases (matched high-confidence, matched low-confidence with gap=0, matched with no plate)",
+        "AC4: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 -> contains 'passed'",
+        "GIT-1: git -C <INSTALL_DIR> status --porcelain | wc -l -> 0",
+        "GIT-2: git -C <INSTALL_DIR> log --oneline main -10 | grep -iE 'us-044c' | wc -l -> >= 1"
       ],
       "files_modified": [
         "telegram_formatter/match_alert.py",
@@ -123,14 +123,14 @@
         "US-044c"
       ],
       "acceptance": [
-        "AC1: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c \"from vehicle_matcher.match import score_top_n; assert callable(score_top_n); result = score_top_n(vm2_result={'color':'white','make':'Chevrolet','model':'Silverado'}, known_vehicles=[{'id':'v_a','label':'A','color':'white','make':'Chevrolet','model':'Silverado'},{'id':'v_b','label':'B','color':'red','make':'Ford','model':'F150'}], n=3); assert isinstance(result, list); assert len(result) <= 3; assert all(isinstance(c, tuple) and len(c) == 2 for c in result); assert result[0][0] == 'v_a'\" -> exit 0",
-        "AC2: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c \"from telegram_formatter.no_match_telegram import build_no_match_alert_body; body = build_no_match_alert_body(reason='below confidence threshold', top_candidates=[('v_a',5.0),('v_b',2.0)], match_threshold=6.0, gap_threshold=1.5, captured_at='2026-09-14T15:35:31Z'); assert 'below confidence threshold' in body; assert 'v_a' in body; assert 'Top candidates' in body; assert 'Thresholds' in body\" -> exit 0",
-        "AC3: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -c \"from telegram_formatter.match_alert import status_wording_for; assert status_wording_for('vehicle', matched=False) == 'unrecognized vehicle'; assert status_wording_for('person', matched=False) == 'unrecognized person'; assert status_wording_for('animal', matched=False) == 'unrecognized animal'; assert status_wording_for('vehicle', matched=True) == 'recognized vehicle'; assert status_wording_for('person', matched=True) == 'recognized person'\" -> exit 0",
-        "AC4: cd /Users/jill/farm-surveillance-v2 && grep -n 'Status:.*vehicle' telegram_formatter/match_alert.py | wc -l -> 0 (old hardcoded 'Status: ... vehicle' is gone — we route through status_wording_for(classification, matched))",
-        "AC5: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/test_no_match_alert_body.py tests/test_match_alert_status_wording.py -v --no-header 2>&1 | tail -15 -> contains 'passed' for both files",
-        "AC6: cd /Users/jill/farm-surveillance-v2 && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 -> contains 'passed'",
-        "GIT-1: git -C /Users/jill/farm-surveillance-v2 status --porcelain | wc -l -> 0",
-        "GIT-2: git -C /Users/jill/farm-surveillance-v2 log --oneline main -10 | grep -iE 'us-044d' | wc -l -> >= 1"
+        "AC1: cd <INSTALL_DIR> && .venv/bin/python -c \"from vehicle_matcher.match import score_top_n; assert callable(score_top_n); result = score_top_n(vm2_result={'color':'white','make':'Chevrolet','model':'Silverado'}, known_vehicles=[{'id':'v_a','label':'A','color':'white','make':'Chevrolet','model':'Silverado'},{'id':'v_b','label':'B','color':'red','make':'Ford','model':'F150'}], n=3); assert isinstance(result, list); assert len(result) <= 3; assert all(isinstance(c, tuple) and len(c) == 2 for c in result); assert result[0][0] == 'v_a'\" -> exit 0",
+        "AC2: cd <INSTALL_DIR> && .venv/bin/python -c \"from telegram_formatter.no_match_telegram import build_no_match_alert_body; body = build_no_match_alert_body(reason='below confidence threshold', top_candidates=[('v_a',5.0),('v_b',2.0)], match_threshold=6.0, gap_threshold=1.5, captured_at='2026-09-14T15:35:31Z'); assert 'below confidence threshold' in body; assert 'v_a' in body; assert 'Top candidates' in body; assert 'Thresholds' in body\" -> exit 0",
+        "AC3: cd <INSTALL_DIR> && .venv/bin/python -c \"from telegram_formatter.match_alert import status_wording_for; assert status_wording_for('vehicle', matched=False) == 'unrecognized vehicle'; assert status_wording_for('person', matched=False) == 'unrecognized person'; assert status_wording_for('animal', matched=False) == 'unrecognized animal'; assert status_wording_for('vehicle', matched=True) == 'recognized vehicle'; assert status_wording_for('person', matched=True) == 'recognized person'\" -> exit 0",
+        "AC4: cd <INSTALL_DIR> && grep -n 'Status:.*vehicle' telegram_formatter/match_alert.py | wc -l -> 0 (old hardcoded 'Status: ... vehicle' is gone — we route through status_wording_for(classification, matched))",
+        "AC5: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/test_no_match_alert_body.py tests/test_match_alert_status_wording.py -v --no-header 2>&1 | tail -15 -> contains 'passed' for both files",
+        "AC6: cd <INSTALL_DIR> && .venv/bin/python -m pytest tests/ -q --no-header 2>&1 | tail -3 -> contains 'passed'",
+        "GIT-1: git -C <INSTALL_DIR> status --porcelain | wc -l -> 0",
+        "GIT-2: git -C <INSTALL_DIR> log --oneline main -10 | grep -iE 'us-044d' | wc -l -> >= 1"
       ],
       "files_modified": [
         "telegram_formatter/no_match_telegram.py",

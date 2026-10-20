@@ -91,6 +91,6 @@
       "no_go": "no pushes to github"
     }
   ],
-  "verification_recipe": "cd /Users/jill/farm-surveillance-v2 && env -u PYTHONPATH -u PYTHONHOME .venv/bin/python3.11 -m pytest tests/ --no-header -q --tb=no",
+  "verification_recipe": "cd <INSTALL_DIR> && env -u PYTHONPATH -u PYTHONHOME .venv/bin/python3.11 -m pytest tests/ --no-header -q --tb=no",
   "results_interpretation": "0 failed = cut-script pytest gate restored; next public release ships a truthful pytest PASS line."
 }
