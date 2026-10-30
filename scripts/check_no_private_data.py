@@ -1,0 +1,653 @@
+#!/usr/bin/env python3
+"""check_no_private_data.py — Scan tracked files for private data leaks.
+
+Exits 0 if no leaks are found; exits 1 and prints file:line for each leak.
+
+Scan categories (see docs/PRIVACY.md for conventions):
+  1. Production /24 IP literals (e.g. 192.168.1.x subnet used on the farm).
+  2. Telegram chat identifier digits (TELEGRAM_HOME_CHAT_ID value).
+  3. Operator personal-handle strings (first-name forms used as a handle).
+  4. Helper personal-handle strings (third-party helpers' names).
+  5. Tracked runtime data paths — any tracked file under a path the
+     .gitignore rules treat as runtime-only. Catches the case where a
+     file was committed BEFORE the .gitignore rule was added; without
+     this check, such files stay tracked forever.
+
+Operator and helper handle patterns are loaded at runtime from a private
+JSON config file (`data/private_identifiers.json`). This keeps the scanner
+itself safe to publish on a public GitHub repository without leaking the
+operator's personal name.
+
+Exclusions (whitelist):
+  - .git/ directories
+  - .venv/ directories
+  - .pytest_cache/ directories
+  - scripts/check_no_private_data.py itself (its pattern definitions)
+  - docs/PRIVACY.md (discusses what to look for)
+  - .mailmap (operator's identity mapping per git convention)
+
+Usage:
+    python scripts/check_no_private_data.py
+    python scripts/check_no_private_data.py data/vehicles/known_vehicles.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Pattern definitions
+# ---------------------------------------------------------------------------
+
+# Category 1: Production /24 prefix — RFC 1918 private ranges commonly used
+# on the farm network. The exact subnet varies per deployment; we match the
+# general pattern of 192.168.x.0/24 addresses used in live frames/paths.
+# NOTE: Documentation/example IPs like 192.0.2.x, 100.64.0.x (RFC 5737/6598)
+# are NOT flagged — only production-prefix literals are.
+PRODUCTION_IP_PATTERNS: list[str] = [
+    r"192\.168\.[1-9]\d?\.1[0-9]{2}",  # farm production /24 range
+]
+
+# Category 1b: Tailscale CGNAT host addresses (100.64.0.0/10 with a
+# non-zero host part). The /10 range itself and 100.64.0.0 are fine to
+# mention in docs; concrete host addresses (100.64.0.N, 100.65.x.x, ...)
+# identify a specific tailnet member and must not ship publicly.
+# Exempt: RFC-style placeholder octets used in docs (x/Y placeholders are
+# not IP literals anyway, so nothing to exempt — only real octets match).
+TAILNET_HOST_IP_PATTERNS: list[str] = [
+    # concrete host addresses only: not followed by a CIDR suffix, and the
+    # last octet is non-zero (100.64.x.0 is network/broadcast-ish, fine to cite)
+    r"\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.(?!0\b)[1-9]\d{0,2}\b(?!\s*/\d)",
+]
+
+# Sample CGNAT host addresses used in code docs and unit tests. These are
+# NOT leaked — they are the project's documented placeholders. Operators
+# must not assign these octets to real tailnet hosts (current deployment
+# avoids them). Anything else in 100.64.0.0/10 with a non-zero host octet
+# is treated as a concrete member of a real tailnet and flagged.
+SAMPLE_CGNAT_HOSTS: set[str] = {
+    "100.64.0.2",
+    "100.64.0.5",
+    "100.127.255.255",
+}
+
+# Category 1c: Infrastructure hostnames/ports of the operator's private
+# services (recovery mirror, NAS, personal machine names). Loaded from
+# data/private_identifiers.json -> infra_hosts (gitignored) so the
+# scanner source stays publishable.
+INFRA_HOSTS: list[str] = []
+
+# Category 1d: Operator home-directory paths — /Users/<name>, /home/<name>.
+# Leak the OS username of the deployment box. Repo-templated paths use
+# <INSTALL_DIR>; anything absolute under a home dir is a finding.
+HOME_PATH_PATTERNS: list[str] = [
+    r"/Users/[A-Za-z0-9._-]+",
+    r"/home/[A-Za-z0-9._-]+",
+]
+
+# Category 2: Telegram home chat ID — digits that match the runtime value.
+# The exact value is environment-specific; we look for the pattern used in
+# telegram-creds.env and matching literal references.
+# NOTE: The actual digits are not hardcoded here — they're loaded from
+# TELEGRAM_HOME_CHAT_ID at runtime so the scanner stays portable.
+CHAT_ID_PATTERN: str = ""  # filled at runtime from env
+
+# Category: Telegram bot-token shape — <bot-id-digits>:AA<secret>.
+# Real tokens leak the deployment's bot ID even when the secret half is fake.
+# Exemptions: digit prefixes that are obviously fake (all-zeros, all-ones,
+# 123456789) and secrets that announce themselves (fake/test/example/...).
+BOT_TOKEN_SHAPE: str = (
+    r"(?i)\b(?<!\d)(?!0{8,12}$|1{8,12}$|123456789:)\d{8,12}"
+    r":AA(?!fake|test|exam|demo|sample|placeholder|dummy)[A-Za-z0-9_\-]{20,}"
+)
+
+# Category 3: Operator personal handle — first-name form used as a handle.
+# Category 4: Helper personal handle — third-party helpers whose names
+# were previously stored in vehicle enrollments.
+#
+# These patterns are NOT hardcoded here. Operators list them in a private
+# config file at `data/private_identifiers.json` (gitignored). This keeps
+# the scanner source safe to publish on a public GitHub repo — the scanner
+# defaults to empty lists when the config is missing, which means:
+#   - Public CI runs (no config present) → no false positives
+#   - Private deployments (config present) → full leak detection
+#
+# Config schema (data/private_identifiers.json, gitignored):
+#   {
+#     "operator_handles": ["first-name", ...],
+#     "helper_handles": ["first-name", ...]
+#   }
+OPERATOR_HANDLES: list[str] = []
+HELPER_HANDLES: list[str] = []
+
+# Category 5: Tracked runtime data paths.
+#
+# These are paths the .gitignore treats as runtime-only output, enrollment
+# data, or pre-deployment snapshots. The .gitignore rule is necessary but
+# not sufficient — a file committed BEFORE the rule was added stays in the
+# tracked tree forever unless someone runs `git rm --cached` and rewrites
+# history. This category catches that class of leak.
+#
+# Each entry is a (glob_pattern, label) pair matched against the path of
+# each tracked file relative to repo root. Use gitignore-style globs.
+# Rationale per entry is in docs/PRIVACY.md.
+RUNTIME_DATA_PATTERNS: list[tuple[str, str]] = [
+    # Per-alert runtime output (one UUID dir per alert, written by listener/daemon.py).
+    # Contains camera alias + absolute paths + msec timestamps.
+    ("data/events/*/event.json", "per-alert event record"),
+    # Hand-labeled bounding boxes keyed by alert UUID.
+    ("data/frames/**/ground_truth.json", "frame ground-truth labels"),
+    # Pre-deployment device snapshots (Reolink GetDevInfo dump).
+    ("data/us-*snapshot*.json", "pre-deployment device snapshot"),
+    # Backtest artifacts (large PNG composites with operator property imagery).
+    ("data/backtest/**", "backtest artifact"),
+    # Enrollment data — known_people.json and embeddings.npz are
+    # separately listed in .gitignore for the people dir; the animal
+    # dir is gitignored wholesale.
+    ("data/known/people/known_people.json", "enrolled person manifest"),
+    ("data/known/people/embeddings.npz", "enrolled person embeddings"),
+    ("data/known/animals/**", "enrolled animal data"),
+    # Operator's private identifier config (real first names).
+    ("data/private_identifiers.json", "operator private identifier config"),
+    # ML weights — release via artifacts, not source.
+    ("models/*.onnx", "ONNX model weight file"),
+    ("models/*.pt", "PyTorch model weight file"),
+    ("models/*.weights", "darknet model weight file"),
+    # Push log typo variants. .gitignore now covers scripts/push*.log;
+    # this catches any variant (scripts/push.log, push_log.txt, etc.)
+    # that snuck in before the rule was added. NOTE: only the LOG
+    # files are leaks — the SCRIPT that pushes to the operator's
+    # recovery mirror is tracked on purpose under
+    # scripts/push_to_forgejo.sh, hence the *.log / *.txt suffixes.
+    ("scripts/push*.log", "forgejo push log"),
+    ("scripts/push*.txt", "forgejo push log"),
+]
+
+# History-scan patterns: these detect secrets that may have lived in
+# git history (e.g. camera-creds.env.bak files). Only ADDED lines
+# (diff hunks starting with '+') are scanned.
+#
+# Categories:
+#   1. Creds-shaped assignments: KEY=secret (e.g. RTSP_PASS=xxx)
+#   2. RTSP URLs with embedded credentials: rtsp://user:pass@host
+#   3. LAN IPs on added lines (192.168.x.x pattern in diff context)
+#   4. High-precision lat/lon pair anywhere (protects real-site coords)
+HISTORY_PATTERNS: list[tuple[str, str]] = [
+    # Creds-shaped: PASSWORD, PASS, CRED, TOKEN on the right of =
+    (r"(?i)(PASS|PASSWORD|CRED|TOKEN)\s*=\s*\S+", "creds-shaped assignment"),
+    # RTSP URL with embedded auth
+    (r"rtsp://[^\s:@]+:[^\s@]+@[^\s]+", "rtsp:// URL with embedded credentials"),
+    # Production LAN IPs (same range as PRODUCTION_IP_PATTERNS)
+    (r"192\.168\.[1-9]\d?\.1[0-9]{2}", "LAN IP literal"),
+    # High-precision lat/lon pair (4+ decimal digits) — verify it is a
+    # test location, not a real site, before pushing
+    (r"(?<![\d.])\d{1,2}\.\d{3,}[^\d\n]{1,15}-\d{1,3}\.\d{3,}(?!\d)", "high-precision lat/lon pair — verify test coords"),
+]
+
+# ---------------------------------------------------------------------------
+# Data types
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class HistoryHit:
+    """A single finding from a history scan."""
+
+    commit_sha: str
+    pattern_name: str
+    line_no: int  # line number in the patch file (+N context line)
+    masked_value: str  # masked version of the match
+
+
+def _mask_value(value: str) -> str:
+    """Mask a matched secret: first4***last2. Never return the raw value."""
+    if len(value) <= 6:
+        return value[:2] + "***" + value[-1:] if len(value) >= 3 else "****"
+    return value[:4] + "***" + value[-2:]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_repo_root() -> Path:
+    """Return the git repository root."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        print("ERROR: not a git repository (or git not available)", file=sys.stderr)
+        sys.exit(2)
+    return Path(result.stdout.strip())
+
+
+def _get_tracked_files(repo_root: Path) -> list[str]:
+    """Get list of tracked files (not ignored) via git ls-files."""
+    result = subprocess.run(
+        ["git", "ls-files"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=str(repo_root),
+    )
+    if result.returncode != 0:
+        print("ERROR: git ls-files failed", file=sys.stderr)
+        sys.exit(2)
+    return result.stdout.strip().splitlines()
+
+
+def _should_exclude(filepath: str, repo_root: Path) -> bool:
+    """Check if a file should be excluded from scanning."""
+    # Normalize to relative path from repo root
+    try:
+        rel = Path(filepath).relative_to(repo_root)
+    except ValueError:
+        # File outside repo root — skip
+        return True
+
+    parts = rel.parts
+    # Exclude .git/, .venv/, .pytest_cache/
+    for part in parts:
+        if part in (".git", ".venv", ".pytest_cache"):
+            return True
+
+    # Exclude operator-local private identifier config
+    if str(rel) == "data/private_identifiers.json":
+        return True
+
+    # Exclude the scanner itself
+    if str(rel) == "scripts/check_no_private_data.py":
+        return True
+
+    # Exclude test that ASSERTS no literal home paths exist (describes the rule)
+    if str(rel) == "tests/test_plist_no_literal_home.py":
+        return True
+
+    # Exclude PRIVACY.md (discusses what to look for)
+    if str(rel) == "docs/PRIVACY.md":
+        return True
+
+    # Exclude .mailmap (operator's identity mapping per git convention)
+    if str(rel) == ".mailmap":
+        return True
+
+    # Exclude register_cameras.py — contains camera IP/port config from
+    # camera-creds.env; these are device addresses, not credentials/leaks.
+    # Exclude verify_recipe_live.py — same reason: camera IP/model metadata.
+    # Exclude PHASE-V2-065-verification.json — live evidence contains
+    # camera IPs from the farm network (device addresses, not secrets).
+    return str(rel) in (
+        ".mailmap",
+        "scripts/register_cameras.py",
+        "scripts/verify_recipe_live.py",
+        "docs/PHASE-V2-065-verification.json",
+    )
+
+
+def _load_private_identifiers(repo_root: Path) -> None:
+    """Load operator/helper handles from data/private_identifiers.json (gitignored).
+
+    Mutates the module-level OPERATOR_HANDLES and HELPER_HANDLES lists.
+    Silently does nothing if the config file is missing — that is the
+    intended behavior for public-CI runs where the scanner ships with
+    empty defaults. Operators who want full leak detection create the
+    config file at their deployment site.
+    """
+    global OPERATOR_HANDLES, HELPER_HANDLES, INFRA_HOSTS
+    config_path = repo_root / "data" / "private_identifiers.json"
+    if not config_path.is_file():
+        return
+    try:
+        cfg = json.loads(config_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        print(
+            f"WARNING: could not load {config_path}: {exc}",
+            file=sys.stderr,
+        )
+        return
+    OPERATOR_HANDLES = list(cfg.get("operator_handles", []) or [])
+    HELPER_HANDLES = list(cfg.get("helper_handles", []) or [])
+    INFRA_HOSTS = list(cfg.get("infra_hosts", []) or [])
+
+
+def _compile_patterns():
+    """Compile regex patterns for scanning."""
+    patterns = []
+
+    # Production IPs
+    for p in PRODUCTION_IP_PATTERNS:
+        patterns.append((re.compile(p), "production IP literal", p))
+
+    # Tailscale CGNAT concrete host IPs
+    for p in TAILNET_HOST_IP_PATTERNS:
+        patterns.append((re.compile(p), "tailnet host IP literal", p))
+
+    # Infrastructure hostnames (private services), incl. host:port forms
+    for h in INFRA_HOSTS:
+        patterns.append(
+            (re.compile(rf"\b{re.escape(h)}(?::\d+)?\b"), f"infra host '{h}'", h)
+        )
+
+    # Operator home-directory paths
+    for p in HOME_PATH_PATTERNS:
+        patterns.append((re.compile(p), "home-directory path", p))
+
+    # Chat ID
+    if CHAT_ID_PATTERN:
+        patterns.append(
+            (re.compile(CHAT_ID_PATTERN), "chat identifier", CHAT_ID_PATTERN)
+        )
+
+    # Telegram bot-token shape (real bot IDs must not ship, even with fake secret)
+    patterns.append(
+        (re.compile(BOT_TOKEN_SHAPE), "telegram bot-token shape", BOT_TOKEN_SHAPE)
+    )
+
+    # Operator handles — word-boundary match to avoid false positives
+    for h in OPERATOR_HANDLES:
+        patterns.append(
+            (re.compile(rf"\b{re.escape(h)}\b"), f"operator handle '{h}'", h)
+        )
+
+    # Helper handles — word-boundary match
+    for h in HELPER_HANDLES:
+        patterns.append((re.compile(rf"\b{re.escape(h)}\b"), f"helper handle '{h}'", h))
+
+    return patterns
+
+
+# ---------------------------------------------------------------------------
+# History scan
+# ---------------------------------------------------------------------------
+
+
+def _run_git_log_patch(repo_root: Path) -> str:
+    """Run `git log -p --all` and return the raw diff output."""
+    result = subprocess.run(
+        ["git", "log", "-p", "--all"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=str(repo_root),
+    )
+    if result.returncode != 0:
+        print("ERROR: git log -p --all failed", file=sys.stderr)
+        sys.exit(2)
+    return result.stdout
+
+
+def _parse_patch_for_added_lines(patch_text: str) -> list[tuple[int, str]]:
+    """Parse a git diff patch and return (line_number_in_patch, added_line_text) pairs.
+
+    Only lines starting with '+' (after the diff header) are returned.
+    The line_number is the position within the patch text (1-indexed).
+    """
+    added_lines: list[tuple[int, str]] = []
+    for i, line in enumerate(patch_text.splitlines(), start=1):
+        if line.startswith("+") and not line.startswith("+++ "):
+            added_lines.append((i, line[1:]))  # strip the leading '+'
+    return added_lines
+
+
+def _scan_history(
+    repo_root: Path,
+    baseline_path: Path | None = None,
+    write_baseline: bool = False,
+) -> int:
+    """Scan git history for private data leaks.
+
+    Returns 1 if leaks are found (exit code for the CLI), 0 if clean.
+    """
+    patch_text = _run_git_log_patch(repo_root)
+    added_lines = _parse_patch_for_added_lines(patch_text)
+
+    if write_baseline:
+        # Collect commits that contain pattern hits
+        baseline_commits: set[str] = set()
+        patch_blocks = patch_text.split("\ncommit ")
+        for block in patch_blocks:
+            # After splitting on "\ncommit ", block[0] starts with "commit "
+            # but subsequent blocks start with just the SHA.
+            # Normalize: extract SHA from first word.
+            first_word = block.split()[0] if block.split() else ""
+            # Skip if first_word is not a 40-hex SHA (means it's the "commit"
+            # keyword that was part of the split, not the actual SHA — only
+            # happens if the text has a stray "commit" that isn't a header)
+            if not re.match(r"^[a-f0-9]{40}$", first_word):
+                # block[0] was "commit" itself (block 0 after split)
+                # The SHA is the second word
+                words = block.split()
+                if len(words) > 1 and re.match(r"^[a-f0-9]{40}$", words[1]):
+                    sha = words[1]
+                else:
+                    continue
+            else:
+                sha = first_word
+            # Extract added lines for this commit
+            lines = block.splitlines()
+            for line in lines:
+                if line.startswith("+") and not line.startswith("+++ "):
+                    for pat_regex, pat_label in HISTORY_PATTERNS:
+                        if re.search(pat_regex, line[1:]):
+                            baseline_commits.add(sha)
+                            break
+
+        # Write baseline file
+        if baseline_path:
+            baseline_path.parent.mkdir(parents=True, exist_ok=True)
+            header = (
+                "# History scan baseline — known-pre-existing offending commits.\n"
+                "# Generated by `--history --write-baseline`.\n"
+                "# Commits listed here are downgraded to warnings when\n"
+                "# `--baseline <file>` is passed.\n"
+                "#\n"
+                "# Each line is a commit SHA (full or short, 7+ chars).\n#\n"
+            )
+            baseline_path.write_text(header, encoding="utf-8")
+            for sha in sorted(baseline_commits):
+                baseline_path.write_text(
+                    baseline_path.read_text() + sha + "\n",
+                    encoding="utf-8",
+                )
+            print(
+                f"Wrote {len(baseline_commits)} baseline entries to {baseline_path}"
+            )
+        return 0
+
+    # Load baseline if provided
+    baseline_commits: set[str] = set()
+    if baseline_path and baseline_path.is_file():
+        baseline_commits = {
+            line.strip()
+            for line in baseline_path.read_text().splitlines()
+            if line.strip() and not line.startswith("#")
+        }
+
+    # Now parse patch text commit-by-commit and scan added lines
+    hits: list[HistoryHit] = []
+    warn_lines: list[str] = []
+    patch_blocks = patch_text.split("\ncommit ")
+    for block in patch_blocks:
+        # After splitting on "\ncommit ", block[0] starts with "commit "
+        # but subsequent blocks start with just the 40-char SHA.
+        first_word = block.split()[0] if block.split() else ""
+        if re.match(r"^[a-f0-9]{40}$", first_word):
+            sha_full = first_word
+        else:
+            # Block 0: first word is "commit", SHA is second word
+            words = block.split()
+            if len(words) > 1 and re.match(r"^[a-f0-9]{40}$", words[1]):
+                sha_full = words[1]
+            else:
+                continue
+        sha_short = sha_full[:12] if len(sha_full) >= 12 else sha_full
+        # Find the diff body (everything after the commit-header block)
+        parts = block.split("\n", 1)
+        block_body = parts[1] if len(parts) > 1 else ""
+
+        added_lines = _parse_patch_for_added_lines(block_body)
+        for line_idx, added_text in added_lines:
+            for pat_regex, pat_name in HISTORY_PATTERNS:
+                m = re.search(pat_regex, added_text)
+                if m:
+                    hit = HistoryHit(
+                        commit_sha=sha_short,
+                        pattern_name=pat_name,
+                        line_no=line_idx,
+                        masked_value=_mask_value(m.group()),
+                    )
+                    # Check if this commit is in the baseline
+                    if sha_full in baseline_commits or sha_short in baseline_commits:
+                        warn_lines.append(
+                            f"WARN: {pat_name} in {sha_short}+{line_idx} "
+                            f"(baseline: {_mask_value(m.group())})"
+                        )
+                    else:
+                        hits.append(hit)
+                    break  # one pattern hit per line is enough
+
+    # Print warnings (baseline commits)
+    if warn_lines:
+        print(f"History scan: {len(warn_lines)} known issue(s) in baseline:\n")
+        for wl in warn_lines:
+            print(wl)
+        print()
+
+    # Print errors (non-baseline commits)
+    if hits:
+        print(f"History scan: {len(hits)} private data leak(s) in git history:\n")
+        for h in hits:
+            print(
+                f"ERROR: {h.commit_sha}+{h.line_no} [{h.pattern_name}] "
+                f"{h.masked_value}"
+            )
+        return 1
+
+    print("History scan: OK — no un-baselined private data leaks found.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Scan tracked files for private data leaks.",
+    )
+    parser.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        help="File or directory to scan (defaults to all tracked files).",
+    )
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="Scan git history (all commits) instead of the working tree.",
+    )
+    parser.add_argument(
+        "--baseline",
+        type=str,
+        default=None,
+        help="Path to a baseline file with known-pre-existing commits (downgrades to warnings).",
+    )
+    parser.add_argument(
+        "--write-baseline",
+        action="store_true",
+        help="Write a baseline file from the current history scan and exit.",
+    )
+    args = parser.parse_args()
+
+    # --- history mode ---
+    if args.history:
+        repo_root = _get_repo_root()
+        baseline_path = Path(args.baseline) if args.baseline else None
+        return _scan_history(repo_root, baseline_path=baseline_path, write_baseline=args.write_baseline)
+
+    repo_root = _get_repo_root()
+    _load_private_identifiers(repo_root)
+    patterns = _compile_patterns()
+
+    if not patterns:
+        print("WARNING: no patterns defined — nothing to scan.", file=sys.stderr)
+        return 0
+
+    # Determine files to scan
+    if args.target:
+        target_path = Path(args.target)
+        if target_path.is_file():
+            files_to_check = [str(target_path)]
+        elif target_path.is_dir():
+            files_to_check = [str(f) for f in target_path.rglob("*") if f.is_file()]
+        else:
+            print(f"ERROR: target '{args.target}' does not exist.", file=sys.stderr)
+            return 2
+    else:
+        tracked = _get_tracked_files(repo_root)
+        files_to_check = [str(repo_root / f) for f in tracked]
+
+    # Scan
+    leaks: list[str] = []
+
+    # Category 5: tracked runtime-data paths. This is a path-level check
+    # against the git-tracked file list — it doesn't read file contents.
+    # It catches files that were committed BEFORE the .gitignore rule
+    # was added; without this check, such files stay tracked forever.
+    for filepath in files_to_check:
+        try:
+            rel = Path(filepath).relative_to(repo_root)
+            rel_str = str(rel)
+        except ValueError:
+            continue
+        for glob_pattern, label in RUNTIME_DATA_PATTERNS:
+            if Path(rel_str).match(glob_pattern):
+                leaks.append(
+                    f"{rel_str}:1 [tracked runtime data: {label}] "
+                    f"matched pattern '{glob_pattern}' — run "
+                    f"`git rm --cached {rel_str}` and amend the rule in .gitignore"
+                )
+                break  # one match per file is enough
+
+    for filepath in files_to_check:
+        if _should_exclude(filepath, repo_root):
+            continue
+
+        try:
+            text = Path(filepath).read_text(errors="replace")
+        except OSError:
+            continue
+
+        for regex, category, pattern_text in patterns:
+            for line_no, line_text in enumerate(text.splitlines(), start=1):
+                m = regex.search(line_text)
+                if m:
+                    # Documented sample CGNAT hosts are placeholders, not leaks.
+                    if category == "tailnet host IP literal" and m.group(0) in SAMPLE_CGNAT_HOSTS:
+                        continue
+                    rel = Path(filepath).relative_to(repo_root)
+                    leaks.append(f"{rel}:{line_no} [{category}] {line_text.strip()}")
+
+    if leaks:
+        print(f"Leaked private data found ({len(leaks)} hit(s)):\n")
+        for leak in leaks:
+            print(leak)
+        return 1
+    else:
+        print("OK: no private data leaks detected.")
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

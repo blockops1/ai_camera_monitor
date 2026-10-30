@@ -1,0 +1,117 @@
+# diagnostic output (tool-generated, not source)
+.desloppify/
+.qa/
+quality_status.json
+_ac1_verify.py
+
+# secrets
+.env
+*.env
+!.env.example
+!camera-creds.env.example
+!telegram-creds.env.example
+!llm-creds.env.example
+
+# privacy scanner config (operator-local identifier list)
+data/private_identifiers.json
+
+# person identity data (enrolled people — not for public repo)
+data/known/people/known_people.json
+data/known/people/embeddings.npz
+
+# animal identity data + enrollment staging crops (biometric, not for public repo)
+data/known/animals/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Watchdog runtime log
+logs/health_watchdog.log
+.ruff_cache/
+.coverage
+htmlcov/
+
+# alerts / frames / logs
+data/frames/*
+data/frames/**/ground_truth.json
+!data/frames/.gitkeep
+data/tg_uploads/*
+!data/tg_uploads/.gitkeep
+data/debug/
+logs/*.log
+logs/*.log.*
+!logs/.gitkeep
+
+# Daily status HTML reports + manual diagnostic dumps (generated at runtime, not source)
+logs/daily-status/
+!logs/daily-status/.gitkeep
+
+# One-off screenshots / scorecards dropped in repo root during diagnostics
+/scorecard.png
+/*.scorecard.png
+
+# archives / copy-targets
+/public/
+/scratch/
+.kanban-bodies/
+
+# ML model weights (large binaries; release via artifacts, not source)
+/models/
+*.pt
+*.onnx
+yolov8n.onnx
+yolov8n_static_640.onnx
+*.weights
+yolo*.pt
+
+# CoreML scratch artifacts (created when scripts run ONNX through CoreML EP;
+# contains compiled_model.mlmodelc + dynamic_nn shape variants — large, not source)
+/[0-9]_*/        # CoreML plan-builder cache dirs left behind by /tmp scripts
+/1/
+/2/
+/3/
+
+# git worktrees (moved to ~/archive/v2-worktrees-YYYY-MM-DD when done)
+.worktrees/
+
+# Operator's local hermes scratch cache (skill bodies, kanban bodies, scratch
+# notes). Lives at ./.hermes/ on the operator's machine and is purely
+# runtime state — never source.
+.hermes/
+
+# Runtime telemetry + push log (US-XXX housekeeping)
+data/gate_drops.jsonl
+scripts/push*.log
+scripts/push_log.txt
+
+# Operator's forgejo recovery mirror push script — operator-internal workflow
+# that documents the forgejo mirror path. Not appropriate for the public
+# GitHub repo. The script itself stays in the working tree for local use;
+# it's just untracked so it doesn't ship to the public mirror.
+scripts/push_to_forgejo.sh
+
+# Per-event runtime output directories (one UUID per alert, written by listener/daemon.py)
+data/events/*/
+
+# Pre-deployment device snapshots (Reolink GetDevInfo dump — firmware + hardware IDs)
+data/us-*snapshot*.json
+
+# Backtest artifacts (large PNG composites with operator property imagery)
+/data/backtest/
+
+# Backup files (created by orchestrator env file edits, not source)
+*.bak
+*.bak.*
+
+# Local render-test PNGs (Chrome headless scratch)
+docs/architecture/_*.png
+
+# Operator-only symlink for auto-injecting the operator-level AGENTS.md
+# (per-machine; the canonical rules file is above the project root)
+/AGENTS.override.md

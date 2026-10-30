@@ -1,0 +1,64 @@
+[tool.pytest.ini_options]
+# 2026-09-22 (operator): pytest tmp_path retention was leaving 40+ GB per run.
+# Workers were filling /private/var/.../pytest-of-<user>/ with multi-GB per-test dirs.
+# Keep tmp dirs only for FAILED tests, and only one generation back.
+tmp_path_retention_count = 1
+tmp_path_retention_policy = "failed"
+testpaths = ["tests"]
+norecursedirs = ["archive"]
+markers = [
+    "slow: marks tests as slow (E2E listener subprocess tests; skipped with -m 'not slow')",
+]
+
+[project]
+name = "farm-surveillance-v2"
+version = "0.1.0"
+description = "v2 vision pipeline listener (from-nothing rebuild)"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0",
+    "python-telegram-bot>=21.0",
+    "numpy>=1.24",
+    "Pillow>=10.0",
+    "onnxruntime>=1.16",
+    "av>=11.0",
+    "httpx>=0.25",
+    "python-dotenv>=1.0",
+    "suntime>=1.1",
+    "timm>=0.9",
+    "torch>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+    "pyright",
+    "PyYAML>=6.0",
+]
+
+[tool.ruff.lint]
+# v2 module-style: one import line per source module.
+# Avoids splitting combined imports like `from x import a, b`.
+isort.split-on-trailing-comma = false
+isort.combine-as-imports = true
+
+[tool.ruff]
+# Exclude JSON from ruff format — it's not Python (ruff adds trailing commas).
+exclude = ["data/vehicles/*.json"]
+
+[tool.ruff.lint.per-file-ignores]
+# Module docstrings may use words that look like keywords elsewhere (gate, classify).
+"infra/*.py" = []
+# Data files (JSON, etc.) are not Python — ignore ruff lint rules on them.
+"*.json" = ["ALL"]
+
+[tool.setuptools.packages.find]
+include = ["infra*", "listener*", "telegram_formatter*", "vehicle_matcher*"]
+
+[tool.pyright]
+include = ["infra", "listener", "telegram_formatter", "vehicle_matcher", "tests"]
+exclude = ["**/__pycache__", ".venv", ".desloppify", ".qa", "data"]
+reportMissingImports = "warning"
+pythonVersion = "3.11"

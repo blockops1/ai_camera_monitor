@@ -1,0 +1,104 @@
+# camera_recipes.toml -- Declarative reolink-cli device configuration
+#
+# Per-camera, per-subcommand settings for all 6 farm cameras.
+# Applied via infra.reolink.apply_recipe(recipe_path).
+#
+# Shape:
+#   [detect_ai.person.<camera>]
+#     stay_time = 2
+#     sensitivity = 50
+#
+# Cameras: front, back, outside_front_garage, outside_front_solar,
+#          outside_front_power, outside_back_solar
+# Subcommands: person, vehicle, dog_cat
+# Fields: stay_time (int), sensitivity (int)
+
+# ---------------------------------------------------------------------------
+# front
+# ---------------------------------------------------------------------------
+[detect_ai.person.front]
+stay_time = 2
+sensitivity = 50
+
+[detect_ai.vehicle.front]
+stay_time = 2
+sensitivity = 50
+
+[detect_ai.dog_cat.front]
+stay_time = 2
+sensitivity = 30
+
+# ---------------------------------------------------------------------------
+# back
+# ---------------------------------------------------------------------------
+[detect_ai.person.back]
+stay_time = 2
+sensitivity = 50
+
+[detect_ai.vehicle.back]
+stay_time = 2
+sensitivity = 50
+
+[detect_ai.dog_cat.back]
+stay_time = 2
+sensitivity = 30
+
+# ---------------------------------------------------------------------------
+# outside_front_garage
+# ---------------------------------------------------------------------------
+[detect_ai.person.outside_front_garage]
+stay_time = 2
+sensitivity = 50
+
+[detect_ai.vehicle.outside_front_garage]
+stay_time = 2
+sensitivity = 50
+
+[detect_ai.dog_cat.outside_front_garage]
+stay_time = 2
+sensitivity = 30
+
+# ---------------------------------------------------------------------------
+# outside_front_solar (gatekeeper camera)
+# ---------------------------------------------------------------------------
+[detect_ai.person.outside_front_solar]
+stay_time = 2
+sensitivity = 50
+
+[detect_ai.vehicle.outside_front_solar]
+stay_time = 2
+sensitivity = 50
+
+[detect_ai.dog_cat.outside_front_solar]
+stay_time = 2
+sensitivity = 30
+
+# ---------------------------------------------------------------------------
+# outside_front_power
+# ---------------------------------------------------------------------------
+[detect_ai.person.outside_front_power]
+stay_time = 2
+sensitivity = 50
+
+[detect_ai.vehicle.outside_front_power]
+stay_time = 2
+sensitivity = 50
+
+[detect_ai.dog_cat.outside_front_power]
+stay_time = 2
+sensitivity = 30
+
+# ---------------------------------------------------------------------------
+# outside_back_solar
+# ---------------------------------------------------------------------------
+[detect_ai.person.outside_back_solar]
+stay_time = 2
+sensitivity = 50
+
+[detect_ai.vehicle.outside_back_solar]
+stay_time = 2
+sensitivity = 50
+
+[detect_ai.dog_cat.outside_back_solar]
+stay_time = 2
+sensitivity = 30

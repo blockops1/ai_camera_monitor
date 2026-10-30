@@ -1,0 +1,319 @@
+"""Telegram HTTP dispatcher — closes the v2 delivery gap.
+
+Pure function `dispatch(messages, *, bot_token, chat_id, base_url)` that
+takes the dicts pipeline.run() already builds (tg1/tg2/tg3 with caption +
+photos) and POSTs them to api.telegram.org.
+
+No fallback paths (per operator 2026-09-09). Empty bot_token or chat_id
+raises ConfigError at call time. 4xx/5xx from api.telegram.org raises
+DeliveryError. No retries, no silent drops.
+
+Photo delivery uses sendMediaGroup with input_media_photo (pre-converted
+JPEGs, q=88, max-dim 1920px cached on disk). type=photo renders inline in
+the Telegram client (not as downloadable files).
+
+parse_mode: HTML (switched from MarkdownV2 on 2026-09-25, US-074).
+HTML has only 3 reserved characters: & < >.
+"""
+
+from __future__ import annotations
+
+import html
+import json
+import logging
+from pathlib import Path
+from typing import Any
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+# HTML entity set — only & < > need escaping in Telegram HTML parse_mode.
+_HTML_RESERVED = {"&", "<", ">"}
+
+# Allowed HTML tags that pass through unescaped (Telegram supports these).
+_ALLOWED_TAGS = {"code", "b", "strong", "em", "i", "u", "s", "strike", "ins", "del", "a"}
+
+
+def _escape_chunk(text: str) -> str:
+    """Escape & < > in *text* for use in Telegram HTML."""
+    return html.escape(text, quote=False)
+
+
+def escape_html(text: str) -> str:
+    """Escape HTML entities in *text* for safe use in Telegram HTML parse_mode.
+
+    Only & < > are reserved in HTML mode.  Static HTML formatting tags
+    (<code>, <b>, <strong>, etc.) are NOT escaped — Telegram renders them
+    natively.
+
+    The caller builds static formatting (e.g. timestamps wrapped in <code>)
+    and only passes dynamic user-data through this helper.
+
+    Algorithm: walk the string, detect <tag...> / </tag> boundaries, and only
+    escape characters outside those regions.
+    """
+    result: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        # Check for an opening < tag.
+        if text[i] == "<":
+            # Find the closing >.
+            end = text.find(">", i)
+            if end != -1:
+                tag_text = text[i:end + 1]  # e.g. "<code>" or "</code>"
+                # Extract tag name from inside the angle brackets.
+                inner_raw = tag_text[1:-1]  # strip '<' and '>'
+                # Skip comments/processing directives.
+                if not inner_raw.startswith("!") and not inner_raw.startswith("/"):
+                    tag_name = inner_raw.lower().split()[0]
+                    if tag_name in _ALLOWED_TAGS:
+                        # Allowed tag — pass through unescaped.
+                        result.append(tag_text)
+                        i = end + 1
+                        continue
+                elif inner_raw.startswith("/"):
+                    # Closing tag — check the name after '/'.
+                    tag_name = inner_raw[1:].lower().split()[0]
+                    if tag_name in _ALLOWED_TAGS:
+                        result.append(tag_text)
+                        i = end + 1
+                        continue
+            # Either not a valid tag or not allowed — escape this char.
+            result.append(html.escape(text[i], quote=False))
+            i += 1
+        elif text[i] == "&":
+            result.append("&amp;")
+            i += 1
+        elif text[i] == ">":
+            result.append("&gt;")
+            i += 1
+        elif text[i] == "<":
+            result.append("&lt;")
+            i += 1
+        else:
+            result.append(text[i])
+            i += 1
+    return "".join(result)
+
+
+class ConfigError(RuntimeError):
+    """Raised when bot_token or chat_id is empty/missing."""
+
+
+class DeliveryError(RuntimeError):
+    """Raised when api.telegram.org returns 4xx/5xx."""
+
+
+def _sniff_mime(path: str) -> tuple[str, str]:
+    """Sniff the first 16 bytes of a file to determine MIME type and suffix.
+
+    Returns (mime_type, suffix) where suffix is the correct file extension
+    ('.png', '.jpg', or '.bin' for unknown types).
+
+    Raises logger.warning for unknown byte sequences.
+    """
+    data = Path(path).read_bytes()[:16]
+    if not data:
+        logger.warning("empty file at %s — sending as octet-stream", path)
+        return "application/octet-stream", ".bin"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png", ".png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg", ".jpg"
+    logger.warning("unknown magic bytes at %s — sending as octet-stream", path)
+    return "application/octet-stream", ".bin"
+
+
+def _require(bot_token: str, chat_id: str) -> None:
+    """Fail loudly on empty config (no silent defaults, per operator 2026-09-09)."""
+    if not bot_token or not chat_id:
+        missing = []
+        if not bot_token:
+            missing.append("TELEGRAM_BOT_TOKEN")
+        if not chat_id:
+            missing.append("TELEGRAM_HOME_CHAT_ID")
+        raise ConfigError(
+            f"dispatcher: required env var(s) empty: {', '.join(missing)}"
+        )
+
+
+def _send_message(
+    client: httpx.Client,
+    bot_token: str,
+    chat_id: str,
+    caption: str,
+    base_url: str,
+) -> httpx.Response:
+    """sendMessage — text-only delivery (TG#3)."""
+    url = f"{base_url}/bot{bot_token}/sendMessage"
+    return client.post(
+        url,
+        json={
+            "chat_id": chat_id,
+            "text": escape_html(caption),
+            "parse_mode": "HTML",
+        },
+    )
+
+
+def _send_photo(
+    client: httpx.Client,
+    bot_token: str,
+    chat_id: str,
+    photo_path: str,
+    caption: str = "",
+    base_url: str = "https://api.telegram.org",
+) -> httpx.Response:
+    """sendPhoto — single-photo delivery with optional caption."""
+    url = f"{base_url}/bot{bot_token}/sendPhoto"
+    mime, suffix = _sniff_mime(photo_path)
+    with open(photo_path, "rb") as f:
+        data = f.read()
+    files = [("photo", (f"photo{suffix}", data, mime))]
+    return client.post(
+        url,
+        data={
+            "chat_id": chat_id,
+            "caption": escape_html(caption),
+            "parse_mode": "HTML",
+        },
+        files=files,
+    )
+
+
+def _send_media_group(
+    client: httpx.Client,
+    bot_token: str,
+    chat_id: str,
+    caption: str,
+    photo_paths: list[str],
+    base_url: str,
+) -> httpx.Response:
+    """sendMediaGroup with input_media_photo — inline JPEG rendering (TG#1/TG#2).
+
+    Uses type=photo so Telegram renders the images inline in the chat
+    (not as downloadable files). Photos are pre-converted to JPEG by
+    the caller (codec.encode_jpeg) before reaching this function.
+    """
+    url = f"{base_url}/bot{bot_token}/sendMediaGroup"
+    media: list[dict[str, str]] = []
+    for i, path in enumerate(photo_paths):
+        attach_ref = f"attach://photo_{i}"
+        media.append(
+            {
+                "type": "photo",
+                "media": attach_ref,
+                "parse_mode": "HTML",
+            }
+        )
+        if i == 0:
+            # Telegram requires the first media entry to also carry caption.
+            media[-1]["caption"] = escape_html(caption)
+    files: list[tuple[str, tuple[str, bytes, str]]] = []
+    for i, path in enumerate(photo_paths):
+        with open(path, "rb") as f:
+            data = f.read()
+        mime, suffix = _sniff_mime(path)
+        files.append((f"photo_{i}", (f"photo_{i}{suffix}", data, mime)))
+    return client.post(
+        url,
+        data={
+            "chat_id": chat_id,
+            "media": json.dumps(media),
+        },
+        files=files,
+    )
+
+
+def send_photo(
+    bot_token: str,
+    chat_id: str,
+    photo_path: str,
+    caption: str = "",
+    base_url: str = "https://api.telegram.org",
+    client: httpx.Client | None = None,
+) -> httpx.Response:
+    """Send a single photo to Telegram.
+
+    Args:
+        bot_token: required, from env TELEGRAM_BOT_TOKEN.
+        chat_id: required, from env TELEGRAM_HOME_CHAT_ID.
+        photo_path: absolute path to the image file.
+        caption: optional caption text.
+        base_url: override for testing (default api.telegram.org).
+        client: optional httpx.Client. If None, a fresh Client is created.
+
+    Returns:
+        httpx.Response from the Telegram API.
+
+    Raises:
+        ConfigError: bot_token or chat_id empty.
+    """
+    _require(bot_token, chat_id)
+    owns_client = client is None
+    if owns_client:
+        client = httpx.Client(timeout=10.0)
+    try:
+        return _send_photo(client, bot_token, chat_id, photo_path, caption, base_url)
+    finally:
+        if owns_client:
+            client.close()
+
+
+def dispatch(
+    messages: list[dict[str, Any]],
+    *,
+    bot_token: str,
+    chat_id: str,
+    base_url: str = "https://api.telegram.org",
+    client: httpx.Client | None = None,
+) -> list[httpx.Response]:
+    """Send each TG#1/TG#2/TG#3 dict to api.telegram.org.
+
+    Args:
+        messages: list of dicts, each with keys 'caption' (str) and 'photos' (list of paths).
+            Empty photos list => sendMessage. Non-empty => sendMediaGroup.
+        bot_token: required, from env TELEGRAM_BOT_TOKEN.
+        chat_id: required, from env TELEGRAM_HOME_CHAT_ID.
+        base_url: override for testing (default api.telegram.org).
+        client: optional httpx.Client. If None, a fresh Client is created.
+
+    Returns:
+        list of httpx.Response, one per message.
+
+    Raises:
+        ConfigError: bot_token or chat_id empty.
+        DeliveryError: any 4xx/5xx response. Caller decides whether to surface
+            this to the camera (daemon logs and continues, never returns 5xx).
+    """
+    _require(bot_token, chat_id)
+    owns_client = client is None
+    if owns_client:
+        client = httpx.Client(timeout=10.0)
+    try:
+        responses: list[httpx.Response] = []
+        for msg in messages:
+            caption = msg.get("caption", "")
+            photo_paths = msg.get("photos", []) or []
+            if photo_paths:
+                resp = _send_media_group(
+                    client, bot_token, chat_id, caption, photo_paths, base_url
+                )
+            else:
+                resp = _send_message(client, bot_token, chat_id, caption, base_url)
+            responses.append(resp)
+            if 400 <= resp.status_code < 600:
+                # Don't bail — finish remaining messages, but raise at the end.
+                pass
+        # Check for any 4xx/5xx after the loop.
+        for resp in responses:
+            if 400 <= resp.status_code < 600:
+                raise DeliveryError(
+                    f"telegram api returned {resp.status_code}: {resp.text[:200]}"
+                )
+        return responses
+    finally:
+        if owns_client:
+            client.close()

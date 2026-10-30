@@ -1,0 +1,228 @@
+"""
+vision_analyzer.py — Call vision llama-server (VM1/VM2) to classify crops.
+
+STATUS: stable
+THREAD SAFETY: single-threaded (httpx per-call, no shared state)
+
+INPUTS:
+    - crop_a, crop_b: str paths to motion-streak JPEGs (required)
+    - mode: str for VM2 dispatch (detail_class only) — one of
+      'vehicle', 'person', 'animal'
+
+OUTPUTS:
+    - dict from VM1 or VM2 JSON response (schema-enforced)
+    - raises VisionAnalyzerError on HTTP non-200 or parse failure
+
+PUBLIC API:
+    verify_class(crop_a, crop_b) -> dict
+        VM1 two-crop classify call. Returns {"class": ..., "confidence": ...}.
+    detail_class(mode, crop_a, crop_b, motion_diff_image=None) -> dict
+        VM2 detail call, dispatched by mode. Returns mode-specific schema dict.
+
+DOES NOT DO:
+    - Gate classification (upstream caller decides)
+    - Crop resizing / encoding (caller handles)
+    - Threat-level analysis (no threat fields at vision layer)
+
+CALLS INTO:
+    - httpx: POST JSON+images to llama-server
+    - infra.vm1_prompt: VM1 prompt + response schema
+    - infra.vehicle/person/animal_prompt: VM2 schemas + builders
+
+DESIGN NOTES (refactor parity):
+    llama-server supports server-side JSON Schema enforcement via
+    `response_format: {"type": "json_schema", "strict": True, "schema": ...}`.
+    Using `strict: True` means:
+      - The model cannot emit keys outside `properties`
+      - Required fields are enforced (model must emit them)
+      - `enum` values are coerced / rejected
+    This is the llama-server contract used by `farm-surveillance-refactor`
+    for the same vision calls. The `SCHEMA_JSON` dicts in
+    `infra/*_prompt.py` are the canonical contract.
+"""
+from __future__ import annotations
+
+import base64
+import json
+import os
+from pathlib import Path
+
+import httpx
+
+from infra.animal_prompt import SCHEMA_JSON as ANIMAL_SCHEMA, build_animal_prompt
+from infra.person_prompt import SCHEMA_JSON as PERSON_SCHEMA, build_person_prompt
+from infra.unsure_prompt import SCHEMA_JSON as UNSURE_SCHEMA, build_unsure_prompt
+from infra.vehicle_prompt import SCHEMA_JSON as VEHICLE_SCHEMA, build_vehicle_prompt
+from infra.vm1_prompt import SCHEMA_JSON as VM1_SCHEMA, build_vm1_prompt
+
+# LLM endpoint is env-driven (VISION_LLM_URL, same var the backtests use).
+# 2026-10-21: operator moved the background LLM to Kapitsa :8000
+# (qwen3.8-27b, reasoning-capable). Defaults point at the new server;
+# override in .env to move back or elsewhere without a code change.
+# Convention: VISION_LLM_URL may be a bare base URL (project convention,
+# e.g. http://127.0.0.1:8000) or a full /v1/chat/completions URL — normalize.
+_VISION_URL_RAW = os.environ.get("VISION_LLM_URL", "http://127.0.0.1:8000").rstrip("/")
+if "/chat/completions" in _VISION_URL_RAW:
+    _VISION_URL = _VISION_URL_RAW
+    _VISION_BASE_URL = _VISION_URL_RAW.rsplit("/v1/", 1)[0]
+else:
+    _VISION_BASE_URL = _VISION_URL_RAW
+    _VISION_URL = _VISION_BASE_URL + "/v1/chat/completions"
+_VISION_MODEL = os.environ.get("VISION_LLM_MODEL", "qwen3.8-27b")
+
+# The qwen3-family model on kapitsa is reasoning-capable: without thinking
+# disabled it spends
+# the whole completion budget on reasoning_content and leaves content empty
+# (finish_reason=length), which breaks the strict-JSON contract.
+# chat_template_kwargs={"enable_thinking": False} verified 2026-10-21 against
+# :8000: returns bare schema JSON in ~250 tokens instead of 1000+ reasoning.
+_THINKING_OFF = {"chat_template_kwargs": {"enable_thinking": False}}
+
+# ---------------------------------------------------------------------------
+# Runtime state — exposed for health-heartbeat consumers (US-073i).
+# ---------------------------------------------------------------------------
+_last_call_timestamp: float | None = None
+_last_success_timestamp: float | None = None
+
+
+def _response_format(schema: dict, name: str) -> dict:
+    """Wrap a JSON Schema dict in the llama-server strict-mode envelope.
+
+    llama-server (Qwen3-VL backend) enforces strict-mode schema when the
+    response_format is shaped:
+        {
+          "type": "json_schema",
+          "json_schema": {
+            "name": "<schema-name>",
+            "strict": True,
+            "schema": <dict>
+          }
+        }
+    Verified 2026-09-09 with `qwen3-vl-8b` on localhost:8080: the nested
+    shape makes the model emit ONLY the schema-declared keys. The flat
+    shape (`type/strict/schema` at top level) is accepted with 200 but
+    the model emits bare text ("unsure", etc.) with no enforcement —
+    silent failure mode.
+
+    `strict: True` makes the server enforce key names + required fields
+    + enums server-side. Without it, the model emits arbitrary keys.
+    """
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": name,
+            "strict": True,
+            "schema": schema,
+        },
+    }
+
+
+class VisionAnalyzerError(Exception):
+    """Raised when the vision llama-server returns an error."""
+
+
+# Mode dispatch — centralizes (response_format, prompt_builder) per mode.
+# Adding a new VM2 mode = add an entry here + create a prompt module.
+# The canonical mode set is exactly four (vm1 + 3 vm2). Anything else
+# raises VisionAnalyzerError loudly.
+DISPATCH = {
+    "animal": (_response_format(ANIMAL_SCHEMA, "animal"), build_animal_prompt),
+    "person": (_response_format(PERSON_SCHEMA, "person"), build_person_prompt),
+    "unsure": (_response_format(UNSURE_SCHEMA, "unsure"), build_unsure_prompt),
+    "vehicle": (_response_format(VEHICLE_SCHEMA, "vehicle"), build_vehicle_prompt),
+}
+
+
+def _b64(path: str) -> dict:
+    data = Path(path).read_bytes()
+    b64 = base64.b64encode(data).decode()
+    ext = Path(path).suffix.lower()
+    mime = "image/png" if ext == ".png" else "image/jpeg"
+    return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
+
+
+def _post_vision(payload: dict, timeout: float) -> dict:
+    """POST to llama-server, parse JSON, return content dict. Raises VisionAnalyzerError."""
+    try:
+        resp = httpx.post(_VISION_URL, json=payload, timeout=timeout)
+    except httpx.HTTPError as exc:
+        raise VisionAnalyzerError(
+            f"llama-server connection failed: {exc}"
+        ) from exc
+    if resp.status_code != 200:
+        raise VisionAnalyzerError(
+            f"llama-server returned {resp.status_code}: {resp.text[:300]}"
+        )
+    # US-093a: record success timestamp for health-heartbeat consumers.
+    import time  # local to avoid circular import in hot path
+
+    global _last_call_timestamp, _last_success_timestamp
+    _last_success_timestamp = time.monotonic()
+    try:
+        raw = resp.json()["choices"][0]["message"]["content"]
+        # Some servers (Kapitsa qwen3 observed 2026-10-21) wrap strict-schema
+        # output in ```json fences despite response_format. Strip them.
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw
+            if raw.rstrip().endswith("```"):
+                raw = raw.rstrip()[:-3]
+        parsed = json.loads(raw.strip())
+        _last_call_timestamp = time.monotonic()
+        return parsed
+    except (KeyError, json.JSONDecodeError, IndexError) as exc:
+        raise VisionAnalyzerError(
+            f"failed to parse response: {exc}"
+        ) from exc
+
+
+def verify_class(crop_a: str, crop_b: str) -> dict:
+    """VM1: classify subject as vehicle/person/animal/unsure from 2 crops.
+
+    Server-side schema enforcement: model must emit exactly
+    {"class": <enum>, "confidence": <enum>}.
+    """
+    payload = {
+        "model": _VISION_MODEL,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": build_vm1_prompt()},
+                _b64(crop_a),
+                _b64(crop_b),
+            ],
+        }],
+        "response_format": _response_format(VM1_SCHEMA, "vm1"),
+        **_THINKING_OFF,
+    }
+    return _post_vision(payload, timeout=30.0)
+
+
+def detail_class(
+    mode: str, crop_a: str, crop_b: str,
+    motion_diff_image: str | None = None,
+) -> dict:
+    """VM2: mode-specific detail call. Raises VisionAnalyzerError on unknown mode."""
+    entry = DISPATCH.get(mode)
+    if entry is None:
+        raise VisionAnalyzerError(
+            f"unknown detail_class mode {mode!r}; "
+            f"expected one of {sorted(DISPATCH.keys())}"
+        )
+    response_format, prompt_fn = entry
+    images = [_b64(crop_a), _b64(crop_b)]
+    if motion_diff_image is not None:
+        images.append(_b64(motion_diff_image))
+    payload = {
+        "model": _VISION_MODEL,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt_fn()},
+                *images,
+            ],
+        }],
+        "response_format": response_format,
+        **_THINKING_OFF,
+    }
+    return _post_vision(payload, timeout=60.0)

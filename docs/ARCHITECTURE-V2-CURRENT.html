@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Farm Surveillance V2 Architecture</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background: #020617;
+      min-height: 100vh;
+      padding: 2rem;
+      color: white;
+    }
+    .container { max-width: 1280px; margin: 0 auto; }
+    .header { margin-bottom: 2rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .pulse-dot {
+      width: 12px; height: 12px;
+      background: #22d3ee;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; }
+    .subtitle { color: #94a3b8; font-size: 0.875rem; margin-left: 1.75rem; }
+    .diagram-container {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 1rem;
+      border: 1px solid #1e293b;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+    svg { width: 100%; min-width: 1100px; display: block; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+    .card {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 0.75rem;
+      border: 1px solid #1e293b;
+      padding: 1.25rem;
+    }
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card-dot.cyan { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.violet { background: #a78bfa; }
+    .card-dot.amber { background: #fbbf24; }
+    .card-dot.rose { background: #fb7185; }
+    .card-dot.orange { background: #fb923c; }
+    .card h3 { font-size: 0.875rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 0.75rem; }
+    .card li { margin-bottom: 0.375rem; }
+    .footer { text-align: center; margin-top: 1.5rem; color: #475569; font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>Farm Surveillance V2 — Current Architecture</h1>
+      </div>
+      <p class="subtitle">Motion-gated YOLO/VLM classification pipeline with hourly RTSP reconnect, sanitized for public release</p>
+    </div>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1200 720">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <marker id="arrowhead-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee" />
+          </marker>
+          <marker id="arrowhead-rose" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fb7185" />
+          </marker>
+          <marker id="arrowhead-orange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fb923c" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- =================== CAMERAS (External) =================== -->
+        <rect x="30" y="60" width="140" height="260" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="100" y="80" fill="white" font-size="11" font-weight="600" text-anchor="middle">Reolink Cameras</text>
+        <text x="100" y="94" fill="#94a3b8" font-size="8" text-anchor="middle">6 cameras via RTSP + webhook</text>
+
+        <rect x="45" y="110" width="110" height="22" rx="3" fill="rgba(30, 41, 59, 0.7)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="100" y="125" fill="white" font-size="9" text-anchor="middle">OFS (driveway)</text>
+
+        <rect x="45" y="137" width="110" height="22" rx="3" fill="rgba(30, 41, 59, 0.7)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="100" y="152" fill="white" font-size="9" text-anchor="middle">OFG (garage)</text>
+
+        <rect x="45" y="164" width="110" height="22" rx="3" fill="rgba(30, 41, 59, 0.7)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="100" y="179" fill="white" font-size="9" text-anchor="middle">OFP (power)</text>
+
+        <rect x="45" y="191" width="110" height="22" rx="3" fill="rgba(30, 41, 59, 0.7)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="100" y="206" fill="white" font-size="9" text-anchor="middle">FRONT (entry)</text>
+
+        <rect x="45" y="218" width="110" height="22" rx="3" fill="rgba(30, 41, 59, 0.7)" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3"/>
+        <text x="100" y="233" fill="#fb7185" font-size="9" text-anchor="middle">BACK (unstable)</text>
+
+        <rect x="45" y="245" width="110" height="22" rx="3" fill="rgba(30, 41, 59, 0.7)" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3"/>
+        <text x="100" y="260" fill="#fb7185" font-size="9" text-anchor="middle">OBS (no RTSP)</text>
+
+        <text x="100" y="290" fill="#fbbf24" font-size="7" text-anchor="middle">Hourly RTSP reset</text>
+        <text x="100" y="302" fill="#fbbf24" font-size="7" text-anchor="middle">on Reolink firmware</text>
+
+        <!-- =================== LISTENER REGION =================== -->
+        <rect x="200" y="40" width="660" height="540" rx="12" fill="rgba(251, 191, 36, 0.04)" stroke="#fbbf24" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="214" y="58" fill="#fbbf24" font-size="10" font-weight="600">Mac mini · LaunchAgent: com.farm.surveillance.v2</text>
+
+        <!-- Listener / Daemon (HTTP entry) -->
+        <rect x="220" y="80" width="140" height="60" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="290" y="100" fill="white" font-size="11" font-weight="600" text-anchor="middle">listener/daemon.py</text>
+        <text x="290" y="116" fill="#94a3b8" font-size="9" text-anchor="middle">Flask :8090/alert</text>
+        <text x="290" y="130" fill="#22d3ee" font-size="7" text-anchor="middle">POST /alert (webhook)</text>
+
+        <!-- Pipeline orchestrator -->
+        <rect x="400" y="80" width="140" height="60" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="470" y="100" fill="white" font-size="11" font-weight="600" text-anchor="middle">listener/pipeline.py</text>
+        <text x="470" y="116" fill="#94a3b8" font-size="9" text-anchor="middle">Orchestrator</text>
+        <text x="470" y="130" fill="#34d399" font-size="7" text-anchor="middle">run(alert_dict) → result</text>
+
+        <!-- Frame Capture (rings) -->
+        <rect x="580" y="60" width="170" height="90" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="665" y="82" fill="white" font-size="11" font-weight="600" text-anchor="middle">infra/frame_capture.py</text>
+        <text x="665" y="98" fill="#94a3b8" font-size="9" text-anchor="middle">Per-camera ring (180 frames)</text>
+        <text x="665" y="114" fill="#94a3b8" font-size="9" text-anchor="middle">RTSP readers · reconnect loop</text>
+        <text x="665" y="130" fill="#fbbf24" font-size="7" text-anchor="middle">Recovers after hourly reset</text>
+
+        <!-- =================== MOTION GATE =================== -->
+        <rect x="400" y="180" width="140" height="90" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="470" y="202" fill="white" font-size="11" font-weight="600" text-anchor="middle">infra/gate.py</text>
+        <text x="470" y="218" fill="#94a3b8" font-size="9" text-anchor="middle">motion_gate()</text>
+        <text x="470" y="232" fill="#94a3b8" font-size="9" text-anchor="middle">Logical-AND bbox across</text>
+        <text x="470" y="246" fill="#94a3b8" font-size="9" text-anchor="middle">2 of 4 ring frames</text>
+        <text x="470" y="260" fill="#34d399" font-size="7" text-anchor="middle">decision: pass / suppress</text>
+
+        <!-- Gate cooldown -->
+        <rect x="400" y="285" width="140" height="50" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="470" y="305" fill="white" font-size="11" font-weight="600" text-anchor="middle">infra/gate_cooldown.py</text>
+        <text x="470" y="321" fill="#94a3b8" font-size="9" text-anchor="middle">UUID-keyed 90s cooldown</text>
+        <text x="470" y="335" fill="#34d399" font-size="7" text-anchor="middle">Suppress duplicates</text>
+
+        <!-- =================== VISION (YOLO + VLM) =================== -->
+        <rect x="220" y="180" width="160" height="155" rx="8" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="300" y="200" fill="white" font-size="11" font-weight="600" text-anchor="middle">Vehicle Classification</text>
+
+        <rect x="232" y="215" width="136" height="36" rx="4" fill="rgba(76, 29, 149, 0.6)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="300" y="232" fill="white" font-size="10" font-weight="600" text-anchor="middle">infra/quick_classifier.py</text>
+        <text x="300" y="246" fill="#94a3b8" font-size="8" text-anchor="middle">YOLO crop detection</text>
+
+        <rect x="232" y="258" width="136" height="36" rx="4" fill="rgba(76, 29, 149, 0.6)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="300" y="275" fill="white" font-size="10" font-weight="600" text-anchor="middle">vehicle_matcher/match.py</text>
+        <text x="300" y="289" fill="#94a3b8" font-size="8" text-anchor="middle">Perceptual hash matching</text>
+
+        <rect x="232" y="301" width="136" height="26" rx="4" fill="rgba(120, 53, 15, 0.4)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="300" y="318" fill="white" font-size="9" text-anchor="middle">data/known_vehicles.json</text>
+
+        <!-- VLM verification -->
+        <rect x="580" y="180" width="170" height="155" rx="8" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="665" y="200" fill="white" font-size="11" font-weight="600" text-anchor="middle">Vision LLM Verification</text>
+
+        <rect x="592" y="215" width="146" height="36" rx="4" fill="rgba(76, 29, 149, 0.6)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="665" y="232" fill="white" font-size="10" font-weight="600" text-anchor="middle">infra/vision_analyzer.py</text>
+        <text x="665" y="246" fill="#94a3b8" font-size="8" text-anchor="middle">Qwen3-VL 8B · :8080</text>
+
+        <rect x="592" y="258" width="146" height="36" rx="4" fill="rgba(76, 29, 149, 0.6)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="592" y="275" fill="white" font-size="10" font-weight="600" startOffset="50%" text-anchor="middle">animal/person/vehicle</text>
+        <text x="665" y="289" fill="#94a3b8" font-size="8" text-anchor="middle">_prompt.py · 3 specialized prompts</text>
+
+        <rect x="592" y="301" width="146" height="26" rx="4" fill="rgba(120, 53, 15, 0.4)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="665" y="318" fill="white" font-size="9" text-anchor="middle">infra/vision_cache.py</text>
+
+        <!-- =================== DECISION / ALERT =================== -->
+        <rect x="400" y="370" width="140" height="60" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="470" y="390" fill="white" font-size="11" font-weight="600" text-anchor="middle">Decision</text>
+        <text x="470" y="406" fill="#94a3b8" font-size="9" text-anchor="middle">class_below_threshold</text>
+        <text x="470" y="420" fill="#94a3b8" font-size="9" text-anchor="middle">animal_suppressed · no_obj</text>
+
+        <!-- Telegram formatter -->
+        <rect x="400" y="450" width="350" height="100" rx="8" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1.5"/>
+        <text x="575" y="472" fill="white" font-size="11" font-weight="600" text-anchor="middle">telegram_formatter/</text>
+
+        <rect x="412" y="484" width="105" height="55" rx="4" fill="rgba(251, 146, 60, 0.5)" stroke="#fb923c" stroke-width="1"/>
+        <text x="464" y="502" fill="white" font-size="10" font-weight="600" text-anchor="middle">alert.py</text>
+        <text x="464" y="516" fill="#94a3b8" font-size="8" text-anchor="middle">Vehicle match →</text>
+        <text x="464" y="528" fill="#94a3b8" font-size="8" text-anchor="middle">Telegram message</text>
+
+        <rect x="525" y="484" width="105" height="55" rx="4" fill="rgba(251, 146, 60, 0.5)" stroke="#fb923c" stroke-width="1"/>
+        <text x="577" y="502" fill="white" font-size="10" font-weight="600" text-anchor="middle">detail.py</text>
+        <text x="577" y="516" fill="#94a3b8" font-size="8" text-anchor="middle">VLM-only alert →</text>
+        <text x="577" y="528" fill="#94a3b8" font-size="8" text-anchor="middle">Telegram message</text>
+
+        <rect x="638" y="484" width="105" height="55" rx="4" fill="rgba(251, 146, 60, 0.5)" stroke="#fb923c" stroke-width="1"/>
+        <text x="690" y="502" fill="white" font-size="10" font-weight="600" text-anchor="middle">match_alert.py</text>
+        <text x="690" y="516" fill="#94a3b8" font-size="8" text-anchor="middle">Generic alert →</text>
+        <text x="690" y="528" fill="#94a3b8" font-size="8" text-anchor="middle">Telegram message</text>
+
+        <!-- Telegram external -->
+        <rect x="780" y="60" width="120" height="60" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="840" y="82" fill="white" font-size="11" font-weight="600" text-anchor="middle">Telegram Bot API</text>
+        <text x="840" y="98" fill="#94a3b8" font-size="9" text-anchor="middle">sendPhoto · sendMessage</text>
+        <text x="840" y="114" fill="#94a3b8" font-size="8" text-anchor="middle">Bot token via env</text>
+
+        <!-- =================== INFRA SUPPORT =================== -->
+        <rect x="220" y="370" width="160" height="180" rx="8" fill="rgba(6, 78, 59, 0.3)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="300" y="390" fill="white" font-size="11" font-weight="600" text-anchor="middle">Support infra</text>
+
+        <rect x="232" y="402" width="136" height="22" rx="3" fill="rgba(6, 78, 59, 0.5)" stroke="#34d399" stroke-width="1"/>
+        <text x="300" y="416" fill="#94a3b8" font-size="8" text-anchor="middle">infra/camera_creds.py</text>
+
+        <rect x="232" y="428" width="136" height="22" rx="3" fill="rgba(6, 78, 59, 0.5)" stroke="#34d399" stroke-width="1"/>
+        <text x="300" y="442" fill="#94a3b8" font-size="8" text-anchor="middle">infra/paths.py</text>
+
+        <rect x="232" y="454" width="136" height="22" rx="3" fill="rgba(6, 78, 59, 0.5)" stroke="#34d399" stroke-width="1"/>
+        <text x="300" y="468" fill="#94a3b8" font-size="8" text-anchor="middle">infra/timezone.py</text>
+
+        <rect x="232" y="480" width="136" height="22" rx="3" fill="rgba(6, 78, 59, 0.5)" stroke="#34d399" stroke-width="1"/>
+        <text x="300" y="494" fill="#94a3b8" font-size="8" text-anchor="middle">infra/cooldown.py</text>
+
+        <rect x="232" y="506" width="136" height="22" rx="3" fill="rgba(6, 78, 59, 0.5)" stroke="#34d399" stroke-width="1"/>
+        <text x="300" y="520" fill="#94a3b8" font-size="8" text-anchor="middle">infra/motion_types.py</text>
+
+        <!-- Vehicle position module -->
+        <rect x="780" y="180" width="120" height="60" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="840" y="202" fill="white" font-size="11" font-weight="600" text-anchor="middle">vehicle_position/</text>
+        <text x="840" y="216" fill="#94a3b8" font-size="8" text-anchor="middle">motion_detector +</text>
+        <text x="840" y="228" fill="#94a3b8" font-size="8" text-anchor="middle">crop_extractor</text>
+
+        <!-- Frame diff -->
+        <rect x="780" y="280" width="120" height="50" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="840" y="300" fill="white" font-size="11" font-weight="600" text-anchor="middle">infra/frame_diff.py</text>
+        <text x="840" y="316" fill="#94a3b8" font-size="8" text-anchor="middle">Frame diff for motion</text>
+
+        <!-- Pipeline cooldown -->
+        <rect x="780" y="340" width="120" height="50" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="840" y="360" fill="white" font-size="11" font-weight="600" text-anchor="middle">pipeline_cooldown</text>
+        <text x="840" y="376" fill="#94a3b8" font-size="8" text-anchor="middle">Cross-camera dedup</text>
+
+        <!-- =================== LLAMA SERVERS (External infra) =================== -->
+        <rect x="900" y="60" width="270" height="200" rx="12" fill="rgba(251, 191, 36, 0.04)" stroke="#fbbf24" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="914" y="78" fill="#fbbf24" font-size="10" font-weight="600">llama.cpp servers (home network)</text>
+
+        <rect x="915" y="92" width="240" height="46" rx="4" fill="rgba(120, 53, 15, 0.4)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="1035" y="110" fill="white" font-size="10" font-weight="600" text-anchor="middle">Qwen3.5-9B · :8081</text>
+        <text x="1035" y="124" fill="#94a3b8" font-size="8" text-anchor="middle">--parallel 4 · text/JSON · text gate</text>
+
+        <rect x="915" y="146" width="240" height="46" rx="4" fill="rgba(120, 53, 15, 0.4)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="1035" y="164" fill="white" font-size="10" font-weight="600" text-anchor="middle">Qwen3-VL 8B · :8080</text>
+        <text x="1035" y="178" fill="#94a3b8" font-size="8" text-anchor="middle">--parallel 2 · vision · classify</text>
+
+        <rect x="915" y="200" width="240" height="46" rx="4" fill="rgba(120, 53, 15, 0.4)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="1035" y="218" fill="white" font-size="10" font-weight="600" text-anchor="middle">Qwen3.6-35B · :8093</text>
+        <text x="1035" y="232" fill="#94a3b8" font-size="8" text-anchor="middle">--parallel 4 · draft spec · reasoning off</text>
+
+        <!-- =================== STORAGE / DATA =================== -->
+        <rect x="220" y="580" width="660" height="100" rx="8" fill="rgba(120, 53, 15, 0.2)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="550" y="600" fill="white" font-size="11" font-weight="600" text-anchor="middle">Data & Config (gitignored where private)</text>
+
+        <rect x="232" y="612" width="160" height="56" rx="4" fill="rgba(120, 53, 15, 0.4)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="312" y="630" fill="white" font-size="9" font-weight="600" text-anchor="middle">data/vehicles/</text>
+        <text x="312" y="644" fill="#94a3b8" font-size="8" text-anchor="middle">known_vehicles.json</text>
+        <text x="312" y="656" fill="#94a3b8" font-size="8" text-anchor="middle">(12 entries, anonymized)</text>
+
+        <rect x="404" y="612" width="160" height="56" rx="4" fill="rgba(120, 53, 15, 0.4)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="484" y="630" fill="white" font-size="9" font-weight="600" text-anchor="middle">data/frames/&lt;camera&gt;/</text>
+        <text x="484" y="644" fill="#94a3b8" font-size="8" text-anchor="middle">Alert crops (4 frames</text>
+        <text x="484" y="656" fill="#94a3b8" font-size="8" text-anchor="middle">per webhook)</text>
+
+        <rect x="576" y="612" width="160" height="56" rx="4" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1"/>
+        <text x="656" y="630" fill="white" font-size="9" font-weight="600" text-anchor="middle">*.env (gitignored)</text>
+        <text x="656" y="644" fill="#94a3b8" font-size="8" text-anchor="middle">camera, telegram, llm</text>
+        <text x="656" y="656" fill="#fb7185" font-size="7" text-anchor="middle">Bot token · chat id · paths</text>
+
+        <rect x="748" y="612" width="120" height="56" rx="4" fill="rgba(120, 53, 15, 0.4)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="808" y="630" fill="white" font-size="9" font-weight="600" text-anchor="middle">config/</text>
+        <text x="808" y="644" fill="#94a3b8" font-size="8" text-anchor="middle">motion_gate_</text>
+        <text x="808" y="656" fill="#94a3b8" font-size="8" text-anchor="middle">thresholds.json</text>
+
+        <!-- Logs -->
+        <rect x="900" y="280" width="270" height="80" rx="8" fill="rgba(76, 29, 149, 0.3)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="1035" y="300" fill="white" font-size="11" font-weight="600" text-anchor="middle">logs/daemon.log</text>
+        <text x="1035" y="316" fill="#94a3b8" font-size="9" text-anchor="middle">Consolidated daemon log</text>
+        <text x="1035" y="330" fill="#a78bfa" font-size="8" text-anchor="middle">Structured logging</text>
+        <text x="1035" y="344" fill="#a78bfa" font-size="8" text-anchor="middle">All alerts, decisions, errors</text>
+
+        <!-- Privacy layer (US-018 hardening) -->
+        <rect x="900" y="400" width="270" height="180" rx="8" fill="rgba(136, 19, 55, 0.2)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="1035" y="420" fill="white" font-size="11" font-weight="600" text-anchor="middle">Privacy Layer (Phase V2-018)</text>
+
+        <text x="912" y="440" fill="#94a3b8" font-size="9">• Operator name → "the operator"</text>
+        <text x="912" y="456" fill="#94a3b8" font-size="9">• Helper names → [helper-A/B]</text>
+        <text x="912" y="472" fill="#94a3b8" font-size="9">• Camera IPs → placeholders</text>
+        <text x="912" y="488" fill="#94a3b8" font-size="9">• Chat IDs → &lt;HOME_CHAT_ID&gt;</text>
+        <text x="912" y="504" fill="#94a3b8" font-size="9">• User paths → &lt;HOME_DIR&gt;</text>
+        <text x="912" y="524" fill="#fb7185" font-size="9">scripts/check_no_private_data.py</text>
+        <text x="912" y="538" fill="#fb7185" font-size="9">docs/PRIVACY.md · pre-push hook</text>
+        <text x="912" y="552" fill="#fb7185" font-size="9">make check-privacy · .env.example</text>
+        <text x="912" y="568" fill="#34d399" font-size="8">132/132 tests pass · scanner exits 0</text>
+
+        <!-- =================== ARROWS =================== -->
+
+        <!-- Camera webhooks → daemon -->
+        <line x1="170" y1="170" x2="218" y2="100" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead-cyan)"/>
+        <text x="180" y="135" fill="#94a3b8" font-size="8">POST /alert</text>
+
+        <!-- Camera RTSP → frame_capture -->
+        <line x1="170" y1="240" x2="578" y2="120" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="380" y="170" fill="#fbbf24" font-size="8">RTSP streams</text>
+
+        <!-- Daemon → pipeline -->
+        <line x1="360" y1="110" x2="398" y2="110" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- Pipeline → frame_capture (read ring) -->
+        <line x1="540" y1="115" x2="578" y2="105" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- Pipeline → motion gate -->
+        <line x1="470" y1="140" x2="470" y2="178" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- Pipeline → vehicle classification -->
+        <line x1="400" y1="135" x2="300" y2="178" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="320" y="155" fill="#34d399" font-size="8">if vehicle</text>
+
+        <!-- Pipeline → VLM verification -->
+        <line x1="540" y1="135" x2="665" y2="178" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="565" y="155" fill="#34d399" font-size="8">if pass</text>
+
+        <!-- Vehicle classifier → known_vehicles -->
+        <line x1="300" y1="328" x2="300" y2="610" stroke="#a78bfa" stroke-width="1" stroke-dasharray="2,2" marker-end="url(#arrowhead)"/>
+
+        <!-- Motion gate → decision -->
+        <line x1="470" y1="270" x2="470" y2="368" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- VLM verify → decision -->
+        <line x1="580" y1="260" x2="540" y2="395" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- Vehicle classifier → decision -->
+        <line x1="380" y1="270" x2="400" y2="395" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- Decision → telegram formatter -->
+        <line x1="470" y1="430" x2="470" y2="448" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead-cyan)"/>
+
+        <!-- Telegram formatter → Telegram API -->
+        <line x1="750" y1="495" x2="778" y2="95" stroke="#fb923c" stroke-width="1.5" marker-end="url(#arrowhead-orange)"/>
+        <text x="770" y="280" fill="#fb923c" font-size="8" transform="rotate(0 770 280)">sendPhoto</text>
+
+        <!-- VLM verify → llama servers -->
+        <line x1="750" y1="220" x2="913" y2="170" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="785" y="190" fill="#a78bfa" font-size="8">chat completion</text>
+
+        <!-- Quick classifier → llama servers (text gate) -->
+        <line x1="370" y1="232" x2="913" y2="115" stroke="#a78bfa" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arrowhead)"/>
+
+        <!-- Daemon → logs -->
+        <line x1="360" y1="125" x2="900" y2="320" stroke="#94a3b8" stroke-width="1" stroke-dasharray="2,2" marker-end="url(#arrowhead)"/>
+
+        <!-- =================== LEGEND (placed low) =================== -->
+        <text x="30" y="700" fill="white" font-size="10" font-weight="600">Legend</text>
+
+        <rect x="30" y="710" width="16" height="10" rx="2" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="52" y="718" fill="#94a3b8" font-size="8">Frontend / HTTP entry</text>
+
+        <rect x="180" y="710" width="16" height="10" rx="2" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="202" y="718" fill="#94a3b8" font-size="8">Pipeline / Backend</text>
+
+        <rect x="320" y="710" width="16" height="10" rx="2" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="342" y="718" fill="#94a3b8" font-size="8">Storage / External service</text>
+
+        <rect x="500" y="710" width="16" height="10" rx="2" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="522" y="718" fill="#94a3b8" font-size="8">Vision / LLM</text>
+
+        <rect x="640" y="710" width="16" height="10" rx="2" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1"/>
+        <text x="662" y="718" fill="#94a3b8" font-size="8">Telegram output</text>
+
+        <rect x="780" y="710" width="16" height="10" rx="2" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1"/>
+        <text x="802" y="718" fill="#94a3b8" font-size="8">Privacy / secret boundary</text>
+
+        <rect x="950" y="710" width="16" height="10" rx="2" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="972" y="718" fill="#94a3b8" font-size="8">External (camera / bot API)</text>
+      </svg>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot cyan"></div>
+          <h3>Recent improvements (12h)</h3>
+        </div>
+        <ul>
+          <li>• Hourly RTSP reader reconnect — survives Reolink firmware reset</li>
+          <li>• Motion gate: per-frame logical-AND bbox across 2/4 ring frames</li>
+          <li>• Vehicle pHash matching against known_vehicles.json (12 entries)</li>
+          <li>• UUID-keyed 90s gate cooldown (no duplicate alerts)</li>
+          <li>• Vision LLM (Qwen3-VL 8B) verifies classifications with specialized prompts</li>
+          <li>• Single consolidated logs/daemon.log</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot rose"></div>
+          <h3>Privacy hardening (Phase V2-018)</h3>
+        </div>
+        <ul>
+          <li>• Operator name → "the operator" everywhere</li>
+          <li>• Helper handles → [helper-A] / [helper-B]</li>
+          <li>• Real IPs → placeholders in code/docs/tests</li>
+          <li>• Chat IDs → &lt;HOME_CHAT_ID&gt; in docs</li>
+          <li>• User paths → &lt;HOME_DIR&gt; / &lt;V1_REPO_PATH&gt;</li>
+          <li>• Bot token + creds → gitignored *.env only</li>
+          <li>• Pre-push hook + make check-privacy enforce</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot emerald"></div>
+          <h3>Current state</h3>
+        </div>
+        <ul>
+          <li>• 142 tests collected (141 pass, 1 pre-existing failure)</li>
+          <li>• Privacy scanner exits 0 (clean)</li>
+          <li>• 9 known orphans deleted (V2-020)</li>
+          <li>• 0 remaining orphans in production tree</li>
+          <li>• V2-020 orphan cleanup complete</li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="footer">
+      Farm Surveillance V2 · Mac mini · Phase V2-018 (privacy hardening) · 9/10 PRD-018 stories done · V2-020 orphan cleanup complete · <a href="DEAD-CODE-AUDIT-2026-09-09.md">dead-code audit 0 orphans</a>
+    </p>
+  </div>
+</body>
+</html>

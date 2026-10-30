@@ -1,0 +1,85 @@
+{
+  "_comment": "Per-camera overrides for the motion gate pipeline. Keys are camera PREFIXES (matching camera-creds.env): FRONT, BACK, OUTSIDE_FRONT_GARAGE, OUTSIDE_FRONT_POWER, OUTSIDE_FRONT_SOLAR, OUTSIDE_BACK_SOLAR. Consumed by infra/gate.py (load_thresholds, is_gate_enabled) and infra/gate_cooldown.py (get_gate_cooldown_seconds). Phase 6B.167 §13.4 (revised 2026-09-08): no CAM{N} translation — pipeline passes camera prefix directly. Tunable per camera: vehicle/person/dog/cat/.../cow/bear/bird confidence thresholds; gate_cooldown window in seconds (0 = no cooldown); gate_enabled event-type toggle. Optional 'subjects' key (list of class names) restricts gate to those subjects; when absent, default vehicle-priority behavior applies. Defaults below mirror module-level THRESHOLDS_BY_CLASS in infra/gate.py — operators tighten/loosen per camera based on noise level. Version-controlled because thresholds are tuning parameters, not private data. See <HOME_DIR>/.hermes/memories/USER.md 'Audit the class, not the instance' + 'No credentials in scripts/configs' rules for the env-vs-config split.",
+  "_default_thresholds_reference": "infra/gate.py:THRESHOLDS_BY_CLASS",
+  "FRONT": {
+    "_note": "Front Door Outside — primary entry, no relaxation",
+    "vehicle": 0.45,
+    "person": 0.35,
+    "bicycle": 0.45,
+    "gate_cooldown": {"vehicle": 60, "person": 30, "default": 45},
+    "gate_enabled": {"vehicle": true, "person": true, "motion": true},
+    "subjects": ["person", "animal", "vehicle", "bicycle"],
+    "osd_masks": [
+      {"x": 0, "y": 1240, "w": 640, "h": 200},
+      {"x": 2000, "y": 1240, "w": 560, "h": 200}
+    ]
+  },
+  "BACK": {
+    "_note": "Back Door Inside — secondary entry",
+    "vehicle": 0.45,
+    "person": 0.35,
+    "bicycle": 0.45,
+    "gate_cooldown": {"vehicle": 60, "person": 30, "default": 45},
+    "gate_enabled": {"vehicle": true, "person": true, "motion": true},
+    "subjects": ["person", "animal", "vehicle", "bicycle"],
+    "osd_masks": [
+      {"x": 0, "y": 1240, "w": 640, "h": 200},
+      {"x": 2000, "y": 1240, "w": 560, "h": 200}
+    ]
+  },
+  "OUTSIDE_FRONT_GARAGE": {
+    "_note": "Outside Front Garage — driveway area",
+    "vehicle": 0.45,
+    "person": 0.40,
+    "bicycle": 0.45,
+    "gate_cooldown": {"vehicle": 90, "person": 45, "default": 60},
+    "gate_enabled": {"vehicle": true, "person": true, "motion": true},
+    "subjects": ["person", "animal", "vehicle", "bicycle"],
+    "osd_masks": [
+      {"x": 0, "y": 1240, "w": 640, "h": 200},
+      {"x": 2000, "y": 1240, "w": 560, "h": 200}
+    ]
+  },
+  "OUTSIDE_FRONT_POWER": {
+    "_note": "Outside Front Power — perimeter; animals added 2026-10-24 per operator directive (animals on all cameras). person stays notification-disabled via gate_enabled.",
+    "vehicle": 0.55,
+    "person": 0.45,
+    "subjects": ["person", "animal", "vehicle", "bicycle"],
+    "gate_cooldown": {"vehicle": 90, "person": 45, "default": 60},
+    "gate_enabled": {"vehicle": true, "person": false, "motion": true},
+    "osd_masks": [
+      {"x": 0, "y": 1240, "w": 640, "h": 200},
+      {"x": 2000, "y": 1240, "w": 560, "h": 200}
+    ],
+    "roi_exclusion_zones": [
+      {"x": 1920, "y": 0, "w": 640, "h": 1440}
+    ]
+  },
+  "OUTSIDE_FRONT_SOLAR": {
+    "_note": "Outside Front Solar — noisy perimeter; thresholds tightened 2026-09-15 to suppress 921 false alarms; animals re-enabled 2026-10-24 per operator directive (animals on all cameras), keeping the tightened cat/dog/bird thresholds as the noise control. person stays notification-disabled via gate_enabled.",
+    "vehicle": 0.55,
+    "person": 0.50,
+    "cat": 0.85,
+    "dog": 0.75,
+    "bird": 0.80,
+    "subjects": ["person", "animal", "vehicle", "bicycle"],
+    "gate_cooldown": {"vehicle": 120, "person": 60, "default": 90},
+    "gate_enabled": {"vehicle": true, "person": false, "cat": true, "dog": true, "motion": true},
+    "osd_masks": [
+      {"x": 0, "y": 1240, "w": 640, "h": 200},
+      {"x": 2000, "y": 1240, "w": 560, "h": 200}
+    ]
+  },
+  "OUTSIDE_BACK_SOLAR": {
+    "_note": "Outside Back Solar — rear perimeter; animals added 2026-10-24 per operator directive (animals on all cameras). person stays notification-disabled via gate_enabled.",
+    "vehicle": 0.55,
+    "person": 0.45,
+    "subjects": ["person", "animal", "vehicle", "bicycle"],
+    "gate_cooldown": {"vehicle": 90, "person": 45, "default": 60},
+    "gate_enabled": {"vehicle": true, "person": false, "motion": true},
+    "osd_masks": [
+      {"x": 0, "y": 1240, "w": 640, "h": 200},
+      {"x": 2000, "y": 1240, "w": 560, "h": 200}
+    ]
+  }
+}
